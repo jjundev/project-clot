@@ -1,4 +1,5 @@
 import { db } from './db.js';
+import { extractMyDiscountPrice } from '/Users/hyunjun_macbook_pro/.opencli/clis/musinsa/check-my-prices.js';
 
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
@@ -57,6 +58,7 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
           brandName: '',
           normalPrice: null,
           salePrice: null,
+          couponPrice: null,
           saleRate: null,
           myPrice: null,
           isSoldOut: false,
@@ -65,7 +67,7 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
 
       const gp = detail.goodsPrice || {};
       const normalPrice = gp.normalPrice ?? null;
-      const salePrice = gp.salePrice ?? gp.finalPrice ?? normalPrice;
+      const salePrice = gp.salePrice ?? normalPrice;
       const couponPrice = gp.couponPrice ?? gp.finalPrice ?? salePrice;
       const finalPrice = gp.finalPrice ?? couponPrice ?? salePrice;
       const finalDiscount = gp.finalDiscount ?? gp.discountRate ?? 0;
@@ -78,7 +80,11 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
         couponName = '쿠폰 적용가';
       }
 
-      const myPrice = finalPrice;
+      // Member level discount approximation (LV.5 실버 1.5% + reserve discount)
+      const memberDiscountRate = gp.memberDiscountRate || 1.5;
+      const memberDiscountAmount = Math.round(couponPrice * (memberDiscountRate / 100));
+      const myPrice = Math.max(0, couponPrice - memberDiscountAmount);
+
       const brandName = detail.brandInfo?.brandName || detail.brand || '';
 
       return {
@@ -89,9 +95,9 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
         url,
         normalPrice,
         salePrice,
+        couponPrice,
         saleRate: finalDiscount,
         myPrice,
-        couponPrice,
         couponName,
         couponDiscount,
         isSoldOut,
@@ -138,7 +144,6 @@ export async function collectPricesForActiveItems({
         continue;
       }
 
-      // Update authoritative brand and product name in DB
       if (priceInfo.goodsName) {
         db.updateItemDetails(item.goods_no, priceInfo.goodsName, priceInfo.brandName, priceInfo.imageUrl);
       }
@@ -191,7 +196,7 @@ export async function collectPricesForActiveItems({
         normal_price: priceInfo.normalPrice,
         sale_price: priceInfo.salePrice,
         sale_rate: priceInfo.saleRate,
-        my_price: priceInfo.myPrice,
+        my_price: priceInfo.couponPrice,
         coupon_name: priceInfo.couponName,
         coupon_discount: priceInfo.couponDiscount,
         member_discount: 0,
