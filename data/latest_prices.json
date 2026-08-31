@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-08-31T05:06:10.806Z",
+  "updated_at": "2026-08-31T05:06:22.210Z",
   "total_items": 51,
   "active_items": 34,
   "soldout_items": 4,
@@ -432,7 +432,7 @@
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/4645216",
       "current_price": 136890,
-      "lowest_price": 15210,
+      "lowest_price": 136890,
       "lowest_price_date": "2026-08-31",
       "is_sold_out": false,
       "last_checked": "2026-08-31T04:59:36.615Z"
@@ -444,7 +444,7 @@
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/5386036",
       "current_price": 138670,
-      "lowest_price": 7290,
+      "lowest_price": 138670,
       "lowest_price_date": "2026-08-31",
       "is_sold_out": false,
       "last_checked": "2026-08-31T04:59:36.614Z"

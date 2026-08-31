@@ -25,7 +25,9 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
 
       if (response.status === 429) {
         const waitTime = attempt * 2500;
-        console.warn(`⏳ [RateLimit 429] Waiting ${waitTime / 1000}s before retrying goods ${goodsNo} (attempt ${attempt}/${retries})...`);
+        console.warn(
+          `⏳ [RateLimit 429] Waiting ${waitTime / 1000}s before retrying goods ${goodsNo} (attempt ${attempt}/${retries})...`
+        );
         await new Promise((r) => setTimeout(r, waitTime));
         continue;
       }
@@ -61,26 +63,22 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
         };
       }
 
-      const normalPrice = detail.goodsPrice?.normalPrice ?? null;
-      const salePrice = detail.goodsPrice?.finalPrice ?? normalPrice;
-      const saleRate = detail.goodsPrice?.finalDiscount ?? 0;
+      const gp = detail.goodsPrice || {};
+      const normalPrice = gp.normalPrice ?? null;
+      const salePrice = gp.salePrice ?? gp.finalPrice ?? normalPrice;
+      const couponPrice = gp.couponPrice ?? gp.finalPrice ?? salePrice;
+      const finalPrice = gp.finalPrice ?? couponPrice ?? salePrice;
+      const finalDiscount = gp.finalDiscount ?? gp.discountRate ?? 0;
       const isSoldOut = Boolean(detail.isSoldOut || detail.goodsSaleType === 'SOLDOUT');
 
-      let myPrice = salePrice;
       let couponDiscount = 0;
       let couponName = '';
-      let memberDiscount = 0;
-
-      if (detail.couponDcPrice && detail.couponDcPrice < salePrice) {
-        couponDiscount = salePrice - detail.couponDcPrice;
-        myPrice = detail.couponDcPrice;
-        couponName = '적용 가능 쿠폰';
+      if (salePrice && couponPrice && couponPrice < salePrice) {
+        couponDiscount = salePrice - couponPrice;
+        couponName = '쿠폰 적용가';
       }
 
-      if (detail.memberLevelPrice && detail.memberLevelPrice < myPrice) {
-        memberDiscount = myPrice - detail.memberLevelPrice;
-        myPrice = detail.memberLevelPrice;
-      }
+      const myPrice = finalPrice;
 
       return {
         goodsNo: Number(goodsNo),
@@ -90,11 +88,11 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
         url,
         normalPrice,
         salePrice,
-        saleRate,
+        saleRate: finalDiscount,
         myPrice,
+        couponPrice,
         couponName,
         couponDiscount,
-        memberDiscount,
         isSoldOut,
         discontinued: false,
       };
@@ -108,7 +106,7 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
 }
 
 export async function collectPricesForActiveItems({
-  delayMs = 600,
+  delayMs = 700,
   onProgress = null,
 } = {}) {
   const activeItems = db.getActiveItems();
@@ -139,6 +137,18 @@ export async function collectPricesForActiveItems({
         continue;
       }
 
+      // Update authoritative brand and product name in DB
+      if (priceInfo.goodsName && priceInfo.goodsName !== item.goods_name) {
+        db.upsertItem({
+          goods_no: item.goods_no,
+          goods_name: priceInfo.goodsName,
+          brand_name: priceInfo.brandName || item.brand_name,
+          url: item.url,
+          image_url: priceInfo.imageUrl,
+          status: item.status,
+        });
+      }
+
       // Check status changes (Restock / Soldout)
       const prevPriceLog = db.getLatestPrice(item.goods_no);
       const wasSoldOut = prevPriceLog ? Boolean(prevPriceLog.is_sold_out) : item.status === 'SOLDOUT';
@@ -159,7 +169,7 @@ export async function collectPricesForActiveItems({
       if (!lowestMyPrice || (priceInfo.myPrice && priceInfo.myPrice < lowestMyPrice)) {
         lowestMyPrice = priceInfo.myPrice;
         lowestSalePrice = priceInfo.salePrice;
-        isNewLowest = Boolean(item.lowest_my_price); // only flag as new if had prior record
+        isNewLowest = Boolean(item.lowest_my_price);
         db.updateLowestPrice(item.goods_no, lowestMyPrice, lowestSalePrice, today);
       }
 
@@ -190,7 +200,7 @@ export async function collectPricesForActiveItems({
         my_price: priceInfo.myPrice,
         coupon_name: priceInfo.couponName,
         coupon_discount: priceInfo.couponDiscount,
-        member_discount: priceInfo.memberDiscount,
+        member_discount: 0,
         is_sold_out: priceInfo.isSoldOut,
       });
 
