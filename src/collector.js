@@ -79,11 +79,12 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
       }
 
       const myPrice = finalPrice;
+      const brandName = detail.brandInfo?.brandName || detail.brand || '';
 
       return {
         goodsNo: Number(goodsNo),
         goodsName: detail.goodsNm || '',
-        brandName: detail.brandInfo?.brandName || detail.brand || '',
+        brandName,
         imageUrl: detail.thumbnailImageUrl || detail.goodsImage || '',
         url,
         normalPrice,
@@ -138,15 +139,8 @@ export async function collectPricesForActiveItems({
       }
 
       // Update authoritative brand and product name in DB
-      if (priceInfo.goodsName && priceInfo.goodsName !== item.goods_name) {
-        db.upsertItem({
-          goods_no: item.goods_no,
-          goods_name: priceInfo.goodsName,
-          brand_name: priceInfo.brandName || item.brand_name,
-          url: item.url,
-          image_url: priceInfo.imageUrl,
-          status: item.status,
-        });
+      if (priceInfo.goodsName) {
+        db.updateItemDetails(item.goods_no, priceInfo.goodsName, priceInfo.brandName, priceInfo.imageUrl);
       }
 
       // Check status changes (Restock / Soldout)

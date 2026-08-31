@@ -28,8 +28,8 @@ export class ClotDatabase {
         brand_name TEXT,
         url TEXT NOT NULL,
         image_url TEXT,
-        source TEXT DEFAULT 'like', -- 'like' or 'manual'
-        status TEXT DEFAULT 'ACTIVE', -- 'ACTIVE', 'UNLIKED', 'SOLDOUT', 'DISCONTINUED'
+        source TEXT DEFAULT 'like',
+        status TEXT DEFAULT 'ACTIVE',
         first_seen_at TEXT NOT NULL,
         last_checked_at TEXT,
         lowest_my_price INTEGER,
@@ -40,7 +40,7 @@ export class ClotDatabase {
       CREATE TABLE IF NOT EXISTS price_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         goods_no INTEGER NOT NULL,
-        date TEXT NOT NULL, -- YYYY-MM-DD
+        date TEXT NOT NULL,
         normal_price INTEGER,
         sale_price INTEGER,
         sale_rate INTEGER,
@@ -58,7 +58,7 @@ export class ClotDatabase {
       CREATE INDEX IF NOT EXISTS idx_items_status ON items (status);
 
       CREATE TABLE IF NOT EXISTS daily_runs (
-        date TEXT PRIMARY KEY, -- YYYY-MM-DD
+        date TEXT PRIMARY KEY,
         total_tracked INTEGER,
         price_dropped_count INTEGER,
         restocked_count INTEGER,
@@ -67,8 +67,6 @@ export class ClotDatabase {
       );
     `);
   }
-
-  // --- Items Management ---
 
   getItem(goodsNo) {
     const stmt = this.db.prepare('SELECT * FROM items WHERE goods_no = ?');
@@ -97,6 +95,9 @@ export class ClotDatabase {
     const now = new Date().toISOString();
     const existing = this.getItem(goods_no);
 
+    const cleanBrand = brand_name && brand_name !== '-' ? brand_name : null;
+    const cleanName = goods_name && goods_name !== '-' ? goods_name : null;
+
     if (!existing) {
       const stmt = this.db.prepare(`
         INSERT INTO items (
@@ -105,8 +106,8 @@ export class ClotDatabase {
       `);
       stmt.run(
         Number(goods_no),
-        goods_name,
-        brand_name,
+        cleanName || '상품',
+        cleanBrand || '-',
         url,
         image_url,
         source,
@@ -116,12 +117,11 @@ export class ClotDatabase {
       );
       return { created: true, goods_no };
     } else {
-      // If was unliked but now active in like list again
       const newStatus = existing.status === 'UNLIKED' && status === 'ACTIVE' ? 'ACTIVE' : existing.status;
       const stmt = this.db.prepare(`
         UPDATE items SET
-          goods_name = COALESCE(NULLIF(?, ''), goods_name),
-          brand_name = COALESCE(NULLIF(?, ''), brand_name),
+          goods_name = COALESCE(?, goods_name),
+          brand_name = COALESCE(?, goods_name, brand_name),
           url = COALESCE(NULLIF(?, ''), url),
           image_url = COALESCE(NULLIF(?, ''), image_url),
           status = ?,
@@ -129,8 +129,8 @@ export class ClotDatabase {
         WHERE goods_no = ?
       `);
       stmt.run(
-        goods_name || '',
-        brand_name || '',
+        cleanName,
+        cleanBrand,
         url || '',
         image_url || '',
         newStatus,
@@ -139,6 +139,18 @@ export class ClotDatabase {
       );
       return { updated: true, goods_no };
     }
+  }
+
+  updateItemDetails(goodsNo, goodsName, brandName, imageUrl) {
+    const stmt = this.db.prepare(`
+      UPDATE items SET
+        goods_name = COALESCE(NULLIF(?, ''), goods_name),
+        brand_name = COALESCE(NULLIF(?, ''), brand_name),
+        image_url = COALESCE(NULLIF(?, ''), image_url),
+        last_checked_at = ?
+      WHERE goods_no = ?
+    `);
+    stmt.run(goodsName, brandName, imageUrl, new Date().toISOString(), Number(goodsNo));
   }
 
   updateItemStatus(goodsNo, status) {
@@ -157,8 +169,6 @@ export class ClotDatabase {
     stmt.run(lowestMyPrice, lowestSalePrice, dateStr, Number(goodsNo));
   }
 
-  // --- Price Logs Management ---
-
   recordPriceLog({
     goods_no,
     date,
@@ -173,8 +183,6 @@ export class ClotDatabase {
     is_sold_out = 0,
   }) {
     const now = new Date().toISOString();
-    
-    // Check if a record already exists for this item on this date
     const checkStmt = this.db.prepare('SELECT id FROM price_logs WHERE goods_no = ? AND date = ?');
     const existing = checkStmt.get(Number(goods_no), date);
 
@@ -242,16 +250,6 @@ export class ClotDatabase {
     return stmt.get(Number(goodsNo));
   }
 
-  getPreviousPrice(goodsNo, beforeDate) {
-    const stmt = this.db.prepare(`
-      SELECT * FROM price_logs 
-      WHERE goods_no = ? AND date < ? 
-      ORDER BY date DESC, id DESC 
-      LIMIT 1
-    `);
-    return stmt.get(Number(goodsNo), beforeDate);
-  }
-
   getPriceHistory(goodsNo, limit = 30) {
     const stmt = this.db.prepare(`
       SELECT * FROM price_logs 
@@ -261,8 +259,6 @@ export class ClotDatabase {
     `);
     return stmt.all(Number(goodsNo), limit);
   }
-
-  // --- Daily Runs ---
 
   hasRunToday(dateStr) {
     const stmt = this.db.prepare('SELECT * FROM daily_runs WHERE date = ?');
