@@ -1,5 +1,5 @@
 import { db } from './db.js';
-import { extractMyDiscountPrice } from '/Users/hyunjun_macbook_pro/.opencli/clis/musinsa/check-my-prices.js';
+import { execSync } from 'node:child_process';
 
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
@@ -80,11 +80,6 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
         couponName = '쿠폰 적용가';
       }
 
-      // Member level discount approximation (LV.5 실버 1.5% + reserve discount)
-      const memberDiscountRate = gp.memberDiscountRate || 1.5;
-      const memberDiscountAmount = Math.round(couponPrice * (memberDiscountRate / 100));
-      const myPrice = Math.max(0, couponPrice - memberDiscountAmount);
-
       const brandName = detail.brandInfo?.brandName || detail.brand || '';
 
       return {
@@ -97,7 +92,7 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
         salePrice,
         couponPrice,
         saleRate: finalDiscount,
-        myPrice,
+        myPrice: couponPrice,
         couponName,
         couponDiscount,
         isSoldOut,
@@ -113,7 +108,7 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
 }
 
 export async function collectPricesForActiveItems({
-  delayMs = 700,
+  delayMs = 500,
   onProgress = null,
 } = {}) {
   const activeItems = db.getActiveItems();
@@ -133,10 +128,57 @@ export async function collectPricesForActiveItems({
 
   const startTime = Date.now();
 
+  // Try batching via OpenCLI my-prices first for true "나의 할인가"
+  let openCliPriceMap = new Map();
+  try {
+    const goodsNos = activeItems.map((it) => it.goods_no);
+    for (let i = 0; i < goodsNos.length; i += 4) {
+      const chunk = goodsNos.slice(i, i + 4).join(',');
+      const raw = execSync(`opencli musinsa my-prices "${chunk}" -f json`, {
+        encoding: 'utf-8',
+        timeout: 45000,
+      });
+      const jsonStart = raw.indexOf('[');
+      if (jsonStart !== -1) {
+        const list = JSON.parse(raw.slice(jsonStart));
+        for (const it of list) {
+          openCliPriceMap.set(Number(it.goodsNo), {
+            normalPrice: Number(String(it.normalPrice).replace(/[^0-9]/g, '')) || null,
+            salePrice: Number(String(it.salePrice).replace(/[^0-9]/g, '')) || null,
+            couponPrice: Number(String(it.couponPrice).replace(/[^0-9]/g, '')) || null,
+            myPrice: Number(String(it.myPrice).replace(/[^0-9]/g, '')) || null,
+            isSoldOut: it.status === '품절',
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`[OpenCLI Notice] Browser bridge batch fallback to direct parser: ${err.message}`);
+  }
+
   for (let i = 0; i < activeItems.length; i++) {
     const item = activeItems[i];
     try {
-      const priceInfo = await fetchProductPriceInfo(item.goods_no);
+      let priceInfo;
+      const liveData = openCliPriceMap.get(item.goods_no);
+
+      if (liveData && liveData.myPrice) {
+        priceInfo = {
+          goodsNo: item.goods_no,
+          goodsName: item.goods_name,
+          brandName: item.brand_name,
+          normalPrice: liveData.normalPrice,
+          salePrice: liveData.salePrice,
+          couponPrice: liveData.couponPrice,
+          myPrice: liveData.myPrice,
+          couponName: '나의 할인가',
+          couponDiscount: liveData.couponPrice && liveData.salePrice ? liveData.salePrice - liveData.couponPrice : 0,
+          isSoldOut: liveData.isSoldOut,
+          discontinued: false,
+        };
+      } else {
+        priceInfo = await fetchProductPriceInfo(item.goods_no);
+      }
 
       if (priceInfo.discontinued) {
         db.updateItemStatus(item.goods_no, 'DISCONTINUED');
@@ -145,7 +187,7 @@ export async function collectPricesForActiveItems({
       }
 
       if (priceInfo.goodsName) {
-        db.updateItemDetails(item.goods_no, priceInfo.goodsName, priceInfo.brandName, priceInfo.imageUrl);
+        db.updateItemDetails(item.goods_no, priceInfo.goodsName, priceInfo.brandName, priceInfo.imageUrl || item.image_url);
       }
 
       // Check status changes (Restock / Soldout)
@@ -195,8 +237,8 @@ export async function collectPricesForActiveItems({
         date: today,
         normal_price: priceInfo.normalPrice,
         sale_price: priceInfo.salePrice,
-        sale_rate: priceInfo.saleRate,
-        my_price: priceInfo.couponPrice,
+        sale_rate: priceInfo.saleRate || 0,
+        my_price: priceInfo.myPrice,
         coupon_name: priceInfo.couponName,
         coupon_discount: priceInfo.couponDiscount,
         member_discount: 0,

@@ -86,10 +86,13 @@ function tryGitAutoCommit() {
         cwd: ROOT_DIR,
         stdio: 'ignore',
       });
-      // Try git push if upstream configured
+      // Push to GitHub remote origin main
       try {
-        execSync('git push', { cwd: ROOT_DIR, stdio: 'ignore' });
-      } catch {}
+        execSync('git push origin main', { cwd: ROOT_DIR, stdio: 'ignore' });
+        console.log(`🚀 Git pushed changes to remote repository for ${today}`);
+      } catch (pushErr) {
+        // Non-fatal
+      }
       console.log(`📌 Git auto-commit created for ${today}`);
     }
   } catch (err) {
