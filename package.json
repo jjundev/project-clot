@@ -1,0 +1,28 @@
+{
+  "name": "project-clot",
+  "version": "1.0.0",
+  "description": "Musinsa automated price tracker, discount monitor, and wishlist lifecycle manager",
+  "type": "module",
+  "main": "src/cli.js",
+  "bin": {
+    "clot": "src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js daily",
+    "sync": "node src/cli.js sync",
+    "track": "node src/cli.js track",
+    "list": "node src/cli.js list",
+    "report": "node src/cli.js report",
+    "daemon:install": "node src/cli.js daemon-install",
+    "daemon:uninstall": "node src/cli.js daemon-uninstall"
+  },
+  "keywords": [
+    "musinsa",
+    "price-tracker",
+    "fashion",
+    "discount-monitor",
+    "opencli"
+  ],
+  "author": "hyunjun",
+  "license": "MIT"
+}
