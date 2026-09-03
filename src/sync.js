@@ -15,6 +15,16 @@ export async function syncLikedItemsFromMusinsa({ limit = 300 } = {}) {
       })
     );
   } catch (err) {
+    const errorOutput = `${err.stdout || ''}\n${err.stderr || ''}\n${err.message}`;
+    if (
+      errorOutput.includes('AUTH_REQUIRED') ||
+      errorOutput.includes('not logged in') ||
+      errorOutput.includes('EMPTY_RESULT')
+    ) {
+      throw new Error(
+        '무신사 로그인이 필요합니다. Chrome 브라우저에서 https://musinsa.com 에 로그인한 후 다시 실행해 주세요. (또는 터미널에서 opencli musinsa login 실행)'
+      );
+    }
     throw new Error(`Failed to execute opencli musinsa likes: ${err.message}`);
   }
 
