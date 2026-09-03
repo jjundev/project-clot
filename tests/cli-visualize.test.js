@@ -11,7 +11,7 @@ const CLI_PATH = path.join(ROOT_DIR, 'src/cli.js');
 
 describe('CLI Visualize Integration', () => {
   test('clot visualize --no-open successfully builds dashboard without error', () => {
-    const output = execSync(`node "${CLI_PATH}" visualize --no-open`, {
+    const output = execSync(`"${process.execPath}" "${CLI_PATH}" visualize --no-open`, {
       cwd: ROOT_DIR,
       encoding: 'utf-8',
     });
@@ -21,7 +21,7 @@ describe('CLI Visualize Integration', () => {
   });
 
   test('clot visualize <goodsNo> --no-open passes target goodsNo successfully', () => {
-    const output = execSync(`node "${CLI_PATH}" visualize 6084885 --no-open`, {
+    const output = execSync(`"${process.execPath}" "${CLI_PATH}" visualize 6084885 --no-open`, {
       cwd: ROOT_DIR,
       encoding: 'utf-8',
     });
