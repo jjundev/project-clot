@@ -131,10 +131,10 @@ export async function collectPricesForActiveItems({
 
   // Try batching via OpenCLI my-prices first for true "나의 할인가"
   let openCliPriceMap = new Map();
-  try {
-    const goodsNos = activeItems.map((it) => it.goods_no);
-    for (let i = 0; i < goodsNos.length; i += 4) {
-      const chunk = goodsNos.slice(i, i + 4).join(',');
+  const goodsNos = activeItems.map((it) => it.goods_no);
+  for (let i = 0; i < goodsNos.length; i += 4) {
+    const chunk = goodsNos.slice(i, i + 4).join(',');
+    try {
       const raw = execSync(
         `opencli musinsa my-prices "${chunk}" -f json`,
         getExecOptions({
@@ -155,9 +155,9 @@ export async function collectPricesForActiveItems({
           });
         }
       }
+    } catch (err) {
+      console.warn(`[OpenCLI Notice] Browser bridge batch fallback to direct parser: ${err.message}`);
     }
-  } catch (err) {
-    console.warn(`[OpenCLI Notice] Browser bridge batch fallback to direct parser: ${err.message}`);
   }
 
   for (let i = 0; i < activeItems.length; i++) {

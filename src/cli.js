@@ -11,8 +11,6 @@ import { collectPricesForActiveItems, fetchProductPriceInfo } from './collector.
 import { notifyPriceDropsAndRestocks, sendMacNotification } from './notifier.js';
 import { setupEnvironment, getExtendedPath } from './env.js';
 
-setupEnvironment();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, '..');
@@ -440,6 +438,7 @@ if (!isMainModule && invokedScript) {
 }
 
 if (isMainModule) {
+  setupEnvironment();
   main().catch((err) => {
     console.error('Fatal error:', err);
     process.exit(1);
