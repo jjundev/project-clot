@@ -1,5 +1,6 @@
 import { db } from './db.js';
 import { execSync } from 'node:child_process';
+import { getExecOptions } from './env.js';
 
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
@@ -134,10 +135,13 @@ export async function collectPricesForActiveItems({
     const goodsNos = activeItems.map((it) => it.goods_no);
     for (let i = 0; i < goodsNos.length; i += 4) {
       const chunk = goodsNos.slice(i, i + 4).join(',');
-      const raw = execSync(`opencli musinsa my-prices "${chunk}" -f json`, {
-        encoding: 'utf-8',
-        timeout: 45000,
-      });
+      const raw = execSync(
+        `opencli musinsa my-prices "${chunk}" -f json`,
+        getExecOptions({
+          encoding: 'utf-8',
+          timeout: 45000,
+        })
+      );
       const jsonStart = raw.indexOf('[');
       if (jsonStart !== -1) {
         const list = JSON.parse(raw.slice(jsonStart));

@@ -1,15 +1,19 @@
 import { execSync } from 'node:child_process';
 import { db } from './db.js';
+import { getExecOptions } from './env.js';
 
 export async function syncLikedItemsFromMusinsa({ limit = 300 } = {}) {
   console.log('🔄 Syncing Musinsa liked items via OpenCLI...');
   
   let rawOutput = '';
   try {
-    rawOutput = execSync(`opencli musinsa likes --limit ${limit} -f json`, {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    rawOutput = execSync(
+      `opencli musinsa likes --limit ${limit} -f json`,
+      getExecOptions({
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+    );
   } catch (err) {
     throw new Error(`Failed to execute opencli musinsa likes: ${err.message}`);
   }
