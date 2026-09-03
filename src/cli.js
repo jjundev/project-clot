@@ -2,19 +2,23 @@
 
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { db } from './db.js';
 import { syncLikedItemsFromMusinsa } from './sync.js';
 import { collectPricesForActiveItems, fetchProductPriceInfo } from './collector.js';
 import { notifyPriceDropsAndRestocks, sendMacNotification } from './notifier.js';
+import { setupEnvironment, getExtendedPath } from './env.js';
+
+setupEnvironment();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, '..');
 const DATA_DIR = path.join(ROOT_DIR, 'data');
 const PLIST_NAME = 'com.musinsa.price-tracker.plist';
-const LAUNCH_AGENTS_DIR = path.join(process.env.HOME, 'Library/LaunchAgents');
+const LAUNCH_AGENTS_DIR = path.join(os.homedir(), 'Library/LaunchAgents');
 const PLIST_TARGET = path.join(LAUNCH_AGENTS_DIR, PLIST_NAME);
 
 function parseArgs() {
@@ -264,17 +268,15 @@ function handleHistory(positional) {
   console.log('');
 }
 
-function handleInstallDaemon() {
-  if (!fs.existsSync(LAUNCH_AGENTS_DIR)) {
-    fs.mkdirSync(LAUNCH_AGENTS_DIR, { recursive: true });
-  }
-
-  const nodePath = process.execPath;
-  const scriptPath = path.join(__dirname, 'cli.js');
-  const logDir = path.join(ROOT_DIR, 'logs');
-  if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
-
-  const plistContent = `<?xml version="1.0" encoding="UTF-8"?>
+export function generatePlistContent({
+  nodePath = process.execPath,
+  scriptPath = path.join(__dirname, 'cli.js'),
+  rootDir = ROOT_DIR,
+  logDir = path.join(ROOT_DIR, 'logs'),
+  extendedPath = getExtendedPath(),
+  homeDir = os.homedir(),
+} = {}) {
+  return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -286,6 +288,13 @@ function handleInstallDaemon() {
         <string>${scriptPath}</string>
         <string>daily</string>
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>${extendedPath}</string>
+        <key>HOME</key>
+        <string>${homeDir}</string>
+    </dict>
     <key>StartCalendarInterval</key>
     <dict>
         <key>Hour</key>
@@ -300,9 +309,27 @@ function handleInstallDaemon() {
     <key>StandardErrorPath</key>
     <string>${path.join(logDir, 'daily.err')}</string>
     <key>WorkingDirectory</key>
-    <string>${ROOT_DIR}</string>
+    <string>${rootDir}</string>
 </dict>
 </plist>`;
+}
+
+function handleInstallDaemon() {
+  if (!fs.existsSync(LAUNCH_AGENTS_DIR)) {
+    fs.mkdirSync(LAUNCH_AGENTS_DIR, { recursive: true });
+  }
+
+  const logDir = path.join(ROOT_DIR, 'logs');
+  if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+
+  const plistContent = generatePlistContent({
+    nodePath: process.execPath,
+    scriptPath: path.join(__dirname, 'cli.js'),
+    rootDir: ROOT_DIR,
+    logDir,
+    extendedPath: getExtendedPath(),
+    homeDir: os.homedir(),
+  });
 
   fs.writeFileSync(PLIST_TARGET, plistContent, 'utf-8');
 
@@ -403,7 +430,19 @@ Commands:
   }
 }
 
-main().catch((err) => {
-  console.error('Fatal error:', err);
-  process.exit(1);
-});
+const currentScript = fileURLToPath(import.meta.url);
+const invokedScript = process.argv[1] ? path.resolve(process.argv[1]) : '';
+let isMainModule = invokedScript === currentScript;
+if (!isMainModule && invokedScript) {
+  try {
+    isMainModule = fs.realpathSync(invokedScript) === currentScript;
+  } catch {}
+}
+
+if (isMainModule) {
+  main().catch((err) => {
+    console.error('Fatal error:', err);
+    process.exit(1);
+  });
+}
+
