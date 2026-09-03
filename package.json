@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "node src/cli.js daily",
+    "test": "node --test tests/*.test.js",
     "sync": "node src/cli.js sync",
     "track": "node src/cli.js track",
     "list": "node src/cli.js list",
