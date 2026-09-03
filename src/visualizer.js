@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { exec } from 'node:child_process';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -119,5 +120,86 @@ export function buildClotDataPayload(dbOrWrapper, { targetGoodsNo } = {}) {
     dates: sortedDates,
     runs,
     items,
+  };
+}
+
+/**
+ * Generates the standalone dashboard HTML file and optionally opens it in the browser.
+ * @param {object} [options]
+ * @param {import('node:sqlite').DatabaseSync | { db: import('node:sqlite').DatabaseSync }} [options.db]
+ * @param {string} [options.outputPath]
+ * @param {string} [options.templatePath]
+ * @param {boolean} [options.openBrowser=true]
+ * @param {number|string} [options.targetGoodsNo]
+ * @returns {{ outputPath: string, targetGoodsNo?: number, totalItems: number }}
+ */
+export function generateDashboardHtml({
+  db,
+  outputPath = DEFAULT_OUTPUT,
+  templatePath = DEFAULT_TEMPLATE,
+  openBrowser = true,
+  targetGoodsNo,
+} = {}) {
+  if (!fs.existsSync(templatePath)) {
+    throw new Error(`Dashboard template file not found at: ${templatePath}`);
+  }
+
+  const outDir = path.dirname(outputPath);
+  if (!fs.existsSync(outDir)) {
+    fs.mkdirSync(outDir, { recursive: true });
+  }
+
+  // Fallback to default DB path if not explicitly provided
+  let activeDb = db;
+  let shouldCloseDb = false;
+  if (!activeDb) {
+    const defaultDbPath = path.join(DATA_DIR, 'prices.db');
+    activeDb = new DatabaseSync(defaultDbPath);
+    shouldCloseDb = true;
+  }
+
+  const digits = targetGoodsNo != null ? String(targetGoodsNo).replace(/\D/g, '') : '';
+  const gNo = digits.length > 0 ? Number(digits) : undefined;
+  const payload = buildClotDataPayload(activeDb, { targetGoodsNo: gNo });
+  if (shouldCloseDb) {
+    activeDb.close();
+  }
+  const templateContent = fs.readFileSync(templatePath, 'utf-8');
+
+  // Replace data placeholder using a function replacer to prevent '$' corruption (CRLF tolerant)
+  const placeholderRegex = /\/\*\s*__CLOT_DATA_PLACEHOLDER__\s*\*\/[\s\S]*?;\s*[\r\n]*/;
+  let rendered;
+  if (placeholderRegex.test(templateContent)) {
+    rendered = templateContent.replace(
+      placeholderRegex,
+      () => `window.__CLOT_DATA__ = ${JSON.stringify(payload)};\n`
+    );
+  } else {
+    rendered = templateContent.replace(
+      /window\.__CLOT_DATA__\s*=\s*[\s\S]*?;\s*[\r\n]*/,
+      () => `window.__CLOT_DATA__ = ${JSON.stringify(payload)};\n`
+    );
+  }
+
+  fs.writeFileSync(outputPath, rendered, 'utf-8');
+
+  if (openBrowser) {
+    try {
+      // Launch clean POSIX path without query string; targetGoodsNo is read from inlined D.targetGoodsNo
+      const targetArg = `"${outputPath}"`;
+      if (process.platform === 'darwin') {
+        exec(`open ${targetArg}`, () => {});
+      } else if (process.platform === 'win32') {
+        exec(`start "" ${targetArg}`, () => {});
+      } else {
+        exec(`xdg-open ${targetArg}`, () => {});
+      }
+    } catch {}
+  }
+
+  return {
+    outputPath,
+    targetGoodsNo: gNo !== undefined ? gNo : undefined,
+    totalItems: payload.items.length,
   };
 }
