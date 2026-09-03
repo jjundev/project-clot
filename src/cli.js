@@ -368,10 +368,20 @@ async function main() {
     case 'run-daily':
       await handleDailyRun(flags);
       break;
-    case 'sync':
-      await syncLikedItemsFromMusinsa(flags);
+    case 'sync': {
+      const syncRes = await syncLikedItemsFromMusinsa(flags);
+      console.log(
+        `📊 Sync Summary: +${syncRes.newItems.length} new, ${syncRes.reactivatedItems.length} reactivated, ${syncRes.unlikedItems.length} unliked, ${syncRes.unchangedCount} unchanged.`
+      );
+      if (syncRes.newItems.length > 0) {
+        console.log('🆕 Newly Added Items:');
+        for (const it of syncRes.newItems) {
+          console.log(`   • [${it.goodsNo}] ${it.name} (${it.brand})`);
+        }
+      }
       exportDataForGit();
       break;
+    }
     case 'track':
     case 'update':
       await collectPricesForActiveItems();
