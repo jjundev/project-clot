@@ -14,6 +14,7 @@
     "track": "node src/cli.js track",
     "list": "node src/cli.js list",
     "report": "node src/cli.js report",
+    "visualize": "node src/cli.js visualize",
     "daemon:install": "node src/cli.js daemon-install",
     "daemon:uninstall": "node src/cli.js daemon-uninstall"
   },

@@ -10,6 +10,7 @@ import { syncLikedItemsFromMusinsa } from './sync.js';
 import { collectPricesForActiveItems, fetchProductPriceInfo } from './collector.js';
 import { notifyPriceDropsAndRestocks, sendMacNotification } from './notifier.js';
 import { setupEnvironment, getExtendedPath } from './env.js';
+import { generateDashboardHtml } from './visualizer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -147,6 +148,14 @@ async function handleDailyRun(flags) {
   // 4. Export JSON and try Git auto-commit
   exportDataForGit();
   tryGitAutoCommit();
+
+  // 5. Refresh static dashboard in background
+  try {
+    generateDashboardHtml({ db, openBrowser: false });
+    console.log('📊 Static dashboard refreshed (data/dashboard.html).');
+  } catch (dashErr) {
+    console.warn('⚠️ Warning: Dashboard regeneration failed:', dashErr.message);
+  }
 
   console.log(`🎉 Daily run finished successfully for ${today}!\n`);
 }
@@ -360,6 +369,30 @@ function handleUninstallDaemon() {
   }
 }
 
+function handleVisualize(flags, positional) {
+  const digits = positional[0] ? String(positional[0]).replace(/\D/g, '') : '';
+  const targetGoodsNo = digits.length > 0 ? Number(digits) : undefined;
+  const noOpen = Boolean(flags['no-open'] || flags.noOpen);
+
+  console.log('🎨 Generating price trend dashboard...');
+  const res = generateDashboardHtml({
+    db,
+    openBrowser: !noOpen,
+    targetGoodsNo,
+  });
+
+  console.log(`✅ 대시보드가 생성되었습니다: ${res.outputPath}`);
+  console.log(`   총 ${res.totalItems}개 상품 시계열 반영 완료.`);
+  if (res.targetGoodsNo) {
+    console.log(`   🎯 타겟 상품 번호: ${res.targetGoodsNo}`);
+  }
+  if (noOpen) {
+    console.log('   (브라우저 열기 생략: --no-open)');
+  } else {
+    console.log('   🚀 기본 브라우저로 대시보드를 띄웠습니다.');
+  }
+}
+
 async function main() {
   const { command, flags, positional } = parseArgs();
 
@@ -405,6 +438,10 @@ async function main() {
     case 'history':
       handleHistory(positional);
       break;
+    case 'visualize':
+    case 'dashboard':
+      handleVisualize(flags, positional);
+      break;
     case 'export':
       exportDataForGit();
       console.log('✅ Exported data to data/latest_prices.json');
@@ -430,6 +467,7 @@ Commands:
   unwatch <goodsNo>      Untrack a product
   list                   List all tracked items with current & lowest prices
   history <goodsNo>      View price history table for a specific product
+  visualize [goodsNo]    Generate and launch interactive price trend dashboard
   export                 Export JSON snapshot for Git commit
   daemon-install         Install macOS launchd background scheduler (09:30 AM)
   daemon-uninstall       Uninstall macOS background scheduler

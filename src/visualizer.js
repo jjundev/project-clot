@@ -160,24 +160,29 @@ export function generateDashboardHtml({
 
   const digits = targetGoodsNo != null ? String(targetGoodsNo).replace(/\D/g, '') : '';
   const gNo = digits.length > 0 ? Number(digits) : undefined;
-  const payload = buildClotDataPayload(activeDb, { targetGoodsNo: gNo });
-  if (shouldCloseDb) {
-    activeDb.close();
+  let payload;
+  try {
+    payload = buildClotDataPayload(activeDb, { targetGoodsNo: gNo });
+  } finally {
+    if (shouldCloseDb) {
+      activeDb.close();
+    }
   }
   const templateContent = fs.readFileSync(templatePath, 'utf-8');
 
   // Replace data placeholder using a function replacer to prevent '$' corruption (CRLF tolerant)
+  const jsonString = JSON.stringify(payload).replace(/<\/script/gi, '<\\/script');
   const placeholderRegex = /\/\*\s*__CLOT_DATA_PLACEHOLDER__\s*\*\/[\s\S]*?;\s*[\r\n]*/;
   let rendered;
   if (placeholderRegex.test(templateContent)) {
     rendered = templateContent.replace(
       placeholderRegex,
-      () => `window.__CLOT_DATA__ = ${JSON.stringify(payload)};\n`
+      () => `window.__CLOT_DATA__ = ${jsonString};\n`
     );
   } else {
     rendered = templateContent.replace(
       /window\.__CLOT_DATA__\s*=\s*[\s\S]*?;\s*[\r\n]*/,
-      () => `window.__CLOT_DATA__ = ${JSON.stringify(payload)};\n`
+      () => `window.__CLOT_DATA__ = ${jsonString};\n`
     );
   }
 
