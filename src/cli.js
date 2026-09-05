@@ -434,7 +434,7 @@ async function main() {
     case 'update': {
       const concurrency = parseConcurrency(flags.concurrency, 4);
       console.log(`🔍 Fetching latest prices (concurrency: ${concurrency})...`);
-      await collectPricesForActiveItems({
+      const results = await collectPricesForActiveItems({
         concurrency,
         onProgress: ({ current, total, item, priceInfo }) => {
           process.stdout.write(
@@ -443,6 +443,10 @@ async function main() {
         },
       });
       console.log('\n');
+      console.log(`✅ Collection complete in ${(results.durationMs / 1000).toFixed(1)}s.`);
+      console.log(`  • Success: ${results.success} / Failed: ${results.failed}`);
+      console.log(`  • Price Drops: ${results.priceDropped.length}`);
+      console.log(`  • Restocks: ${results.restocked.length}`);
       exportDataForGit();
       break;
     }
