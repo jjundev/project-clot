@@ -69,6 +69,7 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
           myPrice: null,
           estimatedMyPrice: null,
           isRestrictedUsePoint: false,
+          isLimitedDc: false,
           isSoldOut: false,
         };
       }
@@ -81,7 +82,13 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
       const finalDiscount = gp.finalDiscount ?? gp.discountRate ?? 0;
       const isSoldOut = Boolean(detail.isSoldOut || detail.goodsSaleType === 'SOLDOUT');
       const isRestrictedUsePoint = Boolean(detail.isRestrictedUsePoint ?? detail.isRestictedUsePoint);
-      const estimatedMyPrice = estimateMemberPrice(couponPrice, isRestrictedUsePoint);
+      const isLimitedDc = Boolean(
+        detail.isLimitedDc ??
+        detail.goodsPrice?.isLimitedDc ??
+        detail.isRestrictedMemberDiscount ??
+        (detail.isGradeDiscountEligible === false)
+      );
+      const estimatedMyPrice = estimateMemberPrice(couponPrice, isRestrictedUsePoint, { isLimitedDc });
 
       let couponDiscount = 0;
       let couponName = '';
@@ -105,6 +112,7 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
         myPrice: null, // Public unauthenticated fetch cannot know member discount
         estimatedMyPrice,
         isRestrictedUsePoint,
+        isLimitedDc,
         couponName,
         couponDiscount,
         isSoldOut,

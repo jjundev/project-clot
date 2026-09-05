@@ -280,7 +280,55 @@ describe('Parallel Collector & Circuit Breaker', () => {
     try {
       const info = await fetchProductPriceInfo(999999);
       assert.equal(info.couponPrice, 70000);
-      assert.equal(info.estimatedMyPrice, 63147); // 70,000 * 0.9021 = 63,147
+      assert.equal(info.estimatedMyPrice, 64130);
+      assert.equal(info.isLimitedDc, false);
+      assert.equal(info.myPrice, null);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('fetchProductPriceInfo correctly detects isLimitedDc and excludes grade discount', async () => {
+    const mockNextData = {
+      props: {
+        pageProps: {
+          dehydratedState: {
+            queries: [
+              {
+                queryKey: ['Detail', 999998],
+                state: {
+                  data: {
+                    data: {
+                      goodsNm: 'Limited DC Item',
+                      goodsPrice: {
+                        normalPrice: 100000,
+                        salePrice: 80000,
+                        couponPrice: 70000,
+                        isLimitedDc: true,
+                      },
+                      isRestrictedUsePoint: false,
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      text: async () => `<script id="__NEXT_DATA__">${JSON.stringify(mockNextData)}</script>`,
+    });
+
+    try {
+      const info = await fetchProductPriceInfo(999998);
+      assert.equal(info.isLimitedDc, true);
+      assert.equal(info.couponPrice, 70000);
+      assert.equal(info.estimatedMyPrice, 65100); // 70,000 - floor10(70,000 * 0.07) = 65,100
       assert.equal(info.myPrice, null);
     } finally {
       globalThis.fetch = originalFetch;
@@ -318,7 +366,7 @@ describe('Parallel Collector & Circuit Breaker', () => {
       normalPrice: 20000,
       salePrice: 20000,
       couponPrice: 20000,
-      estimatedMyPrice: 18042,
+      estimatedMyPrice: 18330,
       myPrice: null,
       isSoldOut: false,
       discontinued: false,
@@ -381,7 +429,7 @@ describe('Parallel Collector & Circuit Breaker', () => {
       normalPrice: 70000,
       salePrice: 50000,
       couponPrice: 45000,
-      estimatedMyPrice: 40595, // 45000 * 0.9021 = 40595
+      estimatedMyPrice: 41230,
       myPrice: null,
       isSoldOut: false,
       discontinued: false,
@@ -398,18 +446,18 @@ describe('Parallel Collector & Circuit Breaker', () => {
     const drop = results.priceDropped[0];
     assert.equal(drop.priceType, 'estimated');
     assert.equal(drop.prevPrice, 49616);
-    assert.equal(drop.currentPrice, 40595);
-    assert.equal(drop.dropAmount, 49616 - 40595);
-    assert.equal(drop.dropRate, Math.round(((49616 - 40595) / 49616) * 100));
+    assert.equal(drop.currentPrice, 41230);
+    assert.equal(drop.dropAmount, 49616 - 41230);
+    assert.equal(drop.dropRate, Math.round(((49616 - 41230) / 49616) * 100));
     assert.equal(drop.isNewLowest, true);
 
     assert.equal(lowestEstUpdates.length, 1);
     assert.equal(lowestEstUpdates[0].id, 301);
-    assert.equal(lowestEstUpdates[0].price, 40595);
+    assert.equal(lowestEstUpdates[0].price, 41230);
 
     assert.equal(recordedLogs.length, 1);
     assert.equal(recordedLogs[0].coupon_price, 45000);
-    assert.equal(recordedLogs[0].estimated_my_price, 40595);
+    assert.equal(recordedLogs[0].estimated_my_price, 41230);
   });
 
   test('collectPricesForActiveItems respects source and items filtering options', async () => {
@@ -435,7 +483,7 @@ describe('Parallel Collector & Circuit Breaker', () => {
       goodsName: 'Product',
       salePrice: 10000,
       couponPrice: 9000,
-      estimatedMyPrice: 8119,
+      estimatedMyPrice: 8250,
       myPrice: null,
       isSoldOut: false,
       discontinued: false,
