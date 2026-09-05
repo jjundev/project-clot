@@ -224,7 +224,8 @@ async function handleWatch(positional) {
 
   exportDataForGit();
   console.log(`✅ Successfully added [${info.brandName}] ${info.goodsName} to watchlist!`);
-  console.log(`   Current price: ${info.myPrice?.toLocaleString() || '-'}원 (Normal: ${info.normalPrice?.toLocaleString()}원)`);
+  const displayPrice = (info.myPrice || info.salePrice)?.toLocaleString() || '-';
+  console.log(`   Current price: ${displayPrice}원 (Normal: ${info.normalPrice?.toLocaleString()}원)`);
 }
 
 function handleList(flags) {
@@ -242,8 +243,10 @@ function handleList(flags) {
 
   items.forEach((it, i) => {
     const latest = db.getLatestPrice(it.goods_no);
-    const currStr = latest?.my_price ? latest.my_price.toLocaleString() + '원' : it.status === 'SOLDOUT' ? '품절' : '-';
-    const lowStr = it.lowest_my_price ? it.lowest_my_price.toLocaleString() + '원' : '-';
+    const activePrice = latest?.my_price || latest?.sale_price;
+    const lowestPrice = it.lowest_my_price || it.lowest_sale_price;
+    const currStr = activePrice ? activePrice.toLocaleString() + '원' : it.status === 'SOLDOUT' ? '품절' : '-';
+    const lowStr = lowestPrice ? lowestPrice.toLocaleString() + '원' : '-';
     const brand = (it.brand_name || '-').slice(0, 14);
     const name = it.goods_name.slice(0, 35);
     console.log(
