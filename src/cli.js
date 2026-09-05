@@ -135,8 +135,13 @@ export async function handleDiscover(flags = {}, dbInstance = db) {
   const limit = (typeof flags.limit === 'string' || typeof flags.limit === 'number') ? Number(flags.limit) : 100;
   const minLikes = (typeof flags['min-likes'] === 'string' || typeof flags['min-likes'] === 'number') ? Number(flags['min-likes']) : 1000;
   const years = (typeof flags.years === 'string' || typeof flags.years === 'number') ? Number(flags.years) : 2;
-  const categoryRaw = typeof flags.category === 'string' ? flags.category : '001,002,003,007,008';
-  const categories = categoryRaw.split(',').map((c) => c.trim()).filter(Boolean);
+  const categoryRaw = typeof flags.category === 'string' ? flags.category : '001,002,003,103,004';
+  const categoryAliases = { '007': '103', '008': '004' };
+  const categories = categoryRaw
+    .split(',')
+    .map((c) => c.trim())
+    .map((c) => categoryAliases[c] || c)
+    .filter(Boolean);
 
   console.log(`\n========================================`);
   console.log(`🔍 [Project-Clot] Discovering Category Goods`);
