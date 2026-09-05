@@ -20,15 +20,27 @@ export function isReleasedWithinYears(imageUrl, years = 2, now = new Date()) {
   return releaseDate >= cutoffDate;
 }
 
+export function floor10(val) {
+  return 10 * Math.floor(Number(val) / 10);
+}
+
 export function estimateMemberPrice(couponPrice, isRestrictedUsePoint = false, options = {}) {
   const price = Number(couponPrice);
   if (!price || isNaN(price) || price <= 0) return null;
-  if (isRestrictedUsePoint) return price;
 
-  const gradeDiscountRate = options.gradeDiscountRate ?? 0.03; // Silver member 3%
-  const pointRate = options.pointRate ?? 0.07; // Points 7%
+  const isLimitedDc = Boolean(options.isLimitedDc);
+  const gradeDiscountRate = isLimitedDc ? 0 : (options.gradeDiscountRate ?? 0.015);
+  const pointRate = isRestrictedUsePoint ? 0 : (options.pointRate ?? 0.07);
 
-  return Math.round(price * (1 - gradeDiscountRate) * (1 - pointRate));
+  // Step 1: Grade discount (10-won truncation)
+  const gradeDiscount = gradeDiscountRate > 0 ? floor10(price * gradeDiscountRate) : 0;
+  const priceAfterGrade = Math.max(0, price - gradeDiscount);
+
+  // Step 2: Point pre-discount (10-won truncation on remaining balance after grade discount)
+  const pointDiscount = pointRate > 0 ? floor10(priceAfterGrade * pointRate) : 0;
+
+  // Step 3: Final basic member price
+  return Math.max(0, priceAfterGrade - pointDiscount);
 }
 
 export async function fetchLikeCountsBatch(goodsNos, fetchFn = fetch) {
@@ -148,6 +160,7 @@ export async function discoverCategoryGoods({
           const normalPrice = item.normalPrice ?? item.price ?? couponPrice;
           const salePrice = item.price ?? couponPrice;
           const isRestrictedUsePoint = Boolean(item.isRestrictedUsePoint ?? item.isRestictedUsePoint);
+          const isLimitedDc = Boolean(item.isLimitedDc ?? item.isRestrictedMemberDiscount);
 
           discovered.push({
             goodsNo: Number(item.goodsNo),
@@ -158,7 +171,7 @@ export async function discoverCategoryGoods({
             normalPrice,
             salePrice,
             couponPrice,
-            estimatedMyPrice: estimateMemberPrice(couponPrice, isRestrictedUsePoint),
+            estimatedMyPrice: estimateMemberPrice(couponPrice, isRestrictedUsePoint, { isLimitedDc }),
             likeCount,
             isSoldOut: Boolean(item.isSoldOut),
             source: 'discovery',

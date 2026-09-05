@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   isReleasedWithinYears,
+  floor10,
   estimateMemberPrice,
   fetchLikeCountsBatch,
   fetchCategoryGoodsPage,
@@ -41,16 +42,37 @@ test('Catalog Discovery Engine & Member Price Estimation', async (t) => {
     assert.equal(isReleasedWithinYears(null, 2, fixedNow), false);
   });
 
-  await t.test('estimateMemberPrice calculates mathematical member price with Silver grade and points', () => {
-    // General case: 100,000 KRW with unrestricted points
-    // 100,000 * (1 - 0.03) * (1 - 0.07) = 100,000 * 0.97 * 0.93 = 90,210
-    const price1 = estimateMemberPrice(100000, false);
-    assert.equal(price1, 90210);
+  await t.test('floor10 truncates values to 10-won unit', () => {
+    assert.equal(floor10(1234), 1230);
+    assert.equal(floor10(1239), 1230);
+    assert.equal(floor10(1230), 1230);
+    assert.equal(floor10(9), 0);
+  });
 
-    // Restricted points case: isRestrictedUsePoint = true
-    // When points are restricted, price is unchanged from coupon price
-    const price2 = estimateMemberPrice(50000, true);
-    assert.equal(price2, 50000);
+  await t.test('estimateMemberPrice calculates exact waterfall member price with 10-won truncation', () => {
+    // 100,000 KRW unrestricted:
+    // Grade discount: floor10(100,000 * 0.015) = 1,500 -> balance 98,500
+    // Point discount: floor10(98,500 * 0.07) = floor10(6,895) = 6,890
+    // Final: 98,500 - 6,890 = 91,610
+    const price1 = estimateMemberPrice(100000, false);
+    assert.equal(price1, 91610);
+
+    // Grade discount restricted (isLimitedDc: true):
+    // Grade discount: 0 -> balance 100,000
+    // Point discount: floor10(100,000 * 0.07) = 7,000
+    // Final: 100,000 - 7,000 = 93,000
+    const priceLimited = estimateMemberPrice(100000, false, { isLimitedDc: true });
+    assert.equal(priceLimited, 93000);
+
+    // Both points and grade restricted (Outlet item):
+    // Both 0 -> 100,000
+    const priceOutlet = estimateMemberPrice(100000, true, { isLimitedDc: true });
+    assert.equal(priceOutlet, 100000);
+
+    // Restricted points only: isRestrictedUsePoint = true, isLimitedDc = false:
+    // Grade discount: 1,500 -> 98,500. Point discount: 0 -> 98,500
+    const price2 = estimateMemberPrice(100000, true);
+    assert.equal(price2, 98500);
 
     // Null or invalid input
     assert.equal(estimateMemberPrice(null), null);
@@ -58,8 +80,7 @@ test('Catalog Discovery Engine & Member Price Estimation', async (t) => {
     assert.equal(estimateMemberPrice('invalid'), null);
 
     // Numeric string coercion
-    assert.equal(estimateMemberPrice('50000', true), 50000);
-    assert.equal(estimateMemberPrice('100000', false), 90210);
+    assert.equal(estimateMemberPrice('100000', false), 91610);
   });
 
   await t.test('fetchLikeCountsBatch queries Musinsa batch like API', async () => {
@@ -217,6 +238,6 @@ test('Catalog Discovery Engine & Member Price Estimation', async (t) => {
     assert.equal(results[0].goodsNo, 7001);
     assert.equal(results[0].goodsName, 'Fresh Trendy Pants');
     assert.equal(results[0].likeCount, 1500);
-    assert.equal(results[0].estimatedMyPrice, 40595); // 45,000 * 0.9021 = 40,594.5 -> 40,595
+    assert.equal(results[0].estimatedMyPrice, 41230);
   });
 });
