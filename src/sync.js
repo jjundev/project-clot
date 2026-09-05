@@ -2,12 +2,12 @@ import { execSync } from 'node:child_process';
 import { db } from './db.js';
 import { getExecOptions } from './env.js';
 
-export async function syncLikedItemsFromMusinsa({ limit = 300 } = {}) {
+export async function syncLikedItemsFromMusinsa({ limit = 300, dbInstance = db, execFn = execSync } = {}) {
   console.log('🔄 Syncing Musinsa liked items via OpenCLI...');
   
   let rawOutput = '';
   try {
-    rawOutput = execSync(
+    rawOutput = execFn(
       `opencli musinsa likes --limit ${limit} -f json`,
       getExecOptions({
         encoding: 'utf-8',
@@ -41,6 +41,7 @@ export async function syncLikedItemsFromMusinsa({ limit = 300 } = {}) {
     totalRemote: remoteLikes.length,
     newItems: [],
     reactivatedItems: [],
+    promotedItems: [],
     unlikedItems: [],
     unchangedCount: 0,
   };
@@ -51,9 +52,9 @@ export async function syncLikedItemsFromMusinsa({ limit = 300 } = {}) {
     if (!goodsNo) continue;
     remoteGoodsNoSet.add(goodsNo);
 
-    const existing = db.getItem(goodsNo);
+    const existing = dbInstance.getItem(goodsNo);
     if (!existing) {
-      db.upsertItem({
+      dbInstance.upsertItem({
         goods_no: goodsNo,
         goods_name: r.goodsName,
         brand_name: r.brandName,
@@ -63,21 +64,25 @@ export async function syncLikedItemsFromMusinsa({ limit = 300 } = {}) {
       });
       summary.newItems.push({ goodsNo, name: r.goodsName, brand: r.brandName });
     } else {
+      if (existing.source === 'discovery') {
+        dbInstance.promoteItemToLike(goodsNo);
+        summary.promotedItems.push(existing);
+      }
       if (existing.status === 'UNLIKED') {
-        db.updateItemStatus(goodsNo, 'ACTIVE');
+        dbInstance.updateItemStatus(goodsNo, 'ACTIVE');
         summary.reactivatedItems.push(existing);
-      } else {
+      } else if (existing.source !== 'discovery') {
         summary.unchangedCount++;
       }
     }
   }
 
   // 2. Detect unliked items (items in DB with source='like' and status='ACTIVE' but missing from current remote likes)
-  const allDbItems = db.getAllItems();
+  const allDbItems = dbInstance.getAllItems();
   for (const item of allDbItems) {
     if (item.source === 'like' && item.status === 'ACTIVE') {
       if (!remoteGoodsNoSet.has(item.goods_no)) {
-        db.updateItemStatus(item.goods_no, 'UNLIKED');
+        dbInstance.updateItemStatus(item.goods_no, 'UNLIKED');
         summary.unlikedItems.push(item);
       }
     }
@@ -85,3 +90,4 @@ export async function syncLikedItemsFromMusinsa({ limit = 300 } = {}) {
 
   return summary;
 }
+

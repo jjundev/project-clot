@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { db } from './db.js';
 import { syncLikedItemsFromMusinsa } from './sync.js';
 import { collectPricesForActiveItems, fetchProductPriceInfo } from './collector.js';
-import { notifyPriceDropsAndRestocks, sendMacNotification } from './notifier.js';
+import { notifyPriceDropsAndRestocks, sendMacNotification, formatHotDealsSummary, sendTelegramMessage } from './notifier.js';
+import { discoverCategoryGoods } from './discovery.js';
 import { setupEnvironment, getExtendedPath } from './env.js';
 import { generateDashboardHtml } from './visualizer.js';
 
@@ -65,14 +66,17 @@ export function exportDataForGit() {
     unliked_items: items.filter((it) => it.status === 'UNLIKED').length,
     items: items.map((it) => {
       const latest = db.getLatestPrice(it.goods_no);
+      const tag = it.source === 'discovery' ? '[탐색]' : '[VIP]';
+      const cleanName = (it.goods_name || '').replace(/^\[(VIP|탐색)\]\s*/, '');
       return {
         goods_no: it.goods_no,
-        goods_name: it.goods_name,
+        goods_name: `${tag} ${cleanName}`,
         brand_name: it.brand_name,
+        source: it.source,
         status: it.status,
         url: it.url,
-        current_price: latest?.my_price || latest?.sale_price || null,
-        lowest_price: it.lowest_my_price || it.lowest_sale_price || null,
+        current_price: latest?.my_price || latest?.estimated_my_price || latest?.sale_price || null,
+        lowest_price: it.lowest_my_price || it.lowest_estimated_price || it.lowest_sale_price || null,
         lowest_price_date: it.lowest_price_date || null,
         is_sold_out: Boolean(latest?.is_sold_out),
         last_checked: it.last_checked_at,
@@ -115,6 +119,126 @@ function tryGitAutoCommit() {
   }
 }
 
+export async function handleDiscover(flags = {}, dbInstance = db) {
+  const categoryRaw = typeof flags.category === 'string' ? flags.category : '001,002,003,007,008';
+  const categories = categoryRaw.split(',').map((c) => c.trim()).filter(Boolean);
+  const limit = flags.limit ? Number(flags.limit) : 100;
+  const minLikes = flags['min-likes'] ? Number(flags['min-likes']) : (flags.minLikes ? Number(flags.minLikes) : 1000);
+  const years = flags.years ? Number(flags.years) : 2;
+
+  console.log(`\n========================================`);
+  console.log(`🔍 [Project-Clot] Discovering Category Goods`);
+  console.log(`   Categories: ${categories.join(', ')}`);
+  console.log(`   Limit per category: ${limit} (Min likes: ${minLikes.toLocaleString()})`);
+  console.log(`========================================\n`);
+
+  const allDiscovered = [];
+  let newlyIngestedCount = 0;
+  const today = new Date().toISOString().split('T')[0];
+
+  for (const cat of categories) {
+    try {
+      console.log(`📂 Scanning category [${cat}]...`);
+      const items = await discoverCategoryGoods({
+        categoryCode: cat,
+        limit,
+        minLikes,
+        years,
+      });
+      console.log(`   ✓ Found ${items.length} items matching criteria in category [${cat}].`);
+
+      for (const item of items) {
+        allDiscovered.push(item);
+        const existing = dbInstance.getItem(item.goodsNo);
+        const isNew = !existing;
+        if (isNew) {
+          newlyIngestedCount++;
+        }
+
+        dbInstance.upsertItem({
+          goods_no: item.goodsNo,
+          goods_name: item.goodsName,
+          brand_name: item.brandName,
+          url: item.url,
+          image_url: item.imageUrl,
+          source: existing ? existing.source : 'discovery',
+          status: item.isSoldOut ? 'SOLDOUT' : 'ACTIVE',
+        });
+
+        dbInstance.recordPriceLog({
+          goods_no: item.goodsNo,
+          date: today,
+          normal_price: item.normalPrice,
+          sale_price: item.salePrice,
+          coupon_price: item.couponPrice,
+          sale_rate:
+            item.normalPrice && item.salePrice && item.normalPrice > item.salePrice
+              ? Math.round(((item.normalPrice - item.salePrice) / item.normalPrice) * 100)
+              : 0,
+          my_price: null,
+          estimated_my_price: item.estimatedMyPrice,
+          coupon_name:
+            item.couponPrice && item.salePrice && item.couponPrice < item.salePrice
+              ? '쿠폰 적용가'
+              : null,
+          coupon_discount:
+            item.couponPrice && item.salePrice && item.couponPrice < item.salePrice
+              ? item.salePrice - item.couponPrice
+              : 0,
+          is_sold_out: item.isSoldOut ? 1 : 0,
+        });
+
+        if (
+          !existing ||
+          !existing.lowest_estimated_price ||
+          (item.estimatedMyPrice && item.estimatedMyPrice < existing.lowest_estimated_price)
+        ) {
+          dbInstance.updateLowestEstimatedPrice(item.goodsNo, item.estimatedMyPrice, today);
+        }
+      }
+    } catch (err) {
+      console.error(`❌ Failed scanning category ${cat}:`, err.message);
+    }
+  }
+
+  // Summary statistics
+  let totalDiscountRate = 0;
+  let discountCount = 0;
+  let minPrice = Infinity;
+  let maxPrice = 0;
+
+  for (const it of allDiscovered) {
+    const effPrice = it.estimatedMyPrice || it.couponPrice || it.salePrice;
+    if (effPrice) {
+      if (effPrice < minPrice) minPrice = effPrice;
+      if (effPrice > maxPrice) maxPrice = effPrice;
+    }
+    const norm = it.normalPrice;
+    if (norm && effPrice && norm > effPrice) {
+      const rate = Math.round(((norm - effPrice) / norm) * 100);
+      totalDiscountRate += rate;
+      discountCount++;
+    }
+  }
+
+  const avgDiscount = discountCount > 0 ? Math.round(totalDiscountRate / discountCount) : 0;
+  const priceRangeStr =
+    minPrice !== Infinity ? `${minPrice.toLocaleString()}원 ~ ${maxPrice.toLocaleString()}원` : '-';
+
+  console.log(`\n========================================`);
+  console.log(`✨ [Project-Clot] Discovery Summary`);
+  console.log(`========================================`);
+  console.log(`  • Categories: ${categories.join(', ')}`);
+  console.log(`  • Total Discovered: ${allDiscovered.length} items`);
+  console.log(`  • Newly Ingested: ${newlyIngestedCount} items`);
+  console.log(`  • Average Discount: ${avgDiscount}%`);
+  console.log(`  • Estimated Price Range: ${priceRangeStr}`);
+  console.log(`========================================\n`);
+
+  exportDataForGit();
+  return allDiscovered;
+}
+
 async function handleDailyRun(flags) {
   const today = new Date().toISOString().split('T')[0];
   const force = Boolean(flags.force);
@@ -131,17 +255,19 @@ async function handleDailyRun(flags) {
   // 1. Sync liked items from Musinsa
   try {
     const syncRes = await syncLikedItemsFromMusinsa();
+    const promotedCount = syncRes.promotedItems?.length || 0;
     console.log(
-      `📊 Sync Summary: +${syncRes.newItems.length} new, ${syncRes.unlikedItems.length} unliked, ${syncRes.unchangedCount} unchanged.`
+      `📊 Sync Summary: +${syncRes.newItems.length} new, ${syncRes.reactivatedItems.length} reactivated, ${promotedCount} promoted, ${syncRes.unlikedItems.length} unliked, ${syncRes.unchangedCount} unchanged.`
     );
   } catch (err) {
     console.warn(`⚠️ Warning: Liked items sync failed, proceeding with existing items. (${err.message})`);
   }
 
-  // 2. Collect prices for all active items
+  // 2. Collect prices for VIP active items
   const concurrency = parseConcurrency(flags.concurrency, 3);
   console.log(`\n🔍 Fetching latest prices & discounts (concurrency: ${concurrency})...`);
   const results = await collectPricesForActiveItems({
+    source: 'like',
     concurrency,
     onProgress: ({ current, total, item, priceInfo }) => {
       const displayPrice = priceInfo.isSoldOut
@@ -162,6 +288,23 @@ async function handleDailyRun(flags) {
   // 3. Dispatch notifications if price drop or restock detected
   await notifyPriceDropsAndRestocks(results);
 
+  // Discovery mode if flagged
+  if (flags['with-discovery']) {
+    console.log(`\n🌐 [Discovery Mode] Running catalog discovery...`);
+    try {
+      const discovered = await handleDiscover(flags);
+      if (discovered && discovered.length > 0) {
+        const hotDealsSummary = formatHotDealsSummary(discovered);
+        if (hotDealsSummary) {
+          await sendTelegramMessage(hotDealsSummary);
+          console.log(`📢 [Discovery] Sent Top 5 hot deals summary to Telegram.`);
+        }
+      }
+    } catch (discErr) {
+      console.warn(`⚠️ Warning: Discovery failed (${discErr.message})`);
+    }
+  }
+
   // 4. Export JSON and try Git auto-commit
   exportDataForGit();
   tryGitAutoCommit();
@@ -176,6 +319,7 @@ async function handleDailyRun(flags) {
 
   console.log(`🎉 Daily run finished successfully for ${today}!\n`);
 }
+
 
 async function handleWatch(positional) {
   const target = positional[0];
@@ -243,12 +387,14 @@ function handleList(flags) {
 
   items.forEach((it, i) => {
     const latest = db.getLatestPrice(it.goods_no);
-    const activePrice = latest?.my_price || latest?.sale_price;
-    const lowestPrice = it.lowest_my_price || it.lowest_sale_price;
+    const activePrice = latest?.my_price || latest?.estimated_my_price || latest?.sale_price;
+    const lowestPrice = it.lowest_my_price || it.lowest_estimated_price || it.lowest_sale_price;
     const currStr = activePrice ? activePrice.toLocaleString() + '원' : it.status === 'SOLDOUT' ? '품절' : '-';
     const lowStr = lowestPrice ? lowestPrice.toLocaleString() + '원' : '-';
+    const tag = it.source === 'discovery' ? '[탐색]' : '[VIP]';
+    const cleanName = (it.goods_name || '').replace(/^\[(VIP|탐색)\]\s*/, '');
     const brand = (it.brand_name || '-').slice(0, 14);
-    const name = it.goods_name.slice(0, 35);
+    const name = `${tag} ${cleanName}`.slice(0, 40);
     console.log(
       String(i + 1).padEnd(4) +
         it.status.padEnd(10) +
@@ -260,6 +406,7 @@ function handleList(flags) {
   });
   console.log('');
 }
+
 
 function handleHistory(positional) {
   const target = positional[0];
@@ -422,10 +569,14 @@ async function main() {
     case 'run-daily':
       await handleDailyRun(flags);
       break;
+    case 'discover':
+      await handleDiscover(flags);
+      break;
     case 'sync': {
       const syncRes = await syncLikedItemsFromMusinsa(flags);
+      const promotedCount = syncRes.promotedItems?.length || 0;
       console.log(
-        `📊 Sync Summary: +${syncRes.newItems.length} new, ${syncRes.reactivatedItems.length} reactivated, ${syncRes.unlikedItems.length} unliked, ${syncRes.unchangedCount} unchanged.`
+        `📊 Sync Summary: +${syncRes.newItems.length} new, ${syncRes.reactivatedItems.length} reactivated, ${promotedCount} promoted from discovery, ${syncRes.unlikedItems.length} unliked, ${syncRes.unchangedCount} unchanged.`
       );
       if (syncRes.newItems.length > 0) {
         console.log('🆕 Newly Added Items:');
@@ -433,11 +584,32 @@ async function main() {
           console.log(`   • [${it.goodsNo}] ${it.name} (${it.brand})`);
         }
       }
+      if (promotedCount > 0) {
+        console.log('✨ Promoted from Discovery to VIP:');
+        for (const it of syncRes.promotedItems) {
+          console.log(`   • [${it.goods_no}] ${it.goods_name} (${it.brand_name})`);
+        }
+      }
       exportDataForGit();
       break;
     }
     case 'track':
     case 'update': {
+      const singleTarget = positional[0] ? Number(positional[0].replace(/\D/g, '')) : null;
+      if (singleTarget) {
+        const existing = db.getItem(singleTarget);
+        if (existing && existing.source === 'discovery') {
+          db.promoteItemToLike(singleTarget);
+          console.log(`✨ [VIP 승격] 탐색 카탈로그 상품 ${singleTarget}이(가) VIP 관심 상품으로 승격되었습니다.`);
+          exportDataForGit();
+          break;
+        } else if (!existing) {
+          console.log(`상품 ${singleTarget}을(를) 추적 목록에 추가합니다.`);
+          await handleWatch([String(singleTarget)]);
+          break;
+        }
+      }
+      // If no single target or item is already VIP, proceed to batch price collection across active items
       const concurrency = parseConcurrency(flags.concurrency, 3);
       console.log(`🔍 Fetching latest prices (concurrency: ${concurrency})...`);
       const results = await collectPricesForActiveItems({
@@ -471,6 +643,7 @@ async function main() {
       }
       break;
     }
+    case 'status':
     case 'list':
       handleList(flags);
       break;
@@ -499,12 +672,13 @@ Usage:
   node src/cli.js <command> [options]
 
 Commands:
-  daily [--force] [--concurrency=1-5] Run daily sync & price tracking (default concurrency: 3)
+  daily [--force] [--concurrency=1-5] [--with-discovery]  Run daily sync & price tracking (default concurrency: 3)
+  discover [--category <codes>] [--limit <n>] [--min-likes <n>]  Discover popular products matching criteria
   sync                   Sync liked items from Musinsa account
-  track [--concurrency=1-5]           Fetch latest prices for all active tracked items
+  track [goodsNo] [--concurrency=1-5]  Track active items or promote discovery item to VIP
   watch <url/goodsNo>    Manually add a product to track
   unwatch <goodsNo>      Untrack a product
-  list                   List all tracked items with current & lowest prices
+  list / status          List tracked items with current & lowest prices ([VIP] / [탐색])
   history <goodsNo>      View price history table for a specific product
   visualize [goodsNo]    Generate and launch interactive price trend dashboard
   export                 Export JSON snapshot for Git commit
@@ -513,6 +687,7 @@ Commands:
 `);
       break;
   }
+
 }
 
 const currentScript = fileURLToPath(import.meta.url);

@@ -111,3 +111,54 @@ export async function notifyPriceDropsAndRestocks({ priceDropped = [], restocked
   const message = lines.join('\n');
   await sendTelegramMessage(message);
 }
+
+export function formatHotDealsSummary(discoveryItems = []) {
+  if (!discoveryItems || discoveryItems.length === 0) {
+    return '';
+  }
+
+  const itemsWithDiscount = discoveryItems.map((item) => {
+    const normalPrice = item.normalPrice ?? item.normal_price ?? null;
+    const targetPrice =
+      item.estimatedMyPrice ??
+      item.estimated_my_price ??
+      item.couponPrice ??
+      item.coupon_price ??
+      item.salePrice ??
+      item.sale_price ??
+      null;
+
+    let discountRate = 0;
+    if (normalPrice && targetPrice && normalPrice > targetPrice) {
+      discountRate = Math.round(((normalPrice - targetPrice) / normalPrice) * 100);
+    } else if (item.saleRate || item.sale_rate) {
+      discountRate = Number(item.saleRate || item.sale_rate);
+    }
+
+    return {
+      ...item,
+      discountRate,
+      targetPrice,
+    };
+  });
+
+  itemsWithDiscount.sort((a, b) => b.discountRate - a.discountRate);
+  const top5 = itemsWithDiscount.slice(0, 5);
+
+  const lines = ['<b>🔥 오늘의 탐색 핫딜 Top 5 (발매 2년 이내 & 좋아요 1,000+)</b>\n'];
+  top5.forEach((item, index) => {
+    const rank = index + 1;
+    const brand = item.brandName || item.brand_name || '-';
+    const name = item.goodsName || item.goods_name || '상품';
+    const goodsNo = item.goodsNo || item.goods_no;
+    const url = item.url || `https://www.musinsa.com/products/${goodsNo}`;
+    const priceStr = item.targetPrice ? `${item.targetPrice.toLocaleString()}원` : '-';
+
+    lines.push(
+      `${rank}. <b>[${brand}]</b> ${name} - 정가 대비 <b>${item.discountRate}%</b> 할인 (추정회원가: <b>${priceStr}</b>)\n` +
+        `   • <a href="${url}">상품 바로가기</a>`
+    );
+  });
+
+  return lines.join('\n');
+}
