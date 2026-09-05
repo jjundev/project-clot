@@ -113,10 +113,11 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
 }
 
 export async function collectPricesForActiveItems({
-  concurrency = 4,
-  delayMs = 100,
+  concurrency = 3,
+  delayMs = 250,
   onProgress = null,
-  openCliTimeoutMs = 15000,
+  openCliTimeoutMs = 25000,
+  openCliChunkSize = 2,
   dbInstance = db,
   execFn = execSync,
   fetchFn = fetchProductPriceInfo,
@@ -143,7 +144,7 @@ export async function collectPricesForActiveItems({
   const goodsNos = activeItems.map((it) => it.goods_no);
   let consecutiveOpenCliErrors = 0;
 
-  for (let i = 0; i < goodsNos.length; i += 4) {
+  for (let i = 0; i < goodsNos.length; i += openCliChunkSize) {
     if (consecutiveOpenCliErrors >= 2) {
       console.warn(
         `⚡ [OpenCLI CircuitBreaker] 2 consecutive OpenCLI batch failures/timeouts. Skipping remaining ${goodsNos.length - i} items and proceeding to fast direct parser.`
@@ -151,7 +152,7 @@ export async function collectPricesForActiveItems({
       break;
     }
 
-    const chunk = goodsNos.slice(i, i + 4).join(',');
+    const chunk = goodsNos.slice(i, i + openCliChunkSize).join(',');
     try {
       const raw = execFn(
         `opencli musinsa my-prices "${chunk}" -f json`,

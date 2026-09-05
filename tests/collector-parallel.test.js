@@ -48,6 +48,7 @@ describe('Parallel Collector & Circuit Breaker', () => {
     const results = await collectPricesForActiveItems({
       concurrency: 2,
       delayMs: 0,
+      openCliChunkSize: 4,
       openCliTimeoutMs: 1000,
       dbInstance: mockDb,
       execFn: mockExec,
@@ -74,7 +75,7 @@ describe('Parallel Collector & Circuit Breaker', () => {
   });
 
   test('circuit breaker aborts subsequent OpenCLI chunks after 2 consecutive failures', async () => {
-    const mockActiveItems = Array.from({ length: 16 }, (_, i) => ({
+    const mockActiveItems = Array.from({ length: 8 }, (_, i) => ({
       goods_no: 1000 + i,
       goods_name: `Item ${i}`,
       brand_name: 'Brand',
@@ -109,17 +110,16 @@ describe('Parallel Collector & Circuit Breaker', () => {
     });
 
     const results = await collectPricesForActiveItems({
-      concurrency: 4,
+      concurrency: 2,
       delayMs: 0,
       dbInstance: mockDb,
       execFn: mockExec,
       fetchFn: mockFetch,
     });
 
-    // 16 items / 4 chunk size = 4 chunks.
-    // Circuit breaker must abort after exactly 2 consecutive failures.
+    // 8 items / 2 chunk size = 4 chunks. Circuit breaker aborts after 2 consecutive failures.
     assert.equal(openCliAttempts, 2, `Expected OpenCLI attempts to be capped at 2, got ${openCliAttempts}`);
-    assert.equal(results.success, 16);
+    assert.equal(results.success, 8);
   });
 
   test('fetchProductPriceInfo returns myPrice: null for public unauthenticated requests', async () => {
