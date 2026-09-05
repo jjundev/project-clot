@@ -33,6 +33,7 @@ export class ClotDatabase {
         image_url TEXT,
         source TEXT DEFAULT 'like',
         status TEXT DEFAULT 'ACTIVE',
+        category TEXT,
         first_seen_at TEXT NOT NULL,
         last_checked_at TEXT,
         lowest_my_price INTEGER,
@@ -98,6 +99,13 @@ export class ClotDatabase {
         if (!e.message.includes('duplicate column name')) throw e;
       }
     }
+    if (!itemsCols.includes('category')) {
+      try {
+        this.db.exec("ALTER TABLE items ADD COLUMN category TEXT;");
+      } catch (e) {
+        if (!e.message.includes('duplicate column name')) throw e;
+      }
+    }
   }
 
   getItem(goodsNo) {
@@ -143,6 +151,7 @@ export class ClotDatabase {
     image_url = '',
     source = 'like',
     status = 'ACTIVE',
+    category = null,
   }) {
     const now = new Date().toISOString();
     const existing = this.getItem(goods_no);
@@ -153,8 +162,8 @@ export class ClotDatabase {
     if (!existing) {
       const stmt = this.db.prepare(`
         INSERT INTO items (
-          goods_no, goods_name, brand_name, url, image_url, source, status, first_seen_at, last_checked_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          goods_no, goods_name, brand_name, url, image_url, source, status, category, first_seen_at, last_checked_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       stmt.run(
         Number(goods_no),
@@ -164,6 +173,7 @@ export class ClotDatabase {
         image_url,
         source,
         status,
+        category,
         now,
         now
       );
@@ -176,6 +186,7 @@ export class ClotDatabase {
           brand_name = COALESCE(?, goods_name, brand_name),
           url = COALESCE(NULLIF(?, ''), url),
           image_url = COALESCE(NULLIF(?, ''), image_url),
+          category = COALESCE(?, category),
           status = ?,
           last_checked_at = ?
         WHERE goods_no = ?
@@ -185,6 +196,7 @@ export class ClotDatabase {
         cleanBrand,
         url || '',
         image_url || '',
+        category,
         newStatus,
         now,
         Number(goods_no)

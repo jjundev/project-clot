@@ -8,6 +8,7 @@ import path from 'node:path';
 import { exec } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
+import { classifyCategory } from './classifier.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,8 +31,11 @@ export function buildClotDataPayload(dbOrWrapper, { targetGoodsNo } = {}) {
   }
 
   // 1. Fetch active and soldout items
+  const itemCols = rawDb.prepare("PRAGMA table_info(items)").all().map((c) => c.name);
+  const hasCat = itemCols.includes('category');
+  const catCol = hasCat ? ', category' : '';
   const itemsStmt = rawDb.prepare(`
-    SELECT goods_no, goods_name, brand_name, url, image_url, status, first_seen_at, last_checked_at
+    SELECT goods_no, goods_name, brand_name, url, image_url, status, first_seen_at, last_checked_at ${catCol}
     FROM items
     WHERE status IN ('ACTIVE', 'SOLDOUT')
     ORDER BY goods_no ASC
@@ -109,6 +113,7 @@ export function buildClotDataPayload(dbOrWrapper, { targetGoodsNo } = {}) {
     u: it.url || `https://www.musinsa.com/products/${it.goods_no}`,
     i: it.image_url || '',
     s: it.status || 'ACTIVE',
+    c: it.category || classifyCategory(it.goods_name, it.brand_name),
     fs: it.first_seen_at ? it.first_seen_at.slice(0, 10) : '',
     L: logsByGoods.get(it.goods_no) || [],
   }));

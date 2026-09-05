@@ -12,6 +12,7 @@ import { notifyPriceDropsAndRestocks, sendMacNotification, formatHotDealsSummary
 import { discoverCategoryGoods } from './discovery.js';
 import { setupEnvironment, getExtendedPath } from './env.js';
 import { generateDashboardHtml } from './visualizer.js';
+import { classifyCategory } from './classifier.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -185,6 +186,7 @@ export async function handleDiscover(flags = {}, dbInstance = db) {
           image_url: item.imageUrl,
           source: existing ? existing.source : 'discovery',
           status: item.isSoldOut ? 'SOLDOUT' : 'ACTIVE',
+          category: classifyCategory(item.goodsName, item.brandName, cat),
         });
 
         dbInstance.recordPriceLog({

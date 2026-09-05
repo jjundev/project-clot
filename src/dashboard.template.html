@@ -177,6 +177,28 @@ a{color:inherit}
 .chip[aria-pressed="true"] .c{color:var(--fg-invert);opacity:.72}
 .chip[aria-pressed="true"]:hover{background:var(--fg-hover);border-color:var(--fg-hover)}
 
+/* ─── Category Tabs ──────────────────────────────────────────────── */
+.cat-bar{
+  width:100%;display:flex;gap:8px;flex-wrap:wrap;
+  padding:0 0 14px;margin-bottom:4px;
+  border-bottom:1px dashed var(--border);
+}
+.cat-chip{
+  height:38px;padding:0 16px;border-radius:var(--r);cursor:pointer;
+  border:1px solid var(--border);background:var(--surface);color:var(--fg);
+  font-size:13px;font-weight:700;display:inline-flex;align-items:center;gap:7px;
+  transition:background .12s ease,border-color .12s ease,color .12s ease,box-shadow .12s ease;
+}
+.cat-chip:hover{background:var(--hover);border-color:var(--muted)}
+.cat-chip:active{background:var(--press)}
+.cat-chip[aria-pressed="true"]{background:var(--fg);border-color:var(--fg);color:var(--fg-invert);box-shadow:var(--shadow)}
+.cat-chip[aria-pressed="true"] .c{color:var(--fg-invert);opacity:.85}
+.cat-tag{
+  display:inline-block;font-size:10px;font-weight:700;letter-spacing:0.02em;
+  padding:2px 6px;border-radius:4px;background:var(--surface);color:var(--muted);
+  width:fit-content;margin-bottom:2px;
+}
+
 .sort{margin-left:auto;display:flex;align-items:center;gap:8px}
 .sort label{font-size:12px;color:var(--muted);font-weight:600;letter-spacing:0.02em}
 .sort select{
@@ -399,6 +421,9 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   .toolbar{top:61px;padding:16px 0 10px}
   .search{flex:1 1 100%}
   .search kbd{display:none}
+  .cat-bar{overflow-x:auto;flex-wrap:nowrap;padding-bottom:8px;scrollbar-width:none}
+  .cat-bar::-webkit-scrollbar{display:none}
+  .cat-chip{flex:none}
   .chips{width:100%;overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px;scrollbar-width:none}
   .chips::-webkit-scrollbar{display:none}
   .chip{flex:none}
@@ -487,6 +512,15 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   </section>
 
   <section class="toolbar" data-od-id="toolbar" aria-label="검색 및 필터">
+    <div class="cat-bar" role="group" aria-label="카테고리 필터" data-od-id="category-bar">
+      <button class="cat-chip" type="button" data-cat="all" aria-pressed="true" data-od-id="cat-all">전체 <span class="c num" id="cntAll">—</span></button>
+      <button class="cat-chip" type="button" data-cat="top" aria-pressed="false" data-od-id="cat-top">상의 <span class="c num" id="cntTop">—</span></button>
+      <button class="cat-chip" type="button" data-cat="outer" aria-pressed="false" data-od-id="cat-outer">아우터 <span class="c num" id="cntOuter">—</span></button>
+      <button class="cat-chip" type="button" data-cat="bottom" aria-pressed="false" data-od-id="cat-bottom">바지 <span class="c num" id="cntBottom">—</span></button>
+      <button class="cat-chip" type="button" data-cat="shoes" aria-pressed="false" data-od-id="cat-shoes">신발 <span class="c num" id="cntShoes">—</span></button>
+      <button class="cat-chip" type="button" data-cat="bag" aria-pressed="false" data-od-id="cat-bag">가방·잡화 <span class="c num" id="cntBag">—</span></button>
+    </div>
+
     <div class="search">
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
         <circle cx="9" cy="9" r="5.5"/><path d="m13.2 13.2 3.3 3.3"/>
@@ -506,6 +540,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     <div class="sort" data-od-id="sort-control">
       <label for="sortSel">정렬</label>
       <select id="sortSel" data-od-id="sort-select">
+        <option value="category">카테고리순 (착장순)</option>
         <option value="rate">할인율 높은 순</option>
         <option value="priceAsc">실구매가 낮은 순</option>
         <option value="priceDesc">실구매가 높은 순</option>
@@ -673,9 +708,13 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     if (el) el.textContent = COUNTS[k];
   });
 
+  var CAT_NAMES = { top: '상의', outer: '아우터', bottom: '바지', shoes: '신발', bag: '가방·잡화' };
+  var CAT_ORDER = { top: 1, outer: 2, bottom: 3, shoes: 4, bag: 5, etc: 6 };
+
   /* ── 상태 ───────────────────────────────────────────────── */
   var state = {
     q: '',
+    cat: store('cat') || 'all',
     filter: store('filter') || 'all',
     sort: store('sort') || 'rate'
   };
@@ -688,6 +727,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   sortSel.value = state.sort;
 
   function matches(it) {
+    if (state.cat && state.cat !== 'all' && it.c !== state.cat) return false;
     if (state.q && it._hay.indexOf(state.q) === -1) return false;
     switch (state.filter) {
       case 'lowest': return it.isLow;
@@ -698,6 +738,10 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     }
   }
   var SORTERS = {
+    category: function (a, b) {
+      var d = (CAT_ORDER[a.c] || 9) - (CAT_ORDER[b.c] || 9);
+      return d !== 0 ? d : (b.rate - a.rate || a.n - b.n);
+    },
     rate: function (a, b) { return b.rate - a.rate || a.n - b.n; },
     priceAsc: function (a, b) { return (a.my == null ? 1e12 : a.my) - (b.my == null ? 1e12 : b.my); },
     priceDesc: function (a, b) { return (b.my == null ? -1 : b.my) - (a.my == null ? -1 : a.my); },
@@ -741,7 +785,9 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       (pins ? '<div class="pins">' + pins + '</div>' : '') +
       (it.isOut ? '<div class="soldout-veil">품절</div>' : '') +
       '</div>' +
-      '<div class="card-body"><div class="brand">' + esc(it.b) + '</div>' +
+      '<div class="card-body">' +
+      (it.c ? '<span class="cat-tag">' + esc(CAT_NAMES[it.c] || it.c) + '</span>' : '') +
+      '<div class="brand">' + esc(it.b) + '</div>' +
       '<div class="gname">' + esc(it.g) + '</div>' + body + '</div></button>';
   }
 
@@ -749,7 +795,46 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     view = D.items.filter(matches).sort(SORTERS[state.sort]);
     document.getElementById('shownN').textContent = view.length;
     var reset = document.getElementById('resetBtn');
-    reset.hidden = (state.filter === 'all' && !state.q);
+    reset.hidden = (state.filter === 'all' && state.cat === 'all' && !state.q);
+
+    // Dynamic scoped counts for quick filters & KPI cards based on selected category
+    var pool = (state.cat && state.cat !== 'all')
+      ? D.items.filter(function (it) { return it.c === state.cat; })
+      : D.items;
+
+    var scopedCounts = {
+      all: pool.length,
+      lowest: pool.filter(function (i) { return i.isLow; }).length,
+      drop: pool.filter(function (i) { return i.dropAmt > 0; }).length,
+      onsale: pool.filter(function (i) { return !i.isOut; }).length,
+      out: pool.filter(function (i) { return i.isOut; }).length
+    };
+
+    ['all', 'lowest', 'drop', 'onsale', 'out'].forEach(function (k) {
+      var el = document.getElementById('c' + k.charAt(0).toUpperCase() + k.slice(1));
+      if (el) el.textContent = scopedCounts[k];
+    });
+
+    document.getElementById('kTotal').innerHTML = scopedCounts.all + '<small>개</small>';
+    document.getElementById('kLowest').innerHTML = scopedCounts.lowest + '<small>개</small>';
+    document.getElementById('kDrop').innerHTML = scopedCounts.drop + '<small>개</small>';
+    document.getElementById('kOut').innerHTML = scopedCounts.out + '<small>개</small>';
+
+    // Dynamic category tab counts
+    var catCounts = { all: D.items.length, top: 0, outer: 0, bottom: 0, shoes: 0, bag: 0 };
+    D.items.forEach(function (it) {
+      if (catCounts[it.c] !== undefined) catCounts[it.c]++;
+    });
+    document.getElementById('cntAll').textContent = catCounts.all;
+    document.getElementById('cntTop').textContent = catCounts.top;
+    document.getElementById('cntOuter').textContent = catCounts.outer;
+    document.getElementById('cntBottom').textContent = catCounts.bottom;
+    document.getElementById('cntShoes').textContent = catCounts.shoes;
+    document.getElementById('cntBag').textContent = catCounts.bag;
+
+    document.querySelectorAll('[data-cat]').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.dataset.cat === state.cat));
+    });
 
     grid.innerHTML = view.length
       ? view.map(cardHtml).join('')
@@ -770,6 +855,13 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     clearTimeout(deb);
     deb = setTimeout(function () { state.q = qEl.value.trim().toLowerCase(); render(); }, 180);
   });
+  document.querySelectorAll('[data-cat]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      state.cat = (state.cat === b.dataset.cat && b.dataset.cat !== 'all') ? 'all' : b.dataset.cat;
+      store('cat', state.cat);
+      render();
+    });
+  });
   document.querySelectorAll('[data-filter]').forEach(function (b) {
     b.addEventListener('click', function () {
       state.filter = (state.filter === b.dataset.filter && b.dataset.filter !== 'all') ? 'all' : b.dataset.filter;
@@ -781,8 +873,8 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     state.sort = sortSel.value; store('sort', state.sort); render();
   });
   document.getElementById('resetBtn').addEventListener('click', function () {
-    state.filter = 'all'; state.q = ''; qEl.value = '';
-    store('filter', 'all'); render();
+    state.filter = 'all'; state.cat = 'all'; state.q = ''; qEl.value = '';
+    store('filter', 'all'); store('cat', 'all'); render();
   });
 
   /* ── 테마 ───────────────────────────────────────────────── */

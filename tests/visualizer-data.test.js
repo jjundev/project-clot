@@ -106,6 +106,7 @@ describe('Visualizer Data Extraction', () => {
     assert.equal(item1.b, '테스트 브랜드');
     assert.equal(item1.g, '테스트 셔츠');
     assert.equal(item1.s, 'ACTIVE');
+    assert.equal(item1.c, 'top');
     assert.equal(item1.fs, '2026-08-01');
     assert.equal(item1.L.length, 2);
     assert.deepEqual(item1.L[0], ['2026-08-01', 50000, 45000, 40000, 0, '5% 쿠폰', 5000]);
@@ -114,6 +115,7 @@ describe('Visualizer Data Extraction', () => {
     const item2 = payload.items.find((it) => it.n === 1002);
     assert.ok(item2);
     assert.equal(item2.s, 'SOLDOUT');
+    assert.equal(item2.c, 'top');
     assert.equal(item2.L.length, 1);
     assert.deepEqual(item2.L[0], ['2026-08-02', 80000, 70000, 70000, 1, '나의 할인가', 0]);
 
