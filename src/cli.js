@@ -389,7 +389,8 @@ function handleVisualize(flags, positional) {
   if (noOpen) {
     console.log('   (브라우저 열기 생략: --no-open)');
   } else {
-    console.log('   🚀 기본 브라우저로 대시보드를 띄웠습니다.');
+    console.log('   🚀 기본 브라우저로 대시보드를 열었습니다.');
+    console.log(`   💡 브라우저가 자동으로 뜨지 않으면 직접 열기: open ${res.outputPath}`);
   }
 }
 
