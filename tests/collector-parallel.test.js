@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { collectPricesForActiveItems } from '../src/collector.js';
+import { collectPricesForActiveItems, fetchProductPriceInfo } from '../src/collector.js';
 
 describe('Parallel Collector & Circuit Breaker', () => {
   test('preserves exact order in results.items and executes fallback when OpenCLI fails', async () => {
@@ -120,5 +120,122 @@ describe('Parallel Collector & Circuit Breaker', () => {
     // Circuit breaker must abort after exactly 2 consecutive failures.
     assert.equal(openCliAttempts, 2, `Expected OpenCLI attempts to be capped at 2, got ${openCliAttempts}`);
     assert.equal(results.success, 16);
+  });
+
+  test('fetchProductPriceInfo returns myPrice: null for public unauthenticated requests', async () => {
+    const mockHtml = `
+      <html><body>
+        <script id="__NEXT_DATA__" type="application/json">
+          {"props":{"pageProps":{"dehydratedState":{"queries":[{"queryKey":["Detail", 999999],"state":{"data":{"data":{"goodsNm":"Item","brand":"Brand","goodsPrice":{"normalPrice":50000,"salePrice":45000,"couponPrice":40000}}}}}]}}}}
+        </script>
+      </body></html>
+    `;
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      text: async () => mockHtml,
+    });
+
+    try {
+      const info = await fetchProductPriceInfo(999999);
+      assert.equal(info.salePrice, 45000);
+      assert.equal(info.couponPrice, 40000);
+      assert.equal(info.myPrice, null, 'Public fetch must NOT set myPrice');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('fetchProductPriceInfo retries on 429 with backoff and succeeds', async () => {
+    let callCount = 0;
+    const mockHtml = `
+      <html><body>
+        <script id="__NEXT_DATA__" type="application/json">
+          {"props":{"pageProps":{"dehydratedState":{"queries":[{"queryKey":["Detail", 888888],"state":{"data":{"data":{"goodsNm":"Item","brand":"Brand","goodsPrice":{"normalPrice":30000,"salePrice":25000}}}}}]}}}}
+        </script>
+      </body></html>
+    `;
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      callCount++;
+      if (callCount <= 2) {
+        return { ok: false, status: 429 };
+      }
+      return { ok: true, status: 200, text: async () => mockHtml };
+    };
+
+    try {
+      // Use backoffBaseMs: 1 to avoid test delay
+      const info = await fetchProductPriceInfo(888888, '', 4, 1);
+      assert.equal(callCount, 3, 'Expected 2 retries on 429 before success');
+      assert.equal(info.goodsNo, 888888);
+      assert.equal(info.salePrice, 25000);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('does not report false price drop when transitioning between authenticated and unauthenticated snapshots', async () => {
+    const mockActiveItems = [
+      {
+        goods_no: 201,
+        goods_name: 'Test Shirt',
+        brand_name: 'Brand A',
+        status: 'ACTIVE',
+        lowest_my_price: 35000,
+        lowest_sale_price: 45000,
+      },
+    ];
+
+    // Day 1 had authenticated member price of 35,000 and salePrice of 45,000
+    const mockDb = {
+      getActiveItems: () => mockActiveItems,
+      getItem: () => mockActiveItems[0],
+      getLatestPrice: () => ({
+        goods_no: 201,
+        date: '2026-09-04',
+        sale_price: 45000,
+        my_price: 35000,
+        is_sold_out: 0,
+      }),
+      updateItemDetails: () => {},
+      updateItemStatus: () => {},
+      updateLowestPrice: () => {},
+      recordPriceLog: () => {},
+      recordDailyRun: () => {},
+    };
+
+    const mockExec = () => {
+      throw new Error('OpenCLI timeout');
+    };
+
+    // Public fetch on Day 2 returns salePrice 45,000, couponPrice 42,000, myPrice null
+    const mockFetch = async (goodsNo) => ({
+      goodsNo,
+      goodsName: 'Test Shirt',
+      brandName: 'Brand A',
+      normalPrice: 50000,
+      salePrice: 45000,
+      couponPrice: 42000,
+      myPrice: null,
+      isSoldOut: false,
+      discontinued: false,
+    });
+
+    const results = await collectPricesForActiveItems({
+      concurrency: 1,
+      delayMs: 0,
+      dbInstance: mockDb,
+      execFn: mockExec,
+      fetchFn: mockFetch,
+    });
+
+    // salePrice stayed at 45,000 and myPrice is null -> no price drop should be emitted
+    assert.equal(results.priceDropped.length, 0, 'Must not report price drop when salePrice is unchanged and myPrice is unavailable');
+    assert.equal(results.items[0].myPrice, null);
+    assert.equal(results.items[0].salePrice, 45000);
   });
 });

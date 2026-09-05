@@ -6,7 +6,7 @@ import { mapConcurrent } from './pool.js';
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 
-export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries = 3) {
+export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries = 4, backoffBaseMs = 2000) {
   const url = `https://www.musinsa.com/products/${goodsNo}`;
   const headers = {
     'User-Agent': USER_AGENT,
@@ -27,9 +27,12 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
       }
 
       if (response.status === 429) {
-        const waitTime = attempt * 2500;
+        if (attempt === retries) {
+          throw new Error(`HTTP 429 Rate Limited on goods ${goodsNo} after ${retries} attempts`);
+        }
+        const waitTime = Math.pow(2, attempt - 1) * backoffBaseMs + Math.floor(Math.random() * 500);
         console.warn(
-          `⏳ [RateLimit 429] Waiting ${waitTime / 1000}s before retrying goods ${goodsNo} (attempt ${attempt}/${retries})...`
+          `⏳ [RateLimit 429] Waiting ${(waitTime / 1000).toFixed(1)}s before retrying goods ${goodsNo} (attempt ${attempt}/${retries})...`
         );
         await new Promise((r) => setTimeout(r, waitTime));
         continue;
@@ -94,7 +97,7 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
         salePrice,
         couponPrice,
         saleRate: finalDiscount,
-        myPrice: couponPrice,
+        myPrice: null, // Public unauthenticated fetch cannot know member discount
         couponName,
         couponDiscount,
         isSoldOut,
@@ -232,32 +235,57 @@ export async function collectPricesForActiveItems({
         results.newlySoldOut.push({ item, priceInfo });
       }
 
-      // Update lowest price tracking
+      // Update lowest price tracking: only update lowest_my_price if authentic myPrice is available
       let lowestMyPrice = item.lowest_my_price;
       let lowestSalePrice = item.lowest_sale_price;
-      let isNewLowest = false;
 
-      if (!lowestMyPrice || (priceInfo.myPrice && priceInfo.myPrice < lowestMyPrice)) {
-        lowestMyPrice = priceInfo.myPrice;
-        lowestSalePrice = priceInfo.salePrice;
-        isNewLowest = Boolean(item.lowest_my_price);
+      const hasNewLowestMyPrice = Boolean(priceInfo.myPrice && (!lowestMyPrice || priceInfo.myPrice < lowestMyPrice));
+      const hasNewLowestSalePrice = Boolean(priceInfo.salePrice && (!lowestSalePrice || priceInfo.salePrice < lowestSalePrice));
+
+      if (hasNewLowestMyPrice || hasNewLowestSalePrice) {
+        if (hasNewLowestMyPrice) {
+          lowestMyPrice = priceInfo.myPrice;
+        }
+        if (hasNewLowestSalePrice) {
+          lowestSalePrice = priceInfo.salePrice;
+        }
         dbInstance.updateLowestPrice(item.goods_no, lowestMyPrice, lowestSalePrice, today);
       }
 
-      // Check for price drop compared to previous log
-      if (prevPriceLog && priceInfo.myPrice && prevPriceLog.my_price) {
-        if (priceInfo.myPrice < prevPriceLog.my_price) {
-          const dropAmount = prevPriceLog.my_price - priceInfo.myPrice;
-          const dropRate = Math.round((dropAmount / prevPriceLog.my_price) * 100);
-          results.priceDropped.push({
-            item,
-            priceInfo,
-            prevPrice: prevPriceLog.my_price,
-            currentPrice: priceInfo.myPrice,
-            dropAmount,
-            dropRate,
-            isNewLowest,
-          });
+      // Check for price drop: compare like-for-like
+      if (prevPriceLog) {
+        if (priceInfo.myPrice && prevPriceLog.my_price) {
+          // Both have authentic personalized prices: compare myPrice
+          if (priceInfo.myPrice < prevPriceLog.my_price) {
+            const dropAmount = prevPriceLog.my_price - priceInfo.myPrice;
+            const dropRate = Math.round((dropAmount / prevPriceLog.my_price) * 100);
+            results.priceDropped.push({
+              item,
+              priceInfo,
+              priceType: 'myPrice',
+              prevPrice: prevPriceLog.my_price,
+              currentPrice: priceInfo.myPrice,
+              dropAmount,
+              dropRate,
+              isNewLowest: Boolean(hasNewLowestMyPrice && item.lowest_my_price),
+            });
+          }
+        } else if (priceInfo.salePrice && prevPriceLog.sale_price) {
+          // At least one snapshot lacks authentic myPrice: compare public salePrice
+          if (priceInfo.salePrice < prevPriceLog.sale_price) {
+            const dropAmount = prevPriceLog.sale_price - priceInfo.salePrice;
+            const dropRate = Math.round((dropAmount / prevPriceLog.sale_price) * 100);
+            results.priceDropped.push({
+              item,
+              priceInfo,
+              priceType: 'salePrice',
+              prevPrice: prevPriceLog.sale_price,
+              currentPrice: priceInfo.salePrice,
+              dropAmount,
+              dropRate,
+              isNewLowest: Boolean(hasNewLowestSalePrice && item.lowest_sale_price),
+            });
+          }
         }
       }
 
