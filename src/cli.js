@@ -39,6 +39,18 @@ function parseArgs() {
   return { command, flags, positional };
 }
 
+export function parseConcurrency(val, defaultVal = 4) {
+  if (typeof val === 'boolean' || val === undefined || val === null || val === '') {
+    return defaultVal;
+  }
+  const parsed = Number(val);
+  if (!Number.isFinite(parsed) || isNaN(parsed)) {
+    return defaultVal;
+  }
+  // Clamp strictly between 1 and 5 for rate limit safety
+  return Math.max(1, Math.min(Math.floor(parsed), 5));
+}
+
 export function exportDataForGit() {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -127,11 +139,13 @@ async function handleDailyRun(flags) {
   }
 
   // 2. Collect prices for all active items
-  console.log(`\n🔍 Fetching latest prices & discounts...`);
+  const concurrency = parseConcurrency(flags.concurrency, 4);
+  console.log(`\n🔍 Fetching latest prices & discounts (concurrency: ${concurrency})...`);
   const results = await collectPricesForActiveItems({
+    concurrency,
     onProgress: ({ current, total, item, priceInfo }) => {
       process.stdout.write(
-        `\r  [${current}/${total}] ${item.brand_name} - ${priceInfo.myPrice ? priceInfo.myPrice.toLocaleString() + '원' : '품절'}`.padEnd(60)
+        `\r  [${current}/${total}] ${(item.brand_name || '-').slice(0, 15)} - ${priceInfo.myPrice ? priceInfo.myPrice.toLocaleString() + '원' : '품절'}`.padEnd(65)
       );
     },
   });
@@ -417,10 +431,21 @@ async function main() {
       break;
     }
     case 'track':
-    case 'update':
-      await collectPricesForActiveItems();
+    case 'update': {
+      const concurrency = parseConcurrency(flags.concurrency, 4);
+      console.log(`🔍 Fetching latest prices (concurrency: ${concurrency})...`);
+      await collectPricesForActiveItems({
+        concurrency,
+        onProgress: ({ current, total, item, priceInfo }) => {
+          process.stdout.write(
+            `\r  [${current}/${total}] ${(item.brand_name || '-').slice(0, 15)} - ${priceInfo.myPrice ? priceInfo.myPrice.toLocaleString() + '원' : '품절'}`.padEnd(65)
+          );
+        },
+      });
+      console.log('\n');
       exportDataForGit();
       break;
+    }
     case 'watch':
       await handleWatch(positional);
       break;
@@ -461,9 +486,9 @@ Usage:
   node src/cli.js <command> [options]
 
 Commands:
-  daily [--force]         Run the daily sync & price tracking with daily lock
+  daily [--force] [--concurrency=1-5] Run daily sync & price tracking (default concurrency: 4)
   sync                   Sync liked items from Musinsa account
-  track                  Fetch latest prices for all active tracked items
+  track [--concurrency=1-5]           Fetch latest prices for all active tracked items
   watch <url/goodsNo>    Manually add a product to track
   unwatch <goodsNo>      Untrack a product
   list                   List all tracked items with current & lowest prices
