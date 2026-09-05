@@ -39,8 +39,11 @@ export function buildClotDataPayload(dbOrWrapper, { targetGoodsNo } = {}) {
   const rawItems = itemsStmt.all();
 
   // 2. Fetch price logs scoped only to active and soldout items
+  const cols = rawDb.prepare("PRAGMA table_info(price_logs)").all().map((c) => c.name);
+  const hasEst = cols.includes('estimated_my_price');
+  const estCol = hasEst ? ', estimated_my_price' : '';
   const logsStmt = rawDb.prepare(`
-    SELECT goods_no, date, normal_price, sale_price, my_price, is_sold_out, coupon_name, coupon_discount
+    SELECT goods_no, date, normal_price, sale_price, my_price ${estCol}, is_sold_out, coupon_name, coupon_discount
     FROM price_logs
     WHERE goods_no IN (SELECT goods_no FROM items WHERE status IN ('ACTIVE', 'SOLDOUT'))
     ORDER BY date ASC, id ASC
@@ -58,11 +61,12 @@ export function buildClotDataPayload(dbOrWrapper, { targetGoodsNo } = {}) {
       logsByGoods.set(log.goods_no, arr);
     }
     const defaultCouponName = log.coupon_discount > 0 ? '쿠폰 적용가' : '나의 할인가';
+    const effectiveMyPrice = log.my_price ?? (hasEst ? log.estimated_my_price : null) ?? null;
     arr.push([
       log.date,
       log.normal_price ?? null,
       log.sale_price ?? null,
-      log.my_price ?? null,
+      effectiveMyPrice,
       log.is_sold_out ? 1 : 0,
       log.coupon_name || defaultCouponName,
       log.coupon_discount || 0,

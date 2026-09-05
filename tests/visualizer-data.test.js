@@ -142,6 +142,25 @@ describe('Visualizer Data Extraction', () => {
     assert.equal(payload.lastRun, null);
   });
 
+  test('buildClotDataPayload uses estimated_my_price when my_price is null', () => {
+    const db = setupTestDb();
+    db.exec(`
+      ALTER TABLE price_logs ADD COLUMN estimated_my_price INTEGER;
+    `);
+    const insertLog = db.prepare(`
+      INSERT INTO price_logs (goods_no, date, normal_price, sale_price, my_price, estimated_my_price, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertLog.run(1001, '2026-08-03', 50000, 45000, null, 36000, '2026-08-03T10:00:00Z');
+
+    const payload = buildClotDataPayload(db);
+    const item1 = payload.items.find((it) => it.n === 1001);
+    assert.ok(item1);
+    const log3 = item1.L.find((entry) => entry[0] === '2026-08-03');
+    assert.ok(log3);
+    assert.equal(log3[3], 36000);
+  });
+
   test('buildClotDataPayload throws on invalid db input', () => {
     assert.throws(() => buildClotDataPayload(null), /valid DatabaseSync instance is required/);
     assert.throws(() => buildClotDataPayload({}), /valid DatabaseSync instance is required/);
