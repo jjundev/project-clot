@@ -55,6 +55,11 @@ test('Catalog Discovery Engine & Member Price Estimation', async (t) => {
     // Null or invalid input
     assert.equal(estimateMemberPrice(null), null);
     assert.equal(estimateMemberPrice(0), null);
+    assert.equal(estimateMemberPrice('invalid'), null);
+
+    // Numeric string coercion
+    assert.equal(estimateMemberPrice('50000', true), 50000);
+    assert.equal(estimateMemberPrice('100000', false), 90210);
   });
 
   await t.test('fetchLikeCountsBatch queries Musinsa batch like API', async () => {
@@ -83,6 +88,21 @@ test('Catalog Discovery Engine & Member Price Estimation', async (t) => {
     const likesMap = await fetchLikeCountsBatch([1001, 1002], mockFetch);
     assert.equal(likesMap.get(1001), 2450);
     assert.equal(likesMap.get(1002), 420);
+  });
+
+  await t.test('fetchLikeCountsBatch handles network and HTTP errors gracefully without throwing', async () => {
+    const errorFetch = async () => {
+      throw new Error('ECONNRESET');
+    };
+    const emptyMap1 = await fetchLikeCountsBatch([1001], errorFetch);
+    assert.equal(emptyMap1.size, 0);
+
+    const httpFailFetch = async () => ({
+      ok: false,
+      status: 502,
+    });
+    const emptyMap2 = await fetchLikeCountsBatch([1001], httpFailFetch);
+    assert.equal(emptyMap2.size, 0);
   });
 
   await t.test('fetchCategoryGoodsPage resolves relative nextPageUrl without throwing', async () => {

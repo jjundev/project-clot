@@ -117,7 +117,18 @@ export function formatHotDealsSummary(discoveryItems = []) {
     return '';
   }
 
-  const itemsWithDiscount = discoveryItems.map((item) => {
+  const seen = new Set();
+  const dedupedItems = [];
+  for (const it of discoveryItems) {
+    const key = it.goodsNo || it.goods_no;
+    if (key) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    dedupedItems.push(it);
+  }
+
+  const itemsWithDiscount = dedupedItems.map((item) => {
     const normalPrice = item.normalPrice ?? item.normal_price ?? null;
     const targetPrice =
       item.estimatedMyPrice ??

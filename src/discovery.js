@@ -21,40 +21,47 @@ export function isReleasedWithinYears(imageUrl, years = 2, now = new Date()) {
 }
 
 export function estimateMemberPrice(couponPrice, isRestrictedUsePoint = false, options = {}) {
-  if (!couponPrice || typeof couponPrice !== 'number' || couponPrice <= 0) return null;
-  if (isRestrictedUsePoint) return couponPrice;
+  const price = Number(couponPrice);
+  if (!price || isNaN(price) || price <= 0) return null;
+  if (isRestrictedUsePoint) return price;
 
   const gradeDiscountRate = options.gradeDiscountRate ?? 0.03; // Silver member 3%
   const pointRate = options.pointRate ?? 0.07; // Points 7%
 
-  return Math.round(couponPrice * (1 - gradeDiscountRate) * (1 - pointRate));
+  return Math.round(price * (1 - gradeDiscountRate) * (1 - pointRate));
 }
 
 export async function fetchLikeCountsBatch(goodsNos, fetchFn = fetch) {
   if (!goodsNos || goodsNos.length === 0) return new Map();
 
-  const ids = goodsNos.map(String);
-  const response = await fetchFn('https://like.musinsa.com/like/api/v2/liketypes/goods/counts', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'User-Agent': USER_AGENT,
-      Referer: 'https://www.musinsa.com/',
-    },
-    body: JSON.stringify({ relationIds: ids }),
-  });
+  try {
+    const ids = goodsNos.map(String);
+    const response = await fetchFn('https://like.musinsa.com/like/api/v2/liketypes/goods/counts', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': USER_AGENT,
+        Referer: 'https://www.musinsa.com/',
+      },
+      body: JSON.stringify({ relationIds: ids }),
+    });
 
-  if (!response.ok) {
-    throw new Error(`Failed to fetch batch like counts: HTTP ${response.status}`);
-  }
+    if (!response.ok) {
+      console.warn(`Failed to fetch batch like counts: HTTP ${response.status}`);
+      return new Map();
+    }
 
-  const json = await response.json();
-  const items = json?.data?.contents?.items || [];
-  const map = new Map();
-  for (const item of items) {
-    map.set(Number(item.relationId), item.count ?? 0);
+    const json = await response.json();
+    const items = json?.data?.contents?.items || [];
+    const map = new Map();
+    for (const item of items) {
+      map.set(Number(item.relationId), item.count ?? 0);
+    }
+    return map;
+  } catch (err) {
+    console.warn(`Failed to fetch batch like counts: ${err.message}`);
+    return new Map();
   }
-  return map;
 }
 
 export async function fetchCategoryGoodsPage(categoryCode, pageUrl = null, fetchFn = fetch) {
@@ -95,6 +102,7 @@ export async function fetchCategoryGoodsPage(categoryCode, pageUrl = null, fetch
   const itemsQ = queries.find(
     (q) =>
       (Array.isArray(q.queryKey) && (q.queryKey[0] === categoryCode || q.queryKey.includes(categoryCode))) ||
+      (q.queryKey != null && JSON.stringify(q.queryKey).includes(String(categoryCode))) ||
       Boolean(q.state?.data?.pages?.[0]?.data?.list)
   );
 

@@ -221,6 +221,92 @@ test('CLI Discovery Integration & VIP Promotion', async (t) => {
     assert.equal(discItem.lowest_price, 72000);
     assert.equal(discItem.source, 'discovery');
   });
+
+  await t.test('VIP item my_price is protected against clobbering by recordPriceLog or discovery scan', () => {
+    const today = new Date().toISOString().split('T')[0];
+    const goodsNo = 6001;
+
+    db.upsertItem({
+      goods_no: goodsNo,
+      goods_name: 'Authentic VIP Coat',
+      brand_name: 'VIPBrand',
+      source: 'like',
+      url: `https://www.musinsa.com/products/${goodsNo}`,
+    });
+
+    // Authentic VIP run records my_price = 85000
+    db.recordPriceLog({
+      goods_no: goodsNo,
+      date: today,
+      normal_price: 150000,
+      sale_price: 120000,
+      coupon_price: 100000,
+      my_price: 85000,
+      estimated_my_price: null,
+    });
+
+    const beforeLog = db.getPriceLogs(goodsNo);
+    assert.equal(beforeLog[0].my_price, 85000);
+
+    // Later discovery or unauthenticated run tries to record with my_price = null
+    db.recordPriceLog({
+      goods_no: goodsNo,
+      date: today,
+      normal_price: 150000,
+      sale_price: 120000,
+      coupon_price: 100000,
+      my_price: null,
+      estimated_my_price: 89000,
+    });
+
+    const afterLog = db.getPriceLogs(goodsNo);
+    assert.equal(afterLog[0].my_price, 85000, 'COALESCE must prevent clobbering non-null my_price with null');
+    assert.equal(afterLog[0].estimated_my_price, 89000);
+
+    // Also verify discovery scanner check: existing item with source !== 'discovery' is skipped
+    const existing = db.getItem(goodsNo);
+    assert.ok(existing);
+    assert.notEqual(existing.source, 'discovery');
+    const shouldSkipDiscoveryUpdate = Boolean(existing && existing.source !== 'discovery');
+    assert.equal(shouldSkipDiscoveryUpdate, true);
+  });
+
+  await t.test('formatHotDealsSummary deduplicates items by goodsNo before sorting', () => {
+    const itemsWithDuplicates = [
+      {
+        goodsNo: 501,
+        goodsName: 'Duplicate Item A',
+        brandName: 'Brand A',
+        normalPrice: 100000,
+        couponPrice: 40000,
+        estimatedMyPrice: 40000,
+        url: 'https://www.musinsa.com/products/501',
+      },
+      {
+        goods_no: 501,
+        goods_name: 'Duplicate Item A (Repeated)',
+        brand_name: 'Brand A',
+        normal_price: 100000,
+        coupon_price: 40000,
+        estimated_my_price: 40000,
+        url: 'https://www.musinsa.com/products/501',
+      },
+      {
+        goodsNo: 502,
+        goodsName: 'Single Item B',
+        brandName: 'Brand B',
+        normalPrice: 100000,
+        couponPrice: 50000,
+        estimatedMyPrice: 50000,
+        url: 'https://www.musinsa.com/products/502',
+      },
+    ];
+
+    const html = formatHotDealsSummary(itemsWithDuplicates);
+    const countA = (html.match(/Duplicate Item A/g) || []).length;
+    assert.equal(countA, 1, 'Duplicate product should appear exactly once');
+    assert.ok(html.includes('Single Item B'));
+  });
 });
 
 

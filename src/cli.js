@@ -167,6 +167,11 @@ export async function handleDiscover(flags = {}, dbInstance = db) {
           newlyIngestedCount++;
         }
 
+        if (existing && existing.source !== 'discovery') {
+          // Do not overwrite price_logs for VIP items during discovery scan
+          continue;
+        }
+
         dbInstance.upsertItem({
           goods_no: item.goodsNo,
           goods_name: item.goodsName,
@@ -619,9 +624,12 @@ async function main() {
           console.log(`상품 ${singleTarget}을(를) 추적 목록에 추가합니다.`);
           await handleWatch([String(singleTarget)]);
           break;
+        } else if (existing && existing.source !== 'discovery') {
+          console.log(`ℹ️ 상품 ${singleTarget}은(는) 이미 VIP 관심 상품 목록에 등록되어 있습니다.`);
+          break;
         }
       }
-      // If no single target or item is already VIP, proceed to batch price collection across active items
+      // If no single target, proceed to batch price collection across active items
       const concurrency = parseConcurrency(flags.concurrency, 3);
       console.log(`🔍 Fetching latest prices (concurrency: ${concurrency})...`);
       const results = await collectPricesForActiveItems({

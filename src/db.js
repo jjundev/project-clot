@@ -76,15 +76,27 @@ export class ClotDatabase {
     // Migration check for existing databases
     const priceLogsCols = this.db.prepare("PRAGMA table_info(price_logs)").all().map((c) => c.name);
     if (!priceLogsCols.includes('coupon_price')) {
-      this.db.exec("ALTER TABLE price_logs ADD COLUMN coupon_price INTEGER;");
+      try {
+        this.db.exec("ALTER TABLE price_logs ADD COLUMN coupon_price INTEGER;");
+      } catch (e) {
+        if (!e.message.includes('duplicate column name')) throw e;
+      }
     }
     if (!priceLogsCols.includes('estimated_my_price')) {
-      this.db.exec("ALTER TABLE price_logs ADD COLUMN estimated_my_price INTEGER;");
+      try {
+        this.db.exec("ALTER TABLE price_logs ADD COLUMN estimated_my_price INTEGER;");
+      } catch (e) {
+        if (!e.message.includes('duplicate column name')) throw e;
+      }
     }
 
     const itemsCols = this.db.prepare("PRAGMA table_info(items)").all().map((c) => c.name);
     if (!itemsCols.includes('lowest_estimated_price')) {
-      this.db.exec("ALTER TABLE items ADD COLUMN lowest_estimated_price INTEGER;");
+      try {
+        this.db.exec("ALTER TABLE items ADD COLUMN lowest_estimated_price INTEGER;");
+      } catch (e) {
+        if (!e.message.includes('duplicate column name')) throw e;
+      }
     }
   }
 
@@ -245,7 +257,7 @@ export class ClotDatabase {
           sale_price = ?,
           coupon_price = ?,
           sale_rate = ?,
-          my_price = ?,
+          my_price = COALESCE(?, my_price),
           estimated_my_price = ?,
           coupon_name = ?,
           coupon_discount = ?,
