@@ -21,17 +21,27 @@ const PLIST_NAME = 'com.musinsa.price-tracker.plist';
 const LAUNCH_AGENTS_DIR = path.join(os.homedir(), 'Library/LaunchAgents');
 const PLIST_TARGET = path.join(LAUNCH_AGENTS_DIR, PLIST_NAME);
 
-function parseArgs() {
-  const args = process.argv.slice(2);
+export function parseArgs(rawArgs = process.argv.slice(2)) {
+  const args = Array.isArray(rawArgs) ? rawArgs : [];
   const command = args[0] || 'help';
   const flags = {};
   const positional = [];
+  const BOOLEAN_FLAGS = new Set(['force', 'with-discovery', 'no-open', 'help']);
 
   for (let i = 1; i < args.length; i++) {
     const a = args[i];
     if (a.startsWith('--')) {
-      const parts = a.slice(2).split('=');
-      flags[parts[0]] = parts[1] !== undefined ? parts[1] : true;
+      if (a.includes('=')) {
+        const parts = a.slice(2).split('=');
+        flags[parts[0]] = parts.slice(1).join('=');
+      } else {
+        const key = a.slice(2);
+        if (!BOOLEAN_FLAGS.has(key) && i + 1 < args.length && !args[i + 1].startsWith('--')) {
+          flags[key] = args[++i];
+        } else {
+          flags[key] = true;
+        }
+      }
     } else {
       positional.push(a);
     }
@@ -39,6 +49,7 @@ function parseArgs() {
 
   return { command, flags, positional };
 }
+
 
 export function parseConcurrency(val, defaultVal = 3) {
   if (typeof val === 'boolean' || val === undefined || val === null || val === '') {
@@ -52,12 +63,12 @@ export function parseConcurrency(val, defaultVal = 3) {
   return Math.max(1, Math.min(Math.floor(parsed), 5));
 }
 
-export function exportDataForGit() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+export function exportDataForGit({ dbInstance = db, dataDir = DATA_DIR } = {}) {
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
   }
 
-  const items = db.getAllItems();
+  const items = dbInstance.getAllItems();
   const summary = {
     updated_at: new Date().toISOString(),
     total_items: items.length,
@@ -65,7 +76,7 @@ export function exportDataForGit() {
     soldout_items: items.filter((it) => it.status === 'SOLDOUT').length,
     unliked_items: items.filter((it) => it.status === 'UNLIKED').length,
     items: items.map((it) => {
-      const latest = db.getLatestPrice(it.goods_no);
+      const latest = dbInstance.getLatestPrice(it.goods_no);
       const tag = it.source === 'discovery' ? '[탐색]' : '[VIP]';
       const cleanName = (it.goods_name || '').replace(/^\[(VIP|탐색)\]\s*/, '');
       return {
@@ -84,10 +95,11 @@ export function exportDataForGit() {
     }),
   };
 
-  const jsonPath = path.join(DATA_DIR, 'latest_prices.json');
+  const jsonPath = path.join(dataDir, 'latest_prices.json');
   fs.writeFileSync(jsonPath, JSON.stringify(summary, null, 2), 'utf-8');
   return jsonPath;
 }
+
 
 function tryGitAutoCommit() {
   try {
@@ -120,11 +132,11 @@ function tryGitAutoCommit() {
 }
 
 export async function handleDiscover(flags = {}, dbInstance = db) {
+  const limit = (typeof flags.limit === 'string' || typeof flags.limit === 'number') ? Number(flags.limit) : 100;
+  const minLikes = (typeof flags['min-likes'] === 'string' || typeof flags['min-likes'] === 'number') ? Number(flags['min-likes']) : 1000;
+  const years = (typeof flags.years === 'string' || typeof flags.years === 'number') ? Number(flags.years) : 2;
   const categoryRaw = typeof flags.category === 'string' ? flags.category : '001,002,003,007,008';
   const categories = categoryRaw.split(',').map((c) => c.trim()).filter(Boolean);
-  const limit = flags.limit ? Number(flags.limit) : 100;
-  const minLikes = flags['min-likes'] ? Number(flags['min-likes']) : (flags.minLikes ? Number(flags.minLikes) : 1000);
-  const years = flags.years ? Number(flags.years) : 2;
 
   console.log(`\n========================================`);
   console.log(`🔍 [Project-Clot] Discovering Category Goods`);
@@ -235,7 +247,7 @@ export async function handleDiscover(flags = {}, dbInstance = db) {
   console.log(`  • Estimated Price Range: ${priceRangeStr}`);
   console.log(`========================================\n`);
 
-  exportDataForGit();
+  exportDataForGit({ dbInstance });
   return allDiscovered;
 }
 

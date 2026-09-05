@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { ClotDatabase } from '../src/db.js';
 import { formatHotDealsSummary } from '../src/notifier.js';
 import { syncLikedItemsFromMusinsa } from '../src/sync.js';
+import { parseArgs, exportDataForGit } from '../src/cli.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -17,6 +18,20 @@ test('CLI Discovery Integration & VIP Promotion', async (t) => {
       db.close();
       fs.rmSync(tempDir, { recursive: true, force: true });
     } catch {}
+  });
+
+  await t.test('parseArgs parses space-separated flags and boolean flags', () => {
+    const res1 = parseArgs(['discover', '--limit', '50', '--category', '001', '--min-likes', '500']);
+    assert.equal(res1.command, 'discover');
+    assert.equal(res1.flags.limit, '50');
+    assert.equal(res1.flags.category, '001');
+    assert.equal(res1.flags['min-likes'], '500');
+
+    const res2 = parseArgs(['daily', '--with-discovery', '--force', '--concurrency=4']);
+    assert.equal(res2.command, 'daily');
+    assert.equal(res2.flags['with-discovery'], true);
+    assert.equal(res2.flags.force, true);
+    assert.equal(res2.flags.concurrency, '4');
   });
 
   await t.test('track command promotes discovery item to like', () => {
@@ -167,7 +182,7 @@ test('CLI Discovery Integration & VIP Promotion', async (t) => {
     assert.equal(promoted.source, 'like');
   });
 
-  await t.test('exportDataForGit correctly tags items with [VIP] and [탐색] and lowest estimated price', () => {
+  await t.test('exportDataForGit correctly tags items with [VIP] and [탐색] and writes latest_prices.json', () => {
     db.upsertItem({
       goods_no: 9001,
       goods_name: 'VIP Denim',
@@ -186,17 +201,26 @@ test('CLI Discovery Integration & VIP Promotion', async (t) => {
     });
     db.updateLowestEstimatedPrice(9002, 72000, '2026-09-05');
 
-    const items = db.getAllItems();
-    const vip = items.find((it) => it.goods_no === 9001);
-    const disc = items.find((it) => it.goods_no === 9002);
+    const exportedPath = exportDataForGit({ dbInstance: db, dataDir: tempDir });
+    assert.equal(exportedPath, path.join(tempDir, 'latest_prices.json'));
+    assert.ok(fs.existsSync(exportedPath));
 
-    const tagVip = vip.source === 'discovery' ? '[탐색]' : '[VIP]';
-    const tagDisc = disc.source === 'discovery' ? '[탐색]' : '[VIP]';
+    const content = JSON.parse(fs.readFileSync(exportedPath, 'utf-8'));
+    assert.ok(content.items.length >= 2);
 
-    assert.equal(tagVip, '[VIP]');
-    assert.equal(tagDisc, '[탐색]');
-    assert.equal(disc.lowest_estimated_price, 72000);
-    assert.equal(vip.lowest_my_price, 45000);
+    const vipItem = content.items.find((it) => it.goods_no === 9001);
+    const discItem = content.items.find((it) => it.goods_no === 9002);
+
+    assert.ok(vipItem);
+    assert.equal(vipItem.goods_name, '[VIP] VIP Denim');
+    assert.equal(vipItem.lowest_price, 45000);
+    assert.equal(vipItem.source, 'like');
+
+    assert.ok(discItem);
+    assert.equal(discItem.goods_name, '[탐색] Discovery Blazer');
+    assert.equal(discItem.lowest_price, 72000);
+    assert.equal(discItem.source, 'discovery');
   });
 });
+
 
