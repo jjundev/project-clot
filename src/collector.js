@@ -1,6 +1,7 @@
 import { db } from './db.js';
 import { execSync } from 'node:child_process';
 import { getExecOptions } from './env.js';
+import { mapConcurrent } from './pool.js';
 
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
@@ -109,10 +110,15 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
 }
 
 export async function collectPricesForActiveItems({
-  delayMs = 500,
+  concurrency = 4,
+  delayMs = 100,
   onProgress = null,
+  openCliTimeoutMs = 15000,
+  dbInstance = db,
+  execFn = execSync,
+  fetchFn = fetchProductPriceInfo,
 } = {}) {
-  const activeItems = db.getActiveItems();
+  const activeItems = dbInstance.getActiveItems();
   const today = new Date().toISOString().split('T')[0];
 
   const results = {
@@ -129,20 +135,29 @@ export async function collectPricesForActiveItems({
 
   const startTime = Date.now();
 
-  // Try batching via OpenCLI my-prices first for true "나의 할인가"
+  // Try batching via OpenCLI my-prices first with Circuit Breaker
   let openCliPriceMap = new Map();
   const goodsNos = activeItems.map((it) => it.goods_no);
+  let consecutiveOpenCliErrors = 0;
+
   for (let i = 0; i < goodsNos.length; i += 4) {
+    if (consecutiveOpenCliErrors >= 2) {
+      console.warn(
+        `⚡ [OpenCLI CircuitBreaker] 2 consecutive OpenCLI batch failures/timeouts. Skipping remaining ${goodsNos.length - i} items and proceeding to fast direct parser.`
+      );
+      break;
+    }
+
     const chunk = goodsNos.slice(i, i + 4).join(',');
     try {
-      const raw = execSync(
+      const raw = execFn(
         `opencli musinsa my-prices "${chunk}" -f json`,
         getExecOptions({
           encoding: 'utf-8',
-          timeout: 45000,
+          timeout: openCliTimeoutMs,
         })
       );
-      const jsonStart = raw.indexOf('[');
+      const jsonStart = raw ? raw.indexOf('[') : -1;
       if (jsonStart !== -1) {
         const list = JSON.parse(raw.slice(jsonStart));
         for (const it of list) {
@@ -154,14 +169,21 @@ export async function collectPricesForActiveItems({
             isSoldOut: it.status === '품절',
           });
         }
+        consecutiveOpenCliErrors = 0; // reset on success
+      } else {
+        consecutiveOpenCliErrors++;
+        console.warn(`[OpenCLI Notice] Browser bridge returned non-JSON output (${consecutiveOpenCliErrors}/2).`);
       }
     } catch (err) {
-      console.warn(`[OpenCLI Notice] Browser bridge batch fallback to direct parser: ${err.message}`);
+      consecutiveOpenCliErrors++;
+      console.warn(`[OpenCLI Notice] Browser bridge batch error (${consecutiveOpenCliErrors}/2): ${err.message}`);
     }
   }
 
-  for (let i = 0; i < activeItems.length; i++) {
-    const item = activeItems[i];
+  let completedCount = 0;
+  const orderedItems = new Array(activeItems.length);
+
+  await mapConcurrent(activeItems, concurrency, async (item, itemIndex) => {
     try {
       let priceInfo;
       const liveData = openCliPriceMap.get(item.goods_no);
@@ -181,28 +203,32 @@ export async function collectPricesForActiveItems({
           discontinued: false,
         };
       } else {
-        priceInfo = await fetchProductPriceInfo(item.goods_no);
+        priceInfo = await fetchFn(item.goods_no);
       }
 
       if (priceInfo.discontinued) {
-        db.updateItemStatus(item.goods_no, 'DISCONTINUED');
+        dbInstance.updateItemStatus(item.goods_no, 'DISCONTINUED');
         results.discontinued.push(item);
-        continue;
+        completedCount++;
+        if (onProgress) {
+          onProgress({ current: completedCount, total: activeItems.length, item, priceInfo });
+        }
+        return;
       }
 
       if (priceInfo.goodsName) {
-        db.updateItemDetails(item.goods_no, priceInfo.goodsName, priceInfo.brandName, priceInfo.imageUrl || item.image_url);
+        dbInstance.updateItemDetails(item.goods_no, priceInfo.goodsName, priceInfo.brandName, priceInfo.imageUrl || item.image_url);
       }
 
       // Check status changes (Restock / Soldout)
-      const prevPriceLog = db.getLatestPrice(item.goods_no);
+      const prevPriceLog = dbInstance.getLatestPrice(item.goods_no);
       const wasSoldOut = prevPriceLog ? Boolean(prevPriceLog.is_sold_out) : item.status === 'SOLDOUT';
 
       if (wasSoldOut && !priceInfo.isSoldOut) {
-        db.updateItemStatus(item.goods_no, 'ACTIVE');
+        dbInstance.updateItemStatus(item.goods_no, 'ACTIVE');
         results.restocked.push({ item, priceInfo });
       } else if (!wasSoldOut && priceInfo.isSoldOut) {
-        db.updateItemStatus(item.goods_no, 'SOLDOUT');
+        dbInstance.updateItemStatus(item.goods_no, 'SOLDOUT');
         results.newlySoldOut.push({ item, priceInfo });
       }
 
@@ -215,7 +241,7 @@ export async function collectPricesForActiveItems({
         lowestMyPrice = priceInfo.myPrice;
         lowestSalePrice = priceInfo.salePrice;
         isNewLowest = Boolean(item.lowest_my_price);
-        db.updateLowestPrice(item.goods_no, lowestMyPrice, lowestSalePrice, today);
+        dbInstance.updateLowestPrice(item.goods_no, lowestMyPrice, lowestSalePrice, today);
       }
 
       // Check for price drop compared to previous log
@@ -236,7 +262,7 @@ export async function collectPricesForActiveItems({
       }
 
       // Record in price_logs
-      db.recordPriceLog({
+      dbInstance.recordPriceLog({
         goods_no: item.goods_no,
         date: today,
         normal_price: priceInfo.normalPrice,
@@ -250,11 +276,12 @@ export async function collectPricesForActiveItems({
       });
 
       results.success++;
-      results.items.push(priceInfo);
+      orderedItems[itemIndex] = priceInfo;
 
+      completedCount++;
       if (onProgress) {
         onProgress({
-          current: i + 1,
+          current: completedCount,
           total: activeItems.length,
           item,
           priceInfo,
@@ -266,14 +293,18 @@ export async function collectPricesForActiveItems({
       }
     } catch (err) {
       results.failed++;
+      completedCount++;
       console.error(`\n[Error] Failed to collect price for ${item.goods_no} (${item.goods_name}):`, err.message);
     }
-  }
+  });
+
+  // Preserve index correlation in results.items
+  results.items = orderedItems.filter(Boolean);
 
   const durationMs = Date.now() - startTime;
   results.durationMs = durationMs;
 
-  db.recordDailyRun({
+  dbInstance.recordDailyRun({
     date: today,
     total_tracked: results.success,
     price_dropped_count: results.priceDropped.length,
