@@ -238,4 +238,245 @@ describe('Parallel Collector & Circuit Breaker', () => {
     assert.equal(results.items[0].myPrice, null);
     assert.equal(results.items[0].salePrice, 45000);
   });
+
+  test('fetchProductPriceInfo returns estimatedMyPrice based on couponPrice and points rule without live network', async () => {
+    const mockNextData = {
+      props: {
+        pageProps: {
+          dehydratedState: {
+            queries: [
+              {
+                queryKey: ['Detail', 999999],
+                state: {
+                  data: {
+                    data: {
+                      goodsNm: 'Test Jacket',
+                      brand: 'Test Brand',
+                      isRestictedUsePoint: false,
+                      goodsPrice: {
+                        normalPrice: 100000,
+                        salePrice: 80000,
+                        couponPrice: 70000,
+                        finalPrice: 70000,
+                        finalDiscount: 30,
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      text: async () => `<script id="__NEXT_DATA__">${JSON.stringify(mockNextData)}</script>`,
+    });
+
+    try {
+      const info = await fetchProductPriceInfo(999999);
+      assert.equal(info.couponPrice, 70000);
+      assert.equal(info.estimatedMyPrice, 63147); // 70,000 * 0.9021 = 63,147
+      assert.equal(info.myPrice, null);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('collectPricesForActiveItems strictly restricts OpenCLI batching to VIP items (source="like")', async () => {
+    const mixedItems = [
+      { goods_no: 101, goods_name: 'VIP Item', source: 'like', status: 'ACTIVE' },
+      { goods_no: 201, goods_name: 'Discovered Item', source: 'discovery', status: 'ACTIVE' },
+    ];
+
+    const mockDb = {
+      getActiveItems: () => mixedItems,
+      getItem: (id) => mixedItems.find((it) => it.goods_no === id),
+      getLatestPrice: () => null,
+      updateItemDetails: () => {},
+      updateItemStatus: () => {},
+      updateLowestPrice: () => {},
+      updateLowestEstimatedPrice: () => {},
+      recordPriceLog: () => {},
+      recordDailyRun: () => {},
+    };
+
+    const executedCommands = [];
+    const mockExec = (cmd) => {
+      executedCommands.push(cmd);
+      return JSON.stringify([{ goodsNo: 101, myPrice: 18000 }]);
+    };
+
+    const mockFetch = async (goodsNo) => ({
+      goodsNo,
+      goodsName: 'Product',
+      brandName: 'Brand',
+      normalPrice: 20000,
+      salePrice: 20000,
+      couponPrice: 20000,
+      estimatedMyPrice: 18042,
+      myPrice: null,
+      isSoldOut: false,
+      discontinued: false,
+    });
+
+    const results = await collectPricesForActiveItems({
+      concurrency: 1,
+      delayMs: 0,
+      dbInstance: mockDb,
+      execFn: mockExec,
+      fetchFn: mockFetch,
+    });
+
+    assert.equal(results.items.length, 2);
+    // OpenCLI command must ONLY contain VIP goodsNo 101, NOT 201!
+    assert.equal(executedCommands.length, 1);
+    assert.ok(executedCommands[0].includes('101'));
+    assert.ok(!executedCommands[0].includes('201'), 'Discovery items must not be passed to OpenCLI');
+  });
+
+  test('collectPricesForActiveItems detects like-for-like estimated price drop and updates lowest estimated price', async () => {
+    const discoveryItem = {
+      goods_no: 301,
+      goods_name: 'Discovered Pants',
+      source: 'discovery',
+      status: 'ACTIVE',
+      lowest_estimated_price: 50000,
+    };
+
+    const lowestEstUpdates = [];
+    const recordedLogs = [];
+
+    const mockDb = {
+      getActiveItems: () => [discoveryItem],
+      getItem: () => discoveryItem,
+      getLatestPrice: () => ({
+        goods_no: 301,
+        date: '2026-09-04',
+        sale_price: 60000,
+        coupon_price: 55000,
+        estimated_my_price: 49616,
+        is_sold_out: 0,
+      }),
+      updateItemDetails: () => {},
+      updateItemStatus: () => {},
+      updateLowestPrice: () => {},
+      updateLowestEstimatedPrice: (id, price, date) => {
+        lowestEstUpdates.push({ id, price, date });
+      },
+      recordPriceLog: (log) => {
+        recordedLogs.push(log);
+      },
+      recordDailyRun: () => {},
+    };
+
+    const mockFetch = async (goodsNo) => ({
+      goodsNo,
+      goodsName: 'Discovered Pants',
+      brandName: 'Brand',
+      normalPrice: 70000,
+      salePrice: 50000,
+      couponPrice: 45000,
+      estimatedMyPrice: 40595, // 45000 * 0.9021 = 40595
+      myPrice: null,
+      isSoldOut: false,
+      discontinued: false,
+    });
+
+    const results = await collectPricesForActiveItems({
+      concurrency: 1,
+      delayMs: 0,
+      dbInstance: mockDb,
+      fetchFn: mockFetch,
+    });
+
+    assert.equal(results.priceDropped.length, 1);
+    const drop = results.priceDropped[0];
+    assert.equal(drop.priceType, 'estimated');
+    assert.equal(drop.prevPrice, 49616);
+    assert.equal(drop.currentPrice, 40595);
+    assert.equal(drop.dropAmount, 49616 - 40595);
+    assert.equal(drop.dropRate, Math.round(((49616 - 40595) / 49616) * 100));
+    assert.equal(drop.isNewLowest, true);
+
+    assert.equal(lowestEstUpdates.length, 1);
+    assert.equal(lowestEstUpdates[0].id, 301);
+    assert.equal(lowestEstUpdates[0].price, 40595);
+
+    assert.equal(recordedLogs.length, 1);
+    assert.equal(recordedLogs[0].coupon_price, 45000);
+    assert.equal(recordedLogs[0].estimated_my_price, 40595);
+  });
+
+  test('collectPricesForActiveItems respects source and items filtering options', async () => {
+    const vipItem = { goods_no: 101, goods_name: 'VIP', source: 'like', status: 'ACTIVE' };
+    const discItem = { goods_no: 201, goods_name: 'Disc', source: 'discovery', status: 'ACTIVE' };
+
+    const mockDb = {
+      getActiveItems: () => [vipItem, discItem],
+      getActiveVipItems: () => [vipItem],
+      getDiscoveredActiveItems: () => [discItem],
+      getItem: (id) => (id === 101 ? vipItem : discItem),
+      getLatestPrice: () => null,
+      updateItemDetails: () => {},
+      updateItemStatus: () => {},
+      updateLowestPrice: () => {},
+      updateLowestEstimatedPrice: () => {},
+      recordPriceLog: () => {},
+      recordDailyRun: () => {},
+    };
+
+    const mockFetch = async (goodsNo) => ({
+      goodsNo,
+      goodsName: 'Product',
+      salePrice: 10000,
+      couponPrice: 9000,
+      estimatedMyPrice: 8119,
+      myPrice: null,
+      isSoldOut: false,
+      discontinued: false,
+    });
+
+    const mockExec = () => '[]';
+
+    // 1. source: 'discovery'
+    const discResults = await collectPricesForActiveItems({
+      concurrency: 1,
+      delayMs: 0,
+      source: 'discovery',
+      dbInstance: mockDb,
+      execFn: mockExec,
+      fetchFn: mockFetch,
+    });
+    assert.equal(discResults.items.length, 1);
+    assert.equal(discResults.items[0].goodsNo, 201);
+
+    // 2. source: 'like'
+    const likeResults = await collectPricesForActiveItems({
+      concurrency: 1,
+      delayMs: 0,
+      source: 'like',
+      dbInstance: mockDb,
+      execFn: mockExec,
+      fetchFn: mockFetch,
+    });
+    assert.equal(likeResults.items.length, 1);
+    assert.equal(likeResults.items[0].goodsNo, 101);
+
+    // 3. items array passed directly
+    const directResults = await collectPricesForActiveItems({
+      concurrency: 1,
+      delayMs: 0,
+      items: [discItem],
+      dbInstance: mockDb,
+      execFn: mockExec,
+      fetchFn: mockFetch,
+    });
+    assert.equal(directResults.items.length, 1);
+    assert.equal(directResults.items[0].goodsNo, 201);
+  });
 });

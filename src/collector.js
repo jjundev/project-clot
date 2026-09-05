@@ -2,6 +2,7 @@ import { db } from './db.js';
 import { execSync } from 'node:child_process';
 import { getExecOptions } from './env.js';
 import { mapConcurrent } from './pool.js';
+import { estimateMemberPrice } from './discovery.js';
 
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
@@ -66,6 +67,8 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
           couponPrice: null,
           saleRate: null,
           myPrice: null,
+          estimatedMyPrice: null,
+          isRestrictedUsePoint: false,
           isSoldOut: false,
         };
       }
@@ -77,6 +80,8 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
       const finalPrice = gp.finalPrice ?? couponPrice ?? salePrice;
       const finalDiscount = gp.finalDiscount ?? gp.discountRate ?? 0;
       const isSoldOut = Boolean(detail.isSoldOut || detail.goodsSaleType === 'SOLDOUT');
+      const isRestrictedUsePoint = Boolean(detail.isRestrictedUsePoint ?? detail.isRestictedUsePoint);
+      const estimatedMyPrice = estimateMemberPrice(couponPrice, isRestrictedUsePoint);
 
       let couponDiscount = 0;
       let couponName = '';
@@ -98,6 +103,8 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
         couponPrice,
         saleRate: finalDiscount,
         myPrice: null, // Public unauthenticated fetch cannot know member discount
+        estimatedMyPrice,
+        isRestrictedUsePoint,
         couponName,
         couponDiscount,
         isSoldOut,
@@ -121,8 +128,20 @@ export async function collectPricesForActiveItems({
   dbInstance = db,
   execFn = execSync,
   fetchFn = fetchProductPriceInfo,
+  items = null,
+  source = null,
 } = {}) {
-  const activeItems = dbInstance.getActiveItems();
+  let activeItems;
+  if (items) {
+    activeItems = items;
+  } else if (source === 'discovery') {
+    activeItems = dbInstance.getDiscoveredActiveItems ? dbInstance.getDiscoveredActiveItems() : [];
+  } else if (source === 'like') {
+    activeItems = dbInstance.getActiveVipItems ? dbInstance.getActiveVipItems() : [];
+  } else {
+    activeItems = dbInstance.getActiveItems();
+  }
+
   const today = new Date().toISOString().split('T')[0];
 
   const results = {
@@ -139,20 +158,21 @@ export async function collectPricesForActiveItems({
 
   const startTime = Date.now();
 
-  // Try batching via OpenCLI my-prices first with Circuit Breaker
+  // Try batching via OpenCLI my-prices first with Circuit Breaker (strictly VIP items)
   let openCliPriceMap = new Map();
-  const goodsNos = activeItems.map((it) => it.goods_no);
+  const vipItems = activeItems.filter((it) => it.source !== 'discovery');
+  const vipGoodsNos = vipItems.map((it) => it.goods_no);
   let consecutiveOpenCliErrors = 0;
 
-  for (let i = 0; i < goodsNos.length; i += openCliChunkSize) {
+  for (let i = 0; i < vipGoodsNos.length; i += openCliChunkSize) {
     if (consecutiveOpenCliErrors >= 2) {
       console.warn(
-        `⚡ [OpenCLI CircuitBreaker] 2 consecutive OpenCLI batch failures/timeouts. Skipping remaining ${goodsNos.length - i} items and proceeding to fast direct parser.`
+        `⚡ [OpenCLI CircuitBreaker] 2 consecutive OpenCLI batch failures/timeouts. Skipping remaining ${vipGoodsNos.length - i} items and proceeding to fast direct parser.`
       );
       break;
     }
 
-    const chunk = goodsNos.slice(i, i + openCliChunkSize).join(',');
+    const chunk = vipGoodsNos.slice(i, i + openCliChunkSize).join(',');
     try {
       const raw = execFn(
         `opencli musinsa my-prices "${chunk}" -f json`,
@@ -201,6 +221,7 @@ export async function collectPricesForActiveItems({
           salePrice: liveData.salePrice,
           couponPrice: liveData.couponPrice,
           myPrice: liveData.myPrice,
+          estimatedMyPrice: liveData.couponPrice ? estimateMemberPrice(liveData.couponPrice, false) : null,
           couponName: '나의 할인가',
           couponDiscount: liveData.couponPrice && liveData.salePrice ? liveData.salePrice - liveData.couponPrice : 0,
           isSoldOut: liveData.isSoldOut,
@@ -236,12 +257,17 @@ export async function collectPricesForActiveItems({
         results.newlySoldOut.push({ item, priceInfo });
       }
 
-      // Update lowest price tracking: only update lowest_my_price if authentic myPrice is available
+      // Lowest price tracking for both VIP and discovery catalog items (executed BEFORE price drop check)
       let lowestMyPrice = item.lowest_my_price;
       let lowestSalePrice = item.lowest_sale_price;
 
       const hasNewLowestMyPrice = Boolean(priceInfo.myPrice && (!lowestMyPrice || priceInfo.myPrice < lowestMyPrice));
-      const hasNewLowestSalePrice = Boolean(priceInfo.salePrice && (!lowestSalePrice || priceInfo.salePrice < lowestSalePrice));
+      const hasNewLowestSalePrice = Boolean(!priceInfo.myPrice && priceInfo.salePrice && (!lowestSalePrice || priceInfo.salePrice < lowestSalePrice));
+      const hasNewLowestEstimated = Boolean(
+        item.source === 'discovery' &&
+        priceInfo.estimatedMyPrice &&
+        (!item.lowest_estimated_price || priceInfo.estimatedMyPrice < item.lowest_estimated_price)
+      );
 
       if (hasNewLowestMyPrice || hasNewLowestSalePrice) {
         if (hasNewLowestMyPrice) {
@@ -252,10 +278,30 @@ export async function collectPricesForActiveItems({
         }
         dbInstance.updateLowestPrice(item.goods_no, lowestMyPrice, lowestSalePrice, today);
       }
+      if (hasNewLowestEstimated && dbInstance.updateLowestEstimatedPrice) {
+        dbInstance.updateLowestEstimatedPrice(item.goods_no, priceInfo.estimatedMyPrice, today);
+      }
 
       // Check for price drop: compare like-for-like
       if (prevPriceLog) {
-        if (priceInfo.myPrice && prevPriceLog.my_price) {
+        if (item.source === 'discovery') {
+          // Like-for-like comparison for estimated prices
+          const prevEst = prevPriceLog.estimated_my_price;
+          if (prevEst && priceInfo.estimatedMyPrice && priceInfo.estimatedMyPrice < prevEst) {
+            const dropAmount = prevEst - priceInfo.estimatedMyPrice;
+            const dropRate = Math.round((dropAmount / prevEst) * 100);
+            results.priceDropped.push({
+              item,
+              priceInfo,
+              priceType: 'estimated',
+              prevPrice: prevEst,
+              currentPrice: priceInfo.estimatedMyPrice,
+              dropAmount,
+              dropRate,
+              isNewLowest: Boolean(hasNewLowestEstimated && item.lowest_estimated_price),
+            });
+          }
+        } else if (priceInfo.myPrice && prevPriceLog.my_price) {
           // Both have authentic personalized prices: compare myPrice
           if (priceInfo.myPrice < prevPriceLog.my_price) {
             const dropAmount = prevPriceLog.my_price - priceInfo.myPrice;
@@ -296,11 +342,14 @@ export async function collectPricesForActiveItems({
         date: today,
         normal_price: priceInfo.normalPrice,
         sale_price: priceInfo.salePrice,
+        coupon_price: priceInfo.couponPrice,
         sale_rate: priceInfo.saleRate || 0,
         my_price: priceInfo.myPrice,
+        estimated_my_price: priceInfo.estimatedMyPrice,
         coupon_name: priceInfo.couponName,
         coupon_discount: priceInfo.couponDiscount,
         member_discount: 0,
+        point_discount: 0,
         is_sold_out: priceInfo.isSoldOut,
       });
 
