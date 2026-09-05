@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { parseConcurrency } from '../src/cli.js';
 
 describe('CLI Concurrency Parser', () => {
-  test('returns default 4 when undefined or null', () => {
-    assert.equal(parseConcurrency(undefined), 4);
-    assert.equal(parseConcurrency(null), 4);
+  test('returns default 3 when undefined or null', () => {
+    assert.equal(parseConcurrency(undefined), 3);
+    assert.equal(parseConcurrency(null), 3);
   });
 
   test('clamps inputs strictly between 1 and 5 to prevent rate-limiting abuse', () => {
@@ -18,8 +18,9 @@ describe('CLI Concurrency Parser', () => {
   });
 
   test('guards against boolean flags and NaN strings', () => {
-    assert.equal(parseConcurrency(true), 4);
-    assert.equal(parseConcurrency('fast'), 4);
-    assert.equal(parseConcurrency(''), 4);
+    assert.equal(parseConcurrency(true), 3);
+    assert.equal(parseConcurrency('fast'), 3);
+    assert.equal(parseConcurrency(''), 3);
   });
 });
+

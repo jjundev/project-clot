@@ -99,9 +99,10 @@ export async function notifyPriceDropsAndRestocks({ priceDropped = [], restocked
   if (restocked.length > 0) {
     lines.push('<b>📦 품절 상품 재입고:</b>');
     for (const r of restocked.slice(0, 10)) {
+      const priceStr = (r.priceInfo.myPrice || r.priceInfo.salePrice)?.toLocaleString() || '-';
       lines.push(
         `✨ <b>[${r.item.brand_name}] ${r.item.goods_name}</b>\n` +
-          `  • 현재가: ${r.priceInfo.myPrice?.toLocaleString() || '-'}원\n` +
+          `  • 현재가: ${priceStr}원\n` +
           `  • <a href="${r.item.url}">상품 바로가기</a>`
       );
     }

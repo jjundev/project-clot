@@ -39,7 +39,7 @@ function parseArgs() {
   return { command, flags, positional };
 }
 
-export function parseConcurrency(val, defaultVal = 4) {
+export function parseConcurrency(val, defaultVal = 3) {
   if (typeof val === 'boolean' || val === undefined || val === null || val === '') {
     return defaultVal;
   }
@@ -72,7 +72,7 @@ export function exportDataForGit() {
         status: it.status,
         url: it.url,
         current_price: latest?.my_price || latest?.sale_price || null,
-        lowest_price: it.lowest_my_price || null,
+        lowest_price: it.lowest_my_price || it.lowest_sale_price || null,
         lowest_price_date: it.lowest_price_date || null,
         is_sold_out: Boolean(latest?.is_sold_out),
         last_checked: it.last_checked_at,
@@ -139,13 +139,16 @@ async function handleDailyRun(flags) {
   }
 
   // 2. Collect prices for all active items
-  const concurrency = parseConcurrency(flags.concurrency, 4);
+  const concurrency = parseConcurrency(flags.concurrency, 3);
   console.log(`\n🔍 Fetching latest prices & discounts (concurrency: ${concurrency})...`);
   const results = await collectPricesForActiveItems({
     concurrency,
     onProgress: ({ current, total, item, priceInfo }) => {
+      const displayPrice = priceInfo.isSoldOut
+        ? '품절'
+        : `${(priceInfo.myPrice || priceInfo.salePrice || 0).toLocaleString()}원`;
       process.stdout.write(
-        `\r  [${current}/${total}] ${(item.brand_name || '-').slice(0, 15)} - ${priceInfo.myPrice ? priceInfo.myPrice.toLocaleString() + '원' : '품절'}`.padEnd(65)
+        `\r  [${current}/${total}] ${(item.brand_name || '-').slice(0, 15)} - ${displayPrice}`.padEnd(65)
       );
     },
   });
@@ -432,13 +435,16 @@ async function main() {
     }
     case 'track':
     case 'update': {
-      const concurrency = parseConcurrency(flags.concurrency, 4);
+      const concurrency = parseConcurrency(flags.concurrency, 3);
       console.log(`🔍 Fetching latest prices (concurrency: ${concurrency})...`);
       const results = await collectPricesForActiveItems({
         concurrency,
         onProgress: ({ current, total, item, priceInfo }) => {
+          const displayPrice = priceInfo.isSoldOut
+            ? '품절'
+            : `${(priceInfo.myPrice || priceInfo.salePrice || 0).toLocaleString()}원`;
           process.stdout.write(
-            `\r  [${current}/${total}] ${(item.brand_name || '-').slice(0, 15)} - ${priceInfo.myPrice ? priceInfo.myPrice.toLocaleString() + '원' : '품절'}`.padEnd(65)
+            `\r  [${current}/${total}] ${(item.brand_name || '-').slice(0, 15)} - ${displayPrice}`.padEnd(65)
           );
         },
       });
@@ -490,7 +496,7 @@ Usage:
   node src/cli.js <command> [options]
 
 Commands:
-  daily [--force] [--concurrency=1-5] Run daily sync & price tracking (default concurrency: 4)
+  daily [--force] [--concurrency=1-5] Run daily sync & price tracking (default concurrency: 3)
   sync                   Sync liked items from Musinsa account
   track [--concurrency=1-5]           Fetch latest prices for all active tracked items
   watch <url/goodsNo>    Manually add a product to track
