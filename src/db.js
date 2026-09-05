@@ -37,6 +37,7 @@ export class ClotDatabase {
         last_checked_at TEXT,
         lowest_my_price INTEGER,
         lowest_sale_price INTEGER,
+        lowest_estimated_price INTEGER,
         lowest_price_date TEXT
       );
 
@@ -46,8 +47,10 @@ export class ClotDatabase {
         date TEXT NOT NULL,
         normal_price INTEGER,
         sale_price INTEGER,
+        coupon_price INTEGER,
         sale_rate INTEGER,
         my_price INTEGER,
+        estimated_my_price INTEGER,
         coupon_name TEXT,
         coupon_discount INTEGER,
         member_discount INTEGER,
@@ -69,6 +72,20 @@ export class ClotDatabase {
         completed_at TEXT NOT NULL
       );
     `);
+
+    // Migration check for existing databases
+    const priceLogsCols = this.db.prepare("PRAGMA table_info(price_logs)").all().map((c) => c.name);
+    if (!priceLogsCols.includes('coupon_price')) {
+      this.db.exec("ALTER TABLE price_logs ADD COLUMN coupon_price INTEGER;");
+    }
+    if (!priceLogsCols.includes('estimated_my_price')) {
+      this.db.exec("ALTER TABLE price_logs ADD COLUMN estimated_my_price INTEGER;");
+    }
+
+    const itemsCols = this.db.prepare("PRAGMA table_info(items)").all().map((c) => c.name);
+    if (!itemsCols.includes('lowest_estimated_price')) {
+      this.db.exec("ALTER TABLE items ADD COLUMN lowest_estimated_price INTEGER;");
+    }
   }
 
   getItem(goodsNo) {
@@ -84,6 +101,26 @@ export class ClotDatabase {
   getActiveItems() {
     const stmt = this.db.prepare("SELECT * FROM items WHERE status IN ('ACTIVE', 'SOLDOUT') ORDER BY goods_no ASC");
     return stmt.all();
+  }
+
+  getItemsBySource(source = 'like') {
+    const stmt = this.db.prepare("SELECT * FROM items WHERE source = ? ORDER BY goods_no ASC");
+    return stmt.all(source);
+  }
+
+  getDiscoveredActiveItems() {
+    const stmt = this.db.prepare("SELECT * FROM items WHERE source = 'discovery' AND status IN ('ACTIVE', 'SOLDOUT') ORDER BY goods_no ASC");
+    return stmt.all();
+  }
+
+  getActiveVipItems() {
+    const stmt = this.db.prepare("SELECT * FROM items WHERE source != 'discovery' AND status IN ('ACTIVE', 'SOLDOUT') ORDER BY goods_no ASC");
+    return stmt.all();
+  }
+
+  promoteItemToLike(goodsNo) {
+    const stmt = this.db.prepare("UPDATE items SET source = 'like' WHERE goods_no = ?");
+    stmt.run(Number(goodsNo));
   }
 
   upsertItem({
@@ -172,13 +209,24 @@ export class ClotDatabase {
     stmt.run(lowestMyPrice, lowestSalePrice, dateStr, Number(goodsNo));
   }
 
+  updateLowestEstimatedPrice(goodsNo, price, date) {
+    const stmt = this.db.prepare(`
+      UPDATE items
+      SET lowest_estimated_price = ?, lowest_price_date = ?
+      WHERE goods_no = ?
+    `);
+    stmt.run(price, date, Number(goodsNo));
+  }
+
   recordPriceLog({
     goods_no,
     date,
     normal_price = null,
     sale_price = null,
+    coupon_price = null,
     sale_rate = null,
     my_price = null,
+    estimated_my_price = null,
     coupon_name = null,
     coupon_discount = 0,
     member_discount = 0,
@@ -186,52 +234,59 @@ export class ClotDatabase {
     is_sold_out = 0,
   }) {
     const now = new Date().toISOString();
-    const checkStmt = this.db.prepare('SELECT id FROM price_logs WHERE goods_no = ? AND date = ?');
-    const existing = checkStmt.get(Number(goods_no), date);
+    const existing = this.db
+      .prepare('SELECT id FROM price_logs WHERE goods_no = ? AND date = ?')
+      .get(Number(goods_no), date);
 
     if (existing) {
       const updateStmt = this.db.prepare(`
         UPDATE price_logs SET
           normal_price = ?,
           sale_price = ?,
+          coupon_price = ?,
           sale_rate = ?,
           my_price = ?,
+          estimated_my_price = ?,
           coupon_name = ?,
           coupon_discount = ?,
           member_discount = ?,
           point_discount = ?,
-          is_sold_out = ?,
-          created_at = ?
+          is_sold_out = ?
         WHERE id = ?
       `);
       updateStmt.run(
         normal_price,
         sale_price,
+        coupon_price,
         sale_rate,
         my_price,
+        estimated_my_price,
         coupon_name,
         coupon_discount,
         member_discount,
         point_discount,
         is_sold_out ? 1 : 0,
-        now,
         existing.id
       );
       return existing.id;
     } else {
       const insertStmt = this.db.prepare(`
         INSERT INTO price_logs (
-          goods_no, date, normal_price, sale_price, sale_rate, my_price,
-          coupon_name, coupon_discount, member_discount, point_discount, is_sold_out, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          goods_no, date, normal_price, sale_price, coupon_price, sale_rate,
+          my_price, estimated_my_price, coupon_name, coupon_discount,
+          member_discount, point_discount, is_sold_out, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const res = insertStmt.run(
         Number(goods_no),
         date,
         normal_price,
         sale_price,
+        coupon_price,
         sale_rate,
         my_price,
+        estimated_my_price,
         coupon_name,
         coupon_discount,
         member_discount,
@@ -251,6 +306,11 @@ export class ClotDatabase {
       LIMIT 1
     `);
     return stmt.get(Number(goodsNo));
+  }
+
+  getPriceLogs(goodsNo) {
+    const stmt = this.db.prepare('SELECT * FROM price_logs WHERE goods_no = ? ORDER BY date ASC');
+    return stmt.all(Number(goodsNo));
   }
 
   getPriceHistory(goodsNo, limit = 30) {
