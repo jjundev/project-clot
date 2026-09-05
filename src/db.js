@@ -22,6 +22,9 @@ export class ClotDatabase {
 
   initSchema() {
     this.db.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA busy_timeout = 5000;
+
       CREATE TABLE IF NOT EXISTS items (
         goods_no INTEGER PRIMARY KEY,
         goods_name TEXT NOT NULL,
