@@ -7,8 +7,8 @@ import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { db } from './db.js';
 import { syncLikedItemsFromMusinsa } from './sync.js';
-import { collectPricesForActiveItems, fetchProductPriceInfo } from './collector.js';
-import { notifyPriceDropsAndRestocks, sendMacNotification, formatHotDealsSummary, sendTelegramMessage } from './notifier.js';
+import { collectPricesForActiveItems, fetchProductPriceInfo, prewarmMusinsaSession } from './collector.js';
+import { notifyPriceDropsAndRestocks, sendMacNotification, formatHotDealsSummary, sendTelegramMessage, notifySessionWarning } from './notifier.js';
 import { discoverCategoryGoods } from './discovery.js';
 import { setupEnvironment, getExtendedPath } from './env.js';
 import { generateDashboardHtml } from './visualizer.js';
@@ -278,13 +278,16 @@ async function handleDailyRun(flags) {
 
   // 1. Sync liked items from Musinsa
   try {
-    const syncRes = await syncLikedItemsFromMusinsa();
+    const syncRes = await syncLikedItemsFromMusinsa({ prewarmFn: prewarmMusinsaSession });
     const promotedCount = syncRes.promotedItems?.length || 0;
     console.log(
       `📊 Sync Summary: +${syncRes.newItems.length} new, ${syncRes.reactivatedItems.length} reactivated, ${promotedCount} promoted, ${syncRes.unlikedItems.length} unliked, ${syncRes.unchangedCount} unchanged.`
     );
   } catch (err) {
     console.warn(`⚠️ Warning: Liked items sync failed, proceeding with existing items. (${err.message})`);
+    if (err.message.includes('로그인이 필요합니다') || err.message.includes('AUTH_REQUIRED')) {
+      await notifySessionWarning({ reason: '무신사 좋아요 목록 동기화 인증 실패 (로그인 만료)' });
+    }
   }
 
   // 2. Collect prices for VIP active items
@@ -293,6 +296,9 @@ async function handleDailyRun(flags) {
   const results = await collectPricesForActiveItems({
     source: 'like',
     concurrency,
+    prewarmFn: prewarmMusinsaSession,
+    enableSelfHealing: true,
+    onSessionWarning: notifySessionWarning,
     onProgress: ({ current, total, item, priceInfo }) => {
       const displayPrice = priceInfo.isSoldOut
         ? '품절'
@@ -597,7 +603,7 @@ async function main() {
       await handleDiscover(flags);
       break;
     case 'sync': {
-      const syncRes = await syncLikedItemsFromMusinsa(flags);
+      const syncRes = await syncLikedItemsFromMusinsa({ ...flags, prewarmFn: prewarmMusinsaSession });
       const promotedCount = syncRes.promotedItems?.length || 0;
       console.log(
         `📊 Sync Summary: +${syncRes.newItems.length} new, ${syncRes.reactivatedItems.length} reactivated, ${promotedCount} promoted from discovery, ${syncRes.unlikedItems.length} unliked, ${syncRes.unchangedCount} unchanged.`
@@ -641,6 +647,9 @@ async function main() {
       console.log(`🔍 Fetching latest prices (concurrency: ${concurrency})...`);
       const results = await collectPricesForActiveItems({
         concurrency,
+        prewarmFn: prewarmMusinsaSession,
+        enableSelfHealing: true,
+        onSessionWarning: notifySessionWarning,
         onProgress: ({ current, total, item, priceInfo }) => {
           const displayPrice = priceInfo.isSoldOut
             ? '품절'

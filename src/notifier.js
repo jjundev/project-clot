@@ -173,3 +173,18 @@ export function formatHotDealsSummary(discoveryItems = []) {
 
   return lines.join('\n');
 }
+
+export async function notifySessionWarning({ reason = '브라우저 세션 지연 또는 인증 만료', isFallback = true } = {}) {
+  sendMacNotification(
+    '⚠️ 무신사 로그인 확인 필요',
+    '세션 지연으로 비로그인 추정가 모드로 수집되었습니다. Chrome 무신사 로그인을 확인해주세요.'
+  );
+
+  const lines = [
+    '<b>⚠️ [Project-Clot] 무신사 로그인 세션 확인 필요</b>\n',
+    `• 사유: ${reason}`,
+    '• 상태: 개인 쿠폰/등급 할인이 미적용된 <b>비로그인 추정가</b>로 수집되었습니다.',
+    '• 조치: Chrome 브라우저에서 <a href="https://www.musinsa.com">musinsa.com</a> 에 접속하여 자동 로그인을 연장해주세요.',
+  ];
+  return await sendTelegramMessage(lines.join('\n'));
+}

@@ -3,6 +3,39 @@ import assert from 'node:assert/strict';
 import { formatMySizeToFilterString, normalizeMySizeRows, getMusinsaMySize } from '/Users/hyunjun_macbook_pro/.opencli/clis/musinsa/mysize.js';
 
 describe('Musinsa MySize Data Formatter & Filter Converter', () => {
+  test('normalizes live Musinsa itemList measurements from the purchased-garment API', () => {
+    const rows = normalizeMySizeRows([
+      {
+        goodsNo: 4752740,
+        brandName: '후브스',
+        goodsName: '멀티 포켓 블루종 자켓 [차콜]',
+        optionName: 'M',
+        sizeType: 'OUTER',
+        itemList: [
+          { code: '총장', name: '총장', size: 68.5 },
+          { code: '어깨너비', name: '어깨너비', size: 54 },
+          { code: '가슴단면', name: '가슴단면', size: 61.5 },
+          { code: '소매길이', name: '소매길이', size: 62 },
+        ],
+      },
+    ]);
+
+    assert.deepEqual(rows[0], {
+      goodsNo: 4752740,
+      brand: '후브스',
+      goodsName: '멀티 포켓 블루종 자켓 [차콜]',
+      size: 'M',
+      category: '아우터',
+      length: '68.5cm',
+      chest: '61.5cm',
+      waist: '-',
+      shoulder: '54cm',
+      sleeve: '62cm',
+      thigh: '-',
+      filterArgs: '-',
+    });
+  });
+
   test('normalizes raw purchased garment measurements into clean rows', () => {
     const rawApiList = [
       {

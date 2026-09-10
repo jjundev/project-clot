@@ -7,7 +7,36 @@ import { estimateMemberPrice } from './discovery.js';
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 
+/**
+ * Pre-warms the Chrome browser with Musinsa session in the background.
+ * Triggers silent auto-refresh of login tokens and ensures OpenCLI bridge is responsive.
+ * @param {object} options
+ * @returns {Promise<boolean>}
+ */
+export async function prewarmMusinsaSession({
+  execFn = execSync,
+  waitMs = 3000,
+  platform = process.platform,
+} = {}) {
+  if (platform !== 'darwin') {
+    return false;
+  }
+  try {
+    // Open in background (-g) without stealing window focus
+    execFn('open -g -a "Google Chrome" "https://www.musinsa.com"', { stdio: 'ignore' });
+    if (waitMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+    return true;
+  } catch (err) {
+    // Non-fatal: if Chrome isn't installed or running in a headless sandbox
+    console.warn(`⚠️ [Session Pre-warm Notice] Could not pre-warm Chrome: ${err.message}`);
+    return false;
+  }
+}
+
 export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries = 4, backoffBaseMs = 2000) {
+
   const url = `https://www.musinsa.com/products/${goodsNo}`;
   const headers = {
     'User-Agent': USER_AGENT,
@@ -136,6 +165,9 @@ export async function collectPricesForActiveItems({
   dbInstance = db,
   execFn = execSync,
   fetchFn = fetchProductPriceInfo,
+  prewarmFn = null,
+  enableSelfHealing = false,
+  onSessionWarning = null,
   items = null,
   source = null,
 } = {}) {
@@ -162,6 +194,7 @@ export async function collectPricesForActiveItems({
     newlySoldOut: [],
     discontinued: [],
     items: [],
+    sessionWarningTriggered: false,
   };
 
   const startTime = Date.now();
@@ -172,11 +205,31 @@ export async function collectPricesForActiveItems({
   const vipGoodsNos = vipItems.map((it) => it.goods_no);
   let consecutiveOpenCliErrors = 0;
 
+  // Pre-warm Chrome Musinsa session in background before batching VIP items
+  if (vipGoodsNos.length > 0 && prewarmFn) {
+    try {
+      console.log('🌅 Pre-warming Chrome Musinsa session in background...');
+      await prewarmFn({ waitMs: process.env.NODE_ENV === 'test' ? 0 : 3000 });
+    } catch (pwErr) {
+      console.warn(`[Pre-warm Notice] Pre-warm failed: ${pwErr.message}`);
+    }
+  }
+
   for (let i = 0; i < vipGoodsNos.length; i += openCliChunkSize) {
     if (consecutiveOpenCliErrors >= 2) {
       console.warn(
         `⚡ [OpenCLI CircuitBreaker] 2 consecutive OpenCLI batch failures/timeouts. Skipping remaining ${vipGoodsNos.length - i} items and proceeding to fast direct parser.`
       );
+      results.sessionWarningTriggered = true;
+      if (onSessionWarning) {
+        try {
+          await onSessionWarning({
+            reason: 'OpenCLI 브라우저 세션 타임아웃 2회 연속 발생 (서킷 브레이커 작동)',
+          });
+        } catch (warnErr) {
+          console.warn(`[Warning Handler Error] ${warnErr.message}`);
+        }
+      }
       break;
     }
 
@@ -207,13 +260,46 @@ export async function collectPricesForActiveItems({
         console.warn(`[OpenCLI Notice] Browser bridge returned non-JSON output (${consecutiveOpenCliErrors}/2).`);
       }
     } catch (err) {
+      // If first failure and self-healing enabled, attempt session pre-warm and retry this chunk once
+      if (enableSelfHealing && consecutiveOpenCliErrors === 0 && prewarmFn) {
+        console.warn(`[OpenCLI Notice] First batch failed. Attempting self-healing session pre-warm and retry...`);
+        try {
+          await prewarmFn({ waitMs: process.env.NODE_ENV === 'test' ? 0 : 4000 });
+          const retryRaw = execFn(
+            `opencli musinsa my-prices "${chunk}" -f json`,
+            getExecOptions({
+              encoding: 'utf-8',
+              timeout: openCliTimeoutMs,
+            })
+          );
+          const retryJsonStart = retryRaw ? retryRaw.indexOf('[') : -1;
+          if (retryJsonStart !== -1) {
+            const list = JSON.parse(retryRaw.slice(retryJsonStart));
+            for (const it of list) {
+              openCliPriceMap.set(Number(it.goodsNo), {
+                normalPrice: Number(String(it.normalPrice).replace(/[^0-9]/g, '')) || null,
+                salePrice: Number(String(it.salePrice).replace(/[^0-9]/g, '')) || null,
+                couponPrice: Number(String(it.couponPrice).replace(/[^0-9]/g, '')) || null,
+                myPrice: Number(String(it.myPrice).replace(/[^0-9]/g, '')) || null,
+                isSoldOut: it.status === '품절',
+              });
+            }
+            consecutiveOpenCliErrors = 0;
+            continue; // recovered successfully!
+          }
+        } catch (retryErr) {
+          // Self-healing attempt failed; fall through to increment error count
+        }
+      }
       consecutiveOpenCliErrors++;
       console.warn(`[OpenCLI Notice] Browser bridge batch error (${consecutiveOpenCliErrors}/2): ${err.message}`);
     }
   }
 
+
   let completedCount = 0;
   const orderedItems = new Array(activeItems.length);
+
 
   await mapConcurrent(activeItems, concurrency, async (item, itemIndex) => {
     try {
