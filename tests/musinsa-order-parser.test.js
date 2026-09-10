@@ -52,4 +52,40 @@ describe('Musinsa Order Option & Size Parser', () => {
       qty: '1개',
     });
   });
+
+  test('extracts option and standalone qty when prefixed option has no embedded qty', () => {
+    const lines = ['배송완료', '브랜드', '상품명', '[옵션] 블랙 / L', '2개', '39,000원'];
+    const result = parseOrderOptionAndSize(lines);
+    assert.deepEqual(result, {
+      size: 'L',
+      option: '블랙 / L',
+      qty: '2개',
+    });
+  });
+});
+
+describe('extractSizeToken', () => {
+  test('extracts standard clothing sizes', () => {
+    assert.equal(extractSizeToken('블랙 / L'), 'L');
+    assert.equal(extractSizeToken('화이트 / XXL'), 'XXL');
+    assert.equal(extractSizeToken('네이비 / FREE'), 'FREE');
+    assert.equal(extractSizeToken('ONE SIZE'), 'ONE SIZE');
+  });
+
+  test('extracts shoe sizes in mm', () => {
+    assert.equal(extractSizeToken('BLUE / 270'), '270');
+    assert.equal(extractSizeToken('265mm'), '265');
+  });
+
+  test('extracts numeric pants and brand sizing', () => {
+    assert.equal(extractSizeToken('블랙 / 32'), '32');
+    assert.equal(extractSizeToken('3'), '3');
+    assert.equal(extractSizeToken('GRAY / 1'), '1');
+  });
+
+  test('returns fallback - for empty or unmatched options', () => {
+    assert.equal(extractSizeToken(''), '-');
+    assert.equal(extractSizeToken('-'), '-');
+    assert.equal(extractSizeToken(null), '-');
+  });
 });
