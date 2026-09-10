@@ -99,9 +99,10 @@ export async function notifyPriceDropsAndRestocks({ priceDropped = [], restocked
   if (restocked.length > 0) {
     lines.push('<b>📦 품절 상품 재입고:</b>');
     for (const r of restocked.slice(0, 10)) {
+      const priceStr = (r.priceInfo.myPrice || r.priceInfo.salePrice)?.toLocaleString() || '-';
       lines.push(
         `✨ <b>[${r.item.brand_name}] ${r.item.goods_name}</b>\n` +
-          `  • 현재가: ${r.priceInfo.myPrice?.toLocaleString() || '-'}원\n` +
+          `  • 현재가: ${priceStr}원\n` +
           `  • <a href="${r.item.url}">상품 바로가기</a>`
       );
     }
@@ -109,4 +110,81 @@ export async function notifyPriceDropsAndRestocks({ priceDropped = [], restocked
 
   const message = lines.join('\n');
   await sendTelegramMessage(message);
+}
+
+export function formatHotDealsSummary(discoveryItems = []) {
+  if (!discoveryItems || discoveryItems.length === 0) {
+    return '';
+  }
+
+  const seen = new Set();
+  const dedupedItems = [];
+  for (const it of discoveryItems) {
+    const key = it.goodsNo || it.goods_no;
+    if (key) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    dedupedItems.push(it);
+  }
+
+  const itemsWithDiscount = dedupedItems.map((item) => {
+    const normalPrice = item.normalPrice ?? item.normal_price ?? null;
+    const targetPrice =
+      item.estimatedMyPrice ??
+      item.estimated_my_price ??
+      item.couponPrice ??
+      item.coupon_price ??
+      item.salePrice ??
+      item.sale_price ??
+      null;
+
+    let discountRate = 0;
+    if (normalPrice && targetPrice && normalPrice > targetPrice) {
+      discountRate = Math.round(((normalPrice - targetPrice) / normalPrice) * 100);
+    } else if (item.saleRate || item.sale_rate) {
+      discountRate = Number(item.saleRate || item.sale_rate);
+    }
+
+    return {
+      ...item,
+      discountRate,
+      targetPrice,
+    };
+  });
+
+  itemsWithDiscount.sort((a, b) => b.discountRate - a.discountRate);
+  const top5 = itemsWithDiscount.slice(0, 5);
+
+  const lines = ['<b>🔥 오늘의 탐색 핫딜 Top 5 (발매 2년 이내 & 좋아요 1,000+)</b>\n'];
+  top5.forEach((item, index) => {
+    const rank = index + 1;
+    const brand = item.brandName || item.brand_name || '-';
+    const name = item.goodsName || item.goods_name || '상품';
+    const goodsNo = item.goodsNo || item.goods_no;
+    const url = item.url || `https://www.musinsa.com/products/${goodsNo}`;
+    const priceStr = item.targetPrice ? `${item.targetPrice.toLocaleString()}원` : '-';
+
+    lines.push(
+      `${rank}. <b>[${brand}]</b> ${name} - 정가 대비 <b>${item.discountRate}%</b> 할인 (추정회원가: <b>${priceStr}</b>)\n` +
+        `   • <a href="${url}">상품 바로가기</a>`
+    );
+  });
+
+  return lines.join('\n');
+}
+
+export async function notifySessionWarning({ reason = '브라우저 세션 지연 또는 인증 만료', isFallback = true } = {}) {
+  sendMacNotification(
+    '⚠️ 무신사 로그인 확인 필요',
+    '세션 지연으로 비로그인 추정가 모드로 수집되었습니다. Chrome 무신사 로그인을 확인해주세요.'
+  );
+
+  const lines = [
+    '<b>⚠️ [Project-Clot] 무신사 로그인 세션 확인 필요</b>\n',
+    `• 사유: ${reason}`,
+    '• 상태: 개인 쿠폰/등급 할인이 미적용된 <b>비로그인 추정가</b>로 수집되었습니다.',
+    '• 조치: Chrome 브라우저에서 <a href="https://www.musinsa.com">musinsa.com</a> 에 접속하여 자동 로그인을 연장해주세요.',
+  ];
+  return await sendTelegramMessage(lines.join('\n'));
 }

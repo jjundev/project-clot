@@ -8,6 +8,7 @@ import path from 'node:path';
 import { exec } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
+import { classifyCategory } from './classifier.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,8 +31,11 @@ export function buildClotDataPayload(dbOrWrapper, { targetGoodsNo } = {}) {
   }
 
   // 1. Fetch active and soldout items
+  const itemCols = rawDb.prepare("PRAGMA table_info(items)").all().map((c) => c.name);
+  const hasCat = itemCols.includes('category');
+  const catCol = hasCat ? ', category' : '';
   const itemsStmt = rawDb.prepare(`
-    SELECT goods_no, goods_name, brand_name, url, image_url, status, first_seen_at, last_checked_at
+    SELECT goods_no, goods_name, brand_name, url, image_url, status, first_seen_at, last_checked_at ${catCol}
     FROM items
     WHERE status IN ('ACTIVE', 'SOLDOUT')
     ORDER BY goods_no ASC
@@ -39,8 +43,11 @@ export function buildClotDataPayload(dbOrWrapper, { targetGoodsNo } = {}) {
   const rawItems = itemsStmt.all();
 
   // 2. Fetch price logs scoped only to active and soldout items
+  const cols = rawDb.prepare("PRAGMA table_info(price_logs)").all().map((c) => c.name);
+  const hasEst = cols.includes('estimated_my_price');
+  const estCol = hasEst ? ', estimated_my_price' : '';
   const logsStmt = rawDb.prepare(`
-    SELECT goods_no, date, normal_price, sale_price, my_price, is_sold_out, coupon_name, coupon_discount
+    SELECT goods_no, date, normal_price, sale_price, my_price ${estCol}, is_sold_out, coupon_name, coupon_discount
     FROM price_logs
     WHERE goods_no IN (SELECT goods_no FROM items WHERE status IN ('ACTIVE', 'SOLDOUT'))
     ORDER BY date ASC, id ASC
@@ -58,11 +65,12 @@ export function buildClotDataPayload(dbOrWrapper, { targetGoodsNo } = {}) {
       logsByGoods.set(log.goods_no, arr);
     }
     const defaultCouponName = log.coupon_discount > 0 ? '쿠폰 적용가' : '나의 할인가';
+    const effectiveMyPrice = log.my_price ?? (hasEst ? log.estimated_my_price : null) ?? null;
     arr.push([
       log.date,
       log.normal_price ?? null,
       log.sale_price ?? null,
-      log.my_price ?? null,
+      effectiveMyPrice,
       log.is_sold_out ? 1 : 0,
       log.coupon_name || defaultCouponName,
       log.coupon_discount || 0,
@@ -105,6 +113,7 @@ export function buildClotDataPayload(dbOrWrapper, { targetGoodsNo } = {}) {
     u: it.url || `https://www.musinsa.com/products/${it.goods_no}`,
     i: it.image_url || '',
     s: it.status || 'ACTIVE',
+    c: it.category || classifyCategory(it.goods_name, it.brand_name),
     fs: it.first_seen_at ? it.first_seen_at.slice(0, 10) : '',
     L: logsByGoods.get(it.goods_no) || [],
   }));

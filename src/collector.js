@@ -1,11 +1,42 @@
 import { db } from './db.js';
 import { execSync } from 'node:child_process';
 import { getExecOptions } from './env.js';
+import { mapConcurrent } from './pool.js';
+import { estimateMemberPrice } from './discovery.js';
 
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 
-export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries = 3) {
+/**
+ * Pre-warms the Chrome browser with Musinsa session in the background.
+ * Triggers silent auto-refresh of login tokens and ensures OpenCLI bridge is responsive.
+ * @param {object} options
+ * @returns {Promise<boolean>}
+ */
+export async function prewarmMusinsaSession({
+  execFn = execSync,
+  waitMs = 3000,
+  platform = process.platform,
+} = {}) {
+  if (platform !== 'darwin') {
+    return false;
+  }
+  try {
+    // Open in background (-g) without stealing window focus
+    execFn('open -g -a "Google Chrome" "https://www.musinsa.com"', { stdio: 'ignore' });
+    if (waitMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+    return true;
+  } catch (err) {
+    // Non-fatal: if Chrome isn't installed or running in a headless sandbox
+    console.warn(`⚠️ [Session Pre-warm Notice] Could not pre-warm Chrome: ${err.message}`);
+    return false;
+  }
+}
+
+export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries = 4, backoffBaseMs = 2000) {
+
   const url = `https://www.musinsa.com/products/${goodsNo}`;
   const headers = {
     'User-Agent': USER_AGENT,
@@ -26,9 +57,12 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
       }
 
       if (response.status === 429) {
-        const waitTime = attempt * 2500;
+        if (attempt === retries) {
+          throw new Error(`HTTP 429 Rate Limited on goods ${goodsNo} after ${retries} attempts`);
+        }
+        const waitTime = Math.pow(2, attempt - 1) * backoffBaseMs + Math.floor(Math.random() * 500);
         console.warn(
-          `⏳ [RateLimit 429] Waiting ${waitTime / 1000}s before retrying goods ${goodsNo} (attempt ${attempt}/${retries})...`
+          `⏳ [RateLimit 429] Waiting ${(waitTime / 1000).toFixed(1)}s before retrying goods ${goodsNo} (attempt ${attempt}/${retries})...`
         );
         await new Promise((r) => setTimeout(r, waitTime));
         continue;
@@ -62,6 +96,9 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
           couponPrice: null,
           saleRate: null,
           myPrice: null,
+          estimatedMyPrice: null,
+          isRestrictedUsePoint: false,
+          isLimitedDc: false,
           isSoldOut: false,
         };
       }
@@ -73,6 +110,14 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
       const finalPrice = gp.finalPrice ?? couponPrice ?? salePrice;
       const finalDiscount = gp.finalDiscount ?? gp.discountRate ?? 0;
       const isSoldOut = Boolean(detail.isSoldOut || detail.goodsSaleType === 'SOLDOUT');
+      const isRestrictedUsePoint = Boolean(detail.isRestrictedUsePoint ?? detail.isRestictedUsePoint);
+      const isLimitedDc = Boolean(
+        detail.isLimitedDc ??
+        detail.goodsPrice?.isLimitedDc ??
+        detail.isRestrictedMemberDiscount ??
+        (detail.isGradeDiscountEligible === false)
+      );
+      const estimatedMyPrice = estimateMemberPrice(couponPrice, isRestrictedUsePoint, { isLimitedDc });
 
       let couponDiscount = 0;
       let couponName = '';
@@ -93,7 +138,10 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
         salePrice,
         couponPrice,
         saleRate: finalDiscount,
-        myPrice: couponPrice,
+        myPrice: null, // Public unauthenticated fetch cannot know member discount
+        estimatedMyPrice,
+        isRestrictedUsePoint,
+        isLimitedDc,
         couponName,
         couponDiscount,
         isSoldOut,
@@ -109,10 +157,31 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
 }
 
 export async function collectPricesForActiveItems({
-  delayMs = 500,
+  concurrency = 3,
+  delayMs = 250,
   onProgress = null,
+  openCliTimeoutMs = 25000,
+  openCliChunkSize = 2,
+  dbInstance = db,
+  execFn = execSync,
+  fetchFn = fetchProductPriceInfo,
+  prewarmFn = null,
+  enableSelfHealing = false,
+  onSessionWarning = null,
+  items = null,
+  source = null,
 } = {}) {
-  const activeItems = db.getActiveItems();
+  let activeItems;
+  if (items) {
+    activeItems = items;
+  } else if (source === 'discovery') {
+    activeItems = dbInstance.getDiscoveredActiveItems ? dbInstance.getDiscoveredActiveItems() : [];
+  } else if (source === 'like') {
+    activeItems = dbInstance.getActiveVipItems ? dbInstance.getActiveVipItems() : [];
+  } else {
+    activeItems = dbInstance.getActiveItems();
+  }
+
   const today = new Date().toISOString().split('T')[0];
 
   const results = {
@@ -125,24 +194,55 @@ export async function collectPricesForActiveItems({
     newlySoldOut: [],
     discontinued: [],
     items: [],
+    sessionWarningTriggered: false,
   };
 
   const startTime = Date.now();
 
-  // Try batching via OpenCLI my-prices first for true "나의 할인가"
+  // Try batching via OpenCLI my-prices first with Circuit Breaker (strictly VIP items)
   let openCliPriceMap = new Map();
-  const goodsNos = activeItems.map((it) => it.goods_no);
-  for (let i = 0; i < goodsNos.length; i += 4) {
-    const chunk = goodsNos.slice(i, i + 4).join(',');
+  const vipItems = activeItems.filter((it) => it.source !== 'discovery');
+  const vipGoodsNos = vipItems.map((it) => it.goods_no);
+  let consecutiveOpenCliErrors = 0;
+
+  // Pre-warm Chrome Musinsa session in background before batching VIP items
+  if (vipGoodsNos.length > 0 && prewarmFn) {
     try {
-      const raw = execSync(
+      console.log('🌅 Pre-warming Chrome Musinsa session in background...');
+      await prewarmFn({ waitMs: process.env.NODE_ENV === 'test' ? 0 : 3000 });
+    } catch (pwErr) {
+      console.warn(`[Pre-warm Notice] Pre-warm failed: ${pwErr.message}`);
+    }
+  }
+
+  for (let i = 0; i < vipGoodsNos.length; i += openCliChunkSize) {
+    if (consecutiveOpenCliErrors >= 2) {
+      console.warn(
+        `⚡ [OpenCLI CircuitBreaker] 2 consecutive OpenCLI batch failures/timeouts. Skipping remaining ${vipGoodsNos.length - i} items and proceeding to fast direct parser.`
+      );
+      results.sessionWarningTriggered = true;
+      if (onSessionWarning) {
+        try {
+          await onSessionWarning({
+            reason: 'OpenCLI 브라우저 세션 타임아웃 2회 연속 발생 (서킷 브레이커 작동)',
+          });
+        } catch (warnErr) {
+          console.warn(`[Warning Handler Error] ${warnErr.message}`);
+        }
+      }
+      break;
+    }
+
+    const chunk = vipGoodsNos.slice(i, i + openCliChunkSize).join(',');
+    try {
+      const raw = execFn(
         `opencli musinsa my-prices "${chunk}" -f json`,
         getExecOptions({
           encoding: 'utf-8',
-          timeout: 45000,
+          timeout: openCliTimeoutMs,
         })
       );
-      const jsonStart = raw.indexOf('[');
+      const jsonStart = raw ? raw.indexOf('[') : -1;
       if (jsonStart !== -1) {
         const list = JSON.parse(raw.slice(jsonStart));
         for (const it of list) {
@@ -154,14 +254,54 @@ export async function collectPricesForActiveItems({
             isSoldOut: it.status === '품절',
           });
         }
+        consecutiveOpenCliErrors = 0; // reset on success
+      } else {
+        consecutiveOpenCliErrors++;
+        console.warn(`[OpenCLI Notice] Browser bridge returned non-JSON output (${consecutiveOpenCliErrors}/2).`);
       }
     } catch (err) {
-      console.warn(`[OpenCLI Notice] Browser bridge batch fallback to direct parser: ${err.message}`);
+      // If first failure and self-healing enabled, attempt session pre-warm and retry this chunk once
+      if (enableSelfHealing && consecutiveOpenCliErrors === 0 && prewarmFn) {
+        console.warn(`[OpenCLI Notice] First batch failed. Attempting self-healing session pre-warm and retry...`);
+        try {
+          await prewarmFn({ waitMs: process.env.NODE_ENV === 'test' ? 0 : 4000 });
+          const retryRaw = execFn(
+            `opencli musinsa my-prices "${chunk}" -f json`,
+            getExecOptions({
+              encoding: 'utf-8',
+              timeout: openCliTimeoutMs,
+            })
+          );
+          const retryJsonStart = retryRaw ? retryRaw.indexOf('[') : -1;
+          if (retryJsonStart !== -1) {
+            const list = JSON.parse(retryRaw.slice(retryJsonStart));
+            for (const it of list) {
+              openCliPriceMap.set(Number(it.goodsNo), {
+                normalPrice: Number(String(it.normalPrice).replace(/[^0-9]/g, '')) || null,
+                salePrice: Number(String(it.salePrice).replace(/[^0-9]/g, '')) || null,
+                couponPrice: Number(String(it.couponPrice).replace(/[^0-9]/g, '')) || null,
+                myPrice: Number(String(it.myPrice).replace(/[^0-9]/g, '')) || null,
+                isSoldOut: it.status === '품절',
+              });
+            }
+            consecutiveOpenCliErrors = 0;
+            continue; // recovered successfully!
+          }
+        } catch (retryErr) {
+          // Self-healing attempt failed; fall through to increment error count
+        }
+      }
+      consecutiveOpenCliErrors++;
+      console.warn(`[OpenCLI Notice] Browser bridge batch error (${consecutiveOpenCliErrors}/2): ${err.message}`);
     }
   }
 
-  for (let i = 0; i < activeItems.length; i++) {
-    const item = activeItems[i];
+
+  let completedCount = 0;
+  const orderedItems = new Array(activeItems.length);
+
+
+  await mapConcurrent(activeItems, concurrency, async (item, itemIndex) => {
     try {
       let priceInfo;
       const liveData = openCliPriceMap.get(item.goods_no);
@@ -175,86 +315,145 @@ export async function collectPricesForActiveItems({
           salePrice: liveData.salePrice,
           couponPrice: liveData.couponPrice,
           myPrice: liveData.myPrice,
+          estimatedMyPrice: liveData.couponPrice ? estimateMemberPrice(liveData.couponPrice, false) : null,
           couponName: '나의 할인가',
           couponDiscount: liveData.couponPrice && liveData.salePrice ? liveData.salePrice - liveData.couponPrice : 0,
           isSoldOut: liveData.isSoldOut,
           discontinued: false,
         };
       } else {
-        priceInfo = await fetchProductPriceInfo(item.goods_no);
+        priceInfo = await fetchFn(item.goods_no);
       }
 
       if (priceInfo.discontinued) {
-        db.updateItemStatus(item.goods_no, 'DISCONTINUED');
+        dbInstance.updateItemStatus(item.goods_no, 'DISCONTINUED');
         results.discontinued.push(item);
-        continue;
+        completedCount++;
+        if (onProgress) {
+          onProgress({ current: completedCount, total: activeItems.length, item, priceInfo });
+        }
+        return;
       }
 
       if (priceInfo.goodsName) {
-        db.updateItemDetails(item.goods_no, priceInfo.goodsName, priceInfo.brandName, priceInfo.imageUrl || item.image_url);
+        dbInstance.updateItemDetails(item.goods_no, priceInfo.goodsName, priceInfo.brandName, priceInfo.imageUrl || item.image_url);
       }
 
       // Check status changes (Restock / Soldout)
-      const prevPriceLog = db.getLatestPrice(item.goods_no);
+      const prevPriceLog = dbInstance.getLatestPrice(item.goods_no);
       const wasSoldOut = prevPriceLog ? Boolean(prevPriceLog.is_sold_out) : item.status === 'SOLDOUT';
 
       if (wasSoldOut && !priceInfo.isSoldOut) {
-        db.updateItemStatus(item.goods_no, 'ACTIVE');
+        dbInstance.updateItemStatus(item.goods_no, 'ACTIVE');
         results.restocked.push({ item, priceInfo });
       } else if (!wasSoldOut && priceInfo.isSoldOut) {
-        db.updateItemStatus(item.goods_no, 'SOLDOUT');
+        dbInstance.updateItemStatus(item.goods_no, 'SOLDOUT');
         results.newlySoldOut.push({ item, priceInfo });
       }
 
-      // Update lowest price tracking
+      // Lowest price tracking for both VIP and discovery catalog items (executed BEFORE price drop check)
       let lowestMyPrice = item.lowest_my_price;
       let lowestSalePrice = item.lowest_sale_price;
-      let isNewLowest = false;
 
-      if (!lowestMyPrice || (priceInfo.myPrice && priceInfo.myPrice < lowestMyPrice)) {
-        lowestMyPrice = priceInfo.myPrice;
-        lowestSalePrice = priceInfo.salePrice;
-        isNewLowest = Boolean(item.lowest_my_price);
-        db.updateLowestPrice(item.goods_no, lowestMyPrice, lowestSalePrice, today);
+      const hasNewLowestMyPrice = Boolean(priceInfo.myPrice && (!lowestMyPrice || priceInfo.myPrice < lowestMyPrice));
+      const hasNewLowestSalePrice = Boolean(!priceInfo.myPrice && priceInfo.salePrice && (!lowestSalePrice || priceInfo.salePrice < lowestSalePrice));
+      const hasNewLowestEstimated = Boolean(
+        item.source === 'discovery' &&
+        priceInfo.estimatedMyPrice &&
+        (!item.lowest_estimated_price || priceInfo.estimatedMyPrice < item.lowest_estimated_price)
+      );
+
+      if (hasNewLowestMyPrice || hasNewLowestSalePrice) {
+        if (hasNewLowestMyPrice) {
+          lowestMyPrice = priceInfo.myPrice;
+        }
+        if (hasNewLowestSalePrice) {
+          lowestSalePrice = priceInfo.salePrice;
+        }
+        dbInstance.updateLowestPrice(item.goods_no, lowestMyPrice, lowestSalePrice, today);
+      }
+      if (hasNewLowestEstimated && dbInstance.updateLowestEstimatedPrice) {
+        dbInstance.updateLowestEstimatedPrice(item.goods_no, priceInfo.estimatedMyPrice, today);
       }
 
-      // Check for price drop compared to previous log
-      if (prevPriceLog && priceInfo.myPrice && prevPriceLog.my_price) {
-        if (priceInfo.myPrice < prevPriceLog.my_price) {
-          const dropAmount = prevPriceLog.my_price - priceInfo.myPrice;
-          const dropRate = Math.round((dropAmount / prevPriceLog.my_price) * 100);
-          results.priceDropped.push({
-            item,
-            priceInfo,
-            prevPrice: prevPriceLog.my_price,
-            currentPrice: priceInfo.myPrice,
-            dropAmount,
-            dropRate,
-            isNewLowest,
-          });
+      // Check for price drop: compare like-for-like
+      if (prevPriceLog) {
+        if (item.source === 'discovery') {
+          // Like-for-like comparison for estimated prices
+          const prevEst = prevPriceLog.estimated_my_price;
+          if (prevEst && priceInfo.estimatedMyPrice && priceInfo.estimatedMyPrice < prevEst) {
+            const dropAmount = prevEst - priceInfo.estimatedMyPrice;
+            const dropRate = Math.round((dropAmount / prevEst) * 100);
+            results.priceDropped.push({
+              item,
+              priceInfo,
+              priceType: 'estimated',
+              prevPrice: prevEst,
+              currentPrice: priceInfo.estimatedMyPrice,
+              dropAmount,
+              dropRate,
+              isNewLowest: Boolean(hasNewLowestEstimated && item.lowest_estimated_price),
+            });
+          }
+        } else if (priceInfo.myPrice && prevPriceLog.my_price) {
+          // Both have authentic personalized prices: compare myPrice
+          if (priceInfo.myPrice < prevPriceLog.my_price) {
+            const dropAmount = prevPriceLog.my_price - priceInfo.myPrice;
+            const dropRate = Math.round((dropAmount / prevPriceLog.my_price) * 100);
+            results.priceDropped.push({
+              item,
+              priceInfo,
+              priceType: 'myPrice',
+              prevPrice: prevPriceLog.my_price,
+              currentPrice: priceInfo.myPrice,
+              dropAmount,
+              dropRate,
+              isNewLowest: Boolean(hasNewLowestMyPrice && item.lowest_my_price),
+            });
+          }
+        } else if (priceInfo.salePrice && prevPriceLog.sale_price) {
+          // At least one snapshot lacks authentic myPrice: compare public salePrice
+          if (priceInfo.salePrice < prevPriceLog.sale_price) {
+            const dropAmount = prevPriceLog.sale_price - priceInfo.salePrice;
+            const dropRate = Math.round((dropAmount / prevPriceLog.sale_price) * 100);
+            results.priceDropped.push({
+              item,
+              priceInfo,
+              priceType: 'salePrice',
+              prevPrice: prevPriceLog.sale_price,
+              currentPrice: priceInfo.salePrice,
+              dropAmount,
+              dropRate,
+              isNewLowest: Boolean(hasNewLowestSalePrice && item.lowest_sale_price),
+            });
+          }
         }
       }
 
       // Record in price_logs
-      db.recordPriceLog({
+      dbInstance.recordPriceLog({
         goods_no: item.goods_no,
         date: today,
         normal_price: priceInfo.normalPrice,
         sale_price: priceInfo.salePrice,
+        coupon_price: priceInfo.couponPrice,
         sale_rate: priceInfo.saleRate || 0,
         my_price: priceInfo.myPrice,
+        estimated_my_price: priceInfo.estimatedMyPrice,
         coupon_name: priceInfo.couponName,
         coupon_discount: priceInfo.couponDiscount,
         member_discount: 0,
+        point_discount: 0,
         is_sold_out: priceInfo.isSoldOut,
       });
 
       results.success++;
-      results.items.push(priceInfo);
+      orderedItems[itemIndex] = priceInfo;
 
+      completedCount++;
       if (onProgress) {
         onProgress({
-          current: i + 1,
+          current: completedCount,
           total: activeItems.length,
           item,
           priceInfo,
@@ -266,14 +465,18 @@ export async function collectPricesForActiveItems({
       }
     } catch (err) {
       results.failed++;
+      completedCount++;
       console.error(`\n[Error] Failed to collect price for ${item.goods_no} (${item.goods_name}):`, err.message);
     }
-  }
+  });
+
+  // Preserve index correlation in results.items
+  results.items = orderedItems.filter(Boolean);
 
   const durationMs = Date.now() - startTime;
   results.durationMs = durationMs;
 
-  db.recordDailyRun({
+  dbInstance.recordDailyRun({
     date: today,
     total_tracked: results.success,
     price_dropped_count: results.priceDropped.length,
