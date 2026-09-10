@@ -63,7 +63,7 @@ describe('Search MySize Bridge', () => {
     };
 
     await resolveMySizeFilter(kwargs, 'test_cookie=abc', mockGetMySize);
-    assert.deepEqual(passedOptions, { type: 'top', limit: 1, tolerance: 2 });
+    assert.deepEqual(passedOptions, { type: 'top', limit: 5, tolerance: 2 });
     assert.equal(passedCookie, 'test_cookie=abc');
     assert.equal(kwargs.measure, '총장:72-76,가슴:56-60');
   });
@@ -82,10 +82,58 @@ describe('Search MySize Bridge', () => {
     assert.equal(kwargs.measure, '총장:71-77,가슴:55-61');
   });
 
-  test('resolveMySizeFilter warns on error without blocking or crashing', async () => {
-    const origWarn = console.warn;
-    const warnings = [];
-    console.warn = (msg) => warnings.push(msg);
+  test('resolveMySizeFilter searches past first item when first item lacks measurements', async () => {
+    const mockGetMySize = async () => {
+      return [
+        {
+          goodsNo: 111,
+          goodsName: '비니 모자 (악세서리)',
+          category: '기타',
+          length: '-',
+          chest: '-',
+          waist: '-',
+          shoulder: '-',
+          sleeve: '-',
+          thigh: '-',
+        },
+        {
+          goodsNo: 222,
+          goodsName: '릴렉스드 옥스포드 셔츠',
+          category: '상의',
+          length: '75cm',
+          chest: '59cm',
+        },
+      ];
+    };
+
+    const kwargs = {
+      'my-size': 'top',
+    };
+
+    await resolveMySizeFilter(kwargs, '', mockGetMySize);
+    assert.equal(kwargs.measure, '총장:73-77,가슴:57-61');
+  });
+
+  test('resolveMySizeFilter leaves kwargs.measure undefined if all items lack measurements', async () => {
+    const mockGetMySize = async () => {
+      return [
+        { length: '-', chest: '-' },
+        { length: null },
+      ];
+    };
+
+    const kwargs = {
+      'my-size': 'top',
+    };
+
+    await resolveMySizeFilter(kwargs, '', mockGetMySize);
+    assert.equal(kwargs.measure, undefined);
+  });
+
+  test('resolveMySizeFilter logs warning to stderr on error without blocking or crashing', async () => {
+    const origError = console.error;
+    const errors = [];
+    console.error = (msg) => errors.push(msg);
 
     try {
       const mockFailingGetMySize = async () => {
@@ -98,10 +146,10 @@ describe('Search MySize Bridge', () => {
 
       await resolveMySizeFilter(kwargs, '', mockFailingGetMySize);
       assert.equal(kwargs.measure, undefined);
-      assert.equal(warnings.length, 1);
-      assert.ok(warnings[0].includes('[musinsa search] my-size warning: 로그인이 필요합니다.'));
+      assert.equal(errors.length, 1);
+      assert.ok(errors[0].includes('[musinsa search] my-size warning: 로그인이 필요합니다.'));
     } finally {
-      console.warn = origWarn;
+      console.error = origError;
     }
   });
 });

@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatMySizeToFilterString, normalizeMySizeRows } from '/Users/hyunjun_macbook_pro/.opencli/clis/musinsa/mysize.js';
+import { formatMySizeToFilterString, normalizeMySizeRows, getMusinsaMySize } from '/Users/hyunjun_macbook_pro/.opencli/clis/musinsa/mysize.js';
 
 describe('Musinsa MySize Data Formatter & Filter Converter', () => {
   test('normalizes raw purchased garment measurements into clean rows', () => {
@@ -34,6 +34,7 @@ describe('Musinsa MySize Data Formatter & Filter Converter', () => {
       shoulder: '51.5cm',
       sleeve: '63cm',
       thigh: '-',
+      filterArgs: '-',
     });
   });
 
@@ -79,6 +80,7 @@ describe('Musinsa MySize Data Formatter & Filter Converter', () => {
       shoulder: '-',
       sleeve: '-',
       thigh: '33cm',
+      filterArgs: '-',
     });
   });
 
@@ -141,5 +143,55 @@ describe('Musinsa MySize Data Formatter & Filter Converter', () => {
   test('handles empty or blank row in formatMySizeToFilterString', () => {
     assert.equal(formatMySizeToFilterString({}), '');
     assert.equal(formatMySizeToFilterString(null), '');
+  });
+
+  test('as-filter mode populates filterArgs and preserves all standard columns', async () => {
+    const origFetch = global.fetch;
+    try {
+      global.fetch = async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            list: [
+              {
+                goodsNo: 501234,
+                goodsName: '릴렉스드 옥스포드 셔츠',
+                brandName: '포터리',
+                sizeName: '3',
+                sizeType: 'TOP',
+                measurements: [
+                  { name: '총장', value: 75.5 },
+                  { name: '가슴단면', value: 59.0 },
+                  { name: '어깨너비', value: 51.5 },
+                  { name: '소매길이', value: 63.0 },
+                ],
+              },
+            ],
+          },
+        }),
+      });
+
+      const rows = await getMusinsaMySize({ 'as-filter': true, tolerance: 2 });
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].goodsNo, 501234);
+      assert.equal(rows[0].brand, '포터리');
+      assert.equal(rows[0].goodsName, '릴렉스드 옥스포드 셔츠');
+      assert.equal(rows[0].size, '3');
+      assert.equal(rows[0].category, '상의');
+      assert.equal(rows[0].length, '75.5cm');
+      assert.equal(rows[0].chest, '59cm');
+      assert.equal(rows[0].waist, '-');
+      assert.equal(rows[0].shoulder, '51.5cm');
+      assert.equal(rows[0].sleeve, '63cm');
+      assert.equal(rows[0].thigh, '-');
+      assert.equal(rows[0].filterArgs, '--measure "총장:74-78,가슴:57-61,어깨:50-54,소매:61-65"');
+
+      // Also verify options.asFilter camelCase works
+      const rowsCamel = await getMusinsaMySize({ asFilter: true, tolerance: 2 });
+      assert.equal(rowsCamel[0].filterArgs, '--measure "총장:74-78,가슴:57-61,어깨:50-54,소매:61-65"');
+    } finally {
+      global.fetch = origFetch;
+    }
   });
 });
