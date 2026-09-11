@@ -15,6 +15,8 @@
 
 3. **하루 1회 실행 보장 데몬 (`launchd`)**
    - macOS 백그라운드 서비스(`launchd`)로 매일 오전 09:30에 조용히 실행됩니다.
+   - **잠자기 인식(Sleep-aware)**: 덮개를 닫아 둔 상태(DarkWake)에서 실행되면 응답할 수 없는 Chrome/OpenCLI 브리지를 기다리지 않고 즉시 공개가 직통 파서로 수집한 뒤 `deferred`로 기록합니다. 이후 30분 간격 catch-up 틱(10:00~21:30) 중 맥이 완전히 깨어난 첫 시점에 로그인 쿠폰가로 자동 재수집(upgrade)합니다.
+   - 실행 명령은 `caffeinate -i -s -u`로 감싸져 수집 도중 다시 잠들지 않고, 덮개가 열려 있으면 DarkWake를 정상 기상으로 승격시킵니다. 현재 상태와 다음 틱의 동작은 `node src/cli.js power-status`로 확인할 수 있습니다.
    - 그 시간에 맥북이 꺼져 있었어도 부팅 시 1회 즉시 실행되며, 하루에 맥북을 여러 번 껐다 켜도 **'Daily Lock'** 메커니즘을 통해 무조건 하루 1번만 실행됩니다.
 
 4. **수동 관심 상품 등록 (`watch`)**
@@ -184,8 +186,11 @@ opencli musinsa measurements --type pants
 
 ### 4. macOS 백그라운드 자동 실행 스케줄러 등록
 ```bash
-# 매일 오전 09:30 자동 실행 데몬 설치
+# 매일 오전 09:30 자동 실행 데몬 설치 (30분 간격 catch-up 포함, 재설치 시 기존 설정 교체)
 node src/cli.js daemon-install
+
+# 전원/기상 상태와 다음 daily 틱의 동작 확인
+node src/cli.js power-status
 
 # 데몬 삭제
 node src/cli.js daemon-uninstall

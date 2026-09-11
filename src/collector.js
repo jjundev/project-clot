@@ -170,6 +170,7 @@ export async function collectPricesForActiveItems({
   onSessionWarning = null,
   items = null,
   source = null,
+  skipOpenCli = false,
 } = {}) {
   let activeItems;
   if (items) {
@@ -195,6 +196,9 @@ export async function collectPricesForActiveItems({
     discontinued: [],
     items: [],
     sessionWarningTriggered: false,
+    // 'full' = OpenCLI authenticated prices, 'deferred' = OpenCLI intentionally skipped
+    // (Mac asleep / DarkWake), 'degraded' = OpenCLI attempted but failed -> direct parser.
+    mode: 'full',
   };
 
   const startTime = Date.now();
@@ -205,8 +209,15 @@ export async function collectPricesForActiveItems({
   const vipGoodsNos = vipItems.map((it) => it.goods_no);
   let consecutiveOpenCliErrors = 0;
 
+  if (skipOpenCli && vipGoodsNos.length > 0) {
+    console.warn(
+      `⏸ [OpenCLI Deferred] Browser bridge unavailable (Mac asleep/DarkWake). Skipping OpenCLI for ${vipGoodsNos.length} VIP items; using fast direct parser.`
+    );
+    results.mode = 'deferred';
+  }
+
   // Pre-warm Chrome Musinsa session in background before batching VIP items
-  if (vipGoodsNos.length > 0 && prewarmFn) {
+  if (!skipOpenCli && vipGoodsNos.length > 0 && prewarmFn) {
     try {
       console.log('🌅 Pre-warming Chrome Musinsa session in background...');
       await prewarmFn({ waitMs: process.env.NODE_ENV === 'test' ? 0 : 3000 });
@@ -215,7 +226,7 @@ export async function collectPricesForActiveItems({
     }
   }
 
-  for (let i = 0; i < vipGoodsNos.length; i += openCliChunkSize) {
+  for (let i = 0; skipOpenCli ? false : i < vipGoodsNos.length; i += openCliChunkSize) {
     if (consecutiveOpenCliErrors >= 2) {
       console.warn(
         `⚡ [OpenCLI CircuitBreaker] 2 consecutive OpenCLI batch failures/timeouts. Skipping remaining ${vipGoodsNos.length - i} items and proceeding to fast direct parser.`
@@ -297,6 +308,10 @@ export async function collectPricesForActiveItems({
   }
 
 
+  if (!skipOpenCli && vipGoodsNos.length > 0) {
+    results.mode = results.sessionWarningTriggered || openCliPriceMap.size === 0 ? 'degraded' : 'full';
+  }
+
   let completedCount = 0;
   const orderedItems = new Array(activeItems.length);
 
@@ -341,6 +356,11 @@ export async function collectPricesForActiveItems({
 
       // Check status changes (Restock / Soldout)
       const prevPriceLog = dbInstance.getLatestPrice(item.goods_no);
+      // Price-drop baseline: latest log *before today*, so a same-day re-run (deferred -> full
+      // upgrade) compares against yesterday's snapshot instead of this morning's estimate.
+      const baselinePriceLog = dbInstance.getLatestPriceBefore
+        ? dbInstance.getLatestPriceBefore(item.goods_no, today)
+        : prevPriceLog;
       const wasSoldOut = prevPriceLog ? Boolean(prevPriceLog.is_sold_out) : item.status === 'SOLDOUT';
 
       if (wasSoldOut && !priceInfo.isSoldOut) {
@@ -377,10 +397,10 @@ export async function collectPricesForActiveItems({
       }
 
       // Check for price drop: compare like-for-like
-      if (prevPriceLog) {
+      if (baselinePriceLog) {
         if (item.source === 'discovery') {
           // Like-for-like comparison for estimated prices
-          const prevEst = prevPriceLog.estimated_my_price;
+          const prevEst = baselinePriceLog.estimated_my_price;
           if (prevEst && priceInfo.estimatedMyPrice && priceInfo.estimatedMyPrice < prevEst) {
             const dropAmount = prevEst - priceInfo.estimatedMyPrice;
             const dropRate = Math.round((dropAmount / prevEst) * 100);
@@ -395,32 +415,32 @@ export async function collectPricesForActiveItems({
               isNewLowest: Boolean(hasNewLowestEstimated && item.lowest_estimated_price),
             });
           }
-        } else if (priceInfo.myPrice && prevPriceLog.my_price) {
+        } else if (priceInfo.myPrice && baselinePriceLog.my_price) {
           // Both have authentic personalized prices: compare myPrice
-          if (priceInfo.myPrice < prevPriceLog.my_price) {
-            const dropAmount = prevPriceLog.my_price - priceInfo.myPrice;
-            const dropRate = Math.round((dropAmount / prevPriceLog.my_price) * 100);
+          if (priceInfo.myPrice < baselinePriceLog.my_price) {
+            const dropAmount = baselinePriceLog.my_price - priceInfo.myPrice;
+            const dropRate = Math.round((dropAmount / baselinePriceLog.my_price) * 100);
             results.priceDropped.push({
               item,
               priceInfo,
               priceType: 'myPrice',
-              prevPrice: prevPriceLog.my_price,
+              prevPrice: baselinePriceLog.my_price,
               currentPrice: priceInfo.myPrice,
               dropAmount,
               dropRate,
               isNewLowest: Boolean(hasNewLowestMyPrice && item.lowest_my_price),
             });
           }
-        } else if (priceInfo.salePrice && prevPriceLog.sale_price) {
+        } else if (priceInfo.salePrice && baselinePriceLog.sale_price) {
           // At least one snapshot lacks authentic myPrice: compare public salePrice
-          if (priceInfo.salePrice < prevPriceLog.sale_price) {
-            const dropAmount = prevPriceLog.sale_price - priceInfo.salePrice;
-            const dropRate = Math.round((dropAmount / prevPriceLog.sale_price) * 100);
+          if (priceInfo.salePrice < baselinePriceLog.sale_price) {
+            const dropAmount = baselinePriceLog.sale_price - priceInfo.salePrice;
+            const dropRate = Math.round((dropAmount / baselinePriceLog.sale_price) * 100);
             results.priceDropped.push({
               item,
               priceInfo,
               priceType: 'salePrice',
-              prevPrice: prevPriceLog.sale_price,
+              prevPrice: baselinePriceLog.sale_price,
               currentPrice: priceInfo.salePrice,
               dropAmount,
               dropRate,
@@ -482,6 +502,7 @@ export async function collectPricesForActiveItems({
     price_dropped_count: results.priceDropped.length,
     restocked_count: results.restocked.length,
     duration_ms: durationMs,
+    mode: results.mode,
   });
 
   return results;

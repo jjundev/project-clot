@@ -13,6 +13,7 @@ import { discoverCategoryGoods } from './discovery.js';
 import { setupEnvironment, getExtendedPath } from './env.js';
 import { generateDashboardHtml } from './visualizer.js';
 import { classifyCategory } from './classifier.js';
+import { probeBrowserBridge, getMacPowerState } from './power.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,7 +28,7 @@ export function parseArgs(rawArgs = process.argv.slice(2)) {
   const command = args[0] || 'help';
   const flags = {};
   const positional = [];
-  const BOOLEAN_FLAGS = new Set(['force', 'with-discovery', 'no-open', 'help']);
+  const BOOLEAN_FLAGS = new Set(['force', 'with-discovery', 'no-open', 'help', 'skip-opencli', 'assume-awake']);
 
   for (let i = 1; i < args.length; i++) {
     const a = args[i];
@@ -263,30 +264,100 @@ export async function handleDiscover(flags = {}, dbInstance = db) {
   return allDiscovered;
 }
 
+/**
+ * Decides what the `daily` command should do given today's existing run (if any) and
+ * whether the Chrome/OpenCLI browser bridge is currently usable.
+ *
+ * Modes recorded in daily_runs.mode:
+ *   - 'full'     : OpenCLI authenticated prices collected. Done for the day.
+ *   - 'deferred' : Mac was asleep/DarkWake, OpenCLI skipped on purpose (cheap run, direct parser).
+ *                  Re-run automatically ("upgrade") as soon as the bridge becomes usable.
+ *   - 'degraded' : OpenCLI was attempted while awake but failed. Not retried automatically
+ *                  (the user already got a session warning) — avoids hammering all day.
+ *
+ * @returns {{ action: 'run'|'skip', mode: 'full'|'deferred', upgrade: boolean, reason: string }}
+ */
+export function decideDailyRun({ existingRun = null, bridgeUsable = true, force = false } = {}) {
+  const mode = bridgeUsable ? 'full' : 'deferred';
+  if (force) {
+    return { action: 'run', mode, upgrade: false, reason: '--force' };
+  }
+  if (!existingRun) {
+    return { action: 'run', mode, upgrade: false, reason: 'first run of the day' };
+  }
+  const prevMode = existingRun.mode || 'full';
+  if (prevMode === 'deferred' && bridgeUsable) {
+    return {
+      action: 'run',
+      mode: 'full',
+      upgrade: true,
+      reason: 'earlier run was deferred (Mac asleep); browser bridge is now available',
+    };
+  }
+  if (prevMode === 'deferred') {
+    return { action: 'skip', mode: prevMode, upgrade: false, reason: 'deferred run already recorded; Mac still not fully awake' };
+  }
+  return { action: 'skip', mode: prevMode, upgrade: false, reason: `already collected today (mode: ${prevMode})` };
+}
+
+function formatPowerState(power) {
+  const lid = power.lidClosed === null ? '?' : power.lidClosed ? 'closed' : 'open';
+  const wake = power.lastWake || '?';
+  const display = power.displayOn === null ? '?' : power.displayOn ? 'on' : 'off';
+  return `lid=${lid} wake=${wake} display=${display}`;
+}
+
 async function handleDailyRun(flags) {
   const today = new Date().toISOString().split('T')[0];
   const force = Boolean(flags.force);
 
-  console.log(`\n========================================`);
-  console.log(`🚀 [Project-Clot] Daily Run: ${today}`);
-  console.log(`========================================`);
+  // 0. Decide run mode from macOS power state (lid closed / DarkWake => defer OpenCLI)
+  const existingRun = db.getDailyRun ? db.getDailyRun(today) : null;
+  let power;
+  if (flags['skip-opencli']) {
+    power = { platform: process.platform, bridgeUsable: false, reason: '--skip-opencli flag', lidClosed: null, lastWake: null, displayOn: null };
+  } else if (flags['assume-awake']) {
+    power = { platform: process.platform, bridgeUsable: true, reason: '--assume-awake flag', lidClosed: null, lastWake: null, displayOn: null };
+  } else {
+    power = await probeBrowserBridge({ retryDelayMs: process.env.NODE_ENV === 'test' ? 0 : 5000 });
+  }
+  const decision = decideDailyRun({ existingRun, bridgeUsable: power.bridgeUsable, force });
 
-  if (!force && db.hasRunToday(today)) {
-    console.log(`✨ [Daily Lock] Already collected prices today (${today}). Skipping.`);
+  if (decision.action === 'skip') {
+    // Catch-up ticks fire every 30 minutes; keep this to a single quiet line.
+    console.log(`⏭ [Daily Lock] ${today} ${decision.reason}. (${formatPowerState(power)})`);
     return;
   }
 
-  // 1. Sync liked items from Musinsa
-  try {
-    const syncRes = await syncLikedItemsFromMusinsa({ prewarmFn: prewarmMusinsaSession });
-    const promotedCount = syncRes.promotedItems?.length || 0;
+  const deferred = decision.mode === 'deferred';
+
+  console.log(`\n========================================`);
+  console.log(`🚀 [Project-Clot] Daily Run: ${today}${deferred ? ' (deferred mode)' : decision.upgrade ? ' (upgrade run)' : ''}`);
+  console.log(`========================================`);
+  console.log(`🔋 Power state: ${formatPowerState(power)} — ${power.reason}`);
+  if (deferred) {
     console.log(
-      `📊 Sync Summary: +${syncRes.newItems.length} new, ${syncRes.reactivatedItems.length} reactivated, ${promotedCount} promoted, ${syncRes.unlikedItems.length} unliked, ${syncRes.unchangedCount} unchanged.`
+      `⏸ [Deferred Mode] Browser bridge unavailable. Skipping OpenCLI (likes sync + my-prices) and collecting public prices via direct parser.\n   Will automatically upgrade to authenticated prices on the next check once the Mac is fully awake.`
     );
-  } catch (err) {
-    console.warn(`⚠️ Warning: Liked items sync failed, proceeding with existing items. (${err.message})`);
-    if (err.message.includes('로그인이 필요합니다') || err.message.includes('AUTH_REQUIRED')) {
-      await notifySessionWarning({ reason: '무신사 좋아요 목록 동기화 인증 실패 (로그인 만료)' });
+  } else if (decision.upgrade) {
+    console.log(`🔁 [Upgrade Run] Morning run was deferred; re-collecting with the authenticated Chrome session.`);
+  }
+
+  // 1. Sync liked items from Musinsa (needs the browser bridge)
+  if (deferred) {
+    console.log('🔄 Liked items sync skipped (deferred mode).');
+  } else {
+    try {
+      const syncRes = await syncLikedItemsFromMusinsa({ prewarmFn: prewarmMusinsaSession });
+      const promotedCount = syncRes.promotedItems?.length || 0;
+      console.log(
+        `📊 Sync Summary: +${syncRes.newItems.length} new, ${syncRes.reactivatedItems.length} reactivated, ${promotedCount} promoted, ${syncRes.unlikedItems.length} unliked, ${syncRes.unchangedCount} unchanged.`
+      );
+    } catch (err) {
+      console.warn(`⚠️ Warning: Liked items sync failed, proceeding with existing items. (${err.message})`);
+      if (err.message.includes('로그인이 필요합니다') || err.message.includes('AUTH_REQUIRED')) {
+        await notifySessionWarning({ reason: '무신사 좋아요 목록 동기화 인증 실패 (로그인 만료)' });
+      }
     }
   }
 
@@ -296,8 +367,9 @@ async function handleDailyRun(flags) {
   const results = await collectPricesForActiveItems({
     source: 'like',
     concurrency,
-    prewarmFn: prewarmMusinsaSession,
-    enableSelfHealing: true,
+    prewarmFn: deferred ? null : prewarmMusinsaSession,
+    skipOpenCli: deferred,
+    enableSelfHealing: !deferred,
     onSessionWarning: notifySessionWarning,
     onProgress: ({ current, total, item, priceInfo }) => {
       const displayPrice = priceInfo.isSoldOut
@@ -311,6 +383,7 @@ async function handleDailyRun(flags) {
   console.log('\n');
 
   console.log(`✅ Collection complete in ${(results.durationMs / 1000).toFixed(1)}s.`);
+  console.log(`  • Mode: ${results.mode}${results.mode !== 'full' ? ' (public/estimated prices)' : ' (authenticated my-prices)'}`);
   console.log(`  • Success: ${results.success} / Failed: ${results.failed}`);
   console.log(`  • Price Drops: ${results.priceDropped.length}`);
   console.log(`  • Restocks: ${results.restocked.length}`);
@@ -472,6 +545,49 @@ function handleHistory(positional) {
   console.log('');
 }
 
+/**
+ * Daily schedule: the primary 09:30 run plus catch-up ticks every 30 minutes until 22:00.
+ * Catch-up ticks are near-free (single "Daily Lock" line) unless the morning run was
+ * deferred because the Mac was asleep, in which case the first tick after the lid opens
+ * upgrades the day's data to authenticated prices.
+ */
+export function buildDailySchedule({
+  primary = { hour: 9, minute: 30 },
+  catchupEveryMinutes = 30,
+  catchupFromHour = 10,
+  catchupUntilHour = 22,
+} = {}) {
+  const entries = [primary];
+  for (let hour = catchupFromHour; hour < catchupUntilHour; hour++) {
+    for (let minute = 0; minute < 60; minute += catchupEveryMinutes) {
+      if (hour === primary.hour && minute === primary.minute) continue;
+      entries.push({ hour, minute });
+    }
+  }
+  return entries;
+}
+
+function renderCalendarIntervals(schedule) {
+  return schedule
+    .map(
+      ({ hour, minute }) => `        <dict>
+            <key>Hour</key>
+            <integer>${hour}</integer>
+            <key>Minute</key>
+            <integer>${minute}</integer>
+        </dict>`
+    )
+    .join('\n');
+}
+
+export const CAFFEINATE_PATH = '/usr/bin/caffeinate';
+// -i: no idle sleep while the run is in progress (a DarkWake would otherwise re-sleep in
+//     seconds and stretch a 5-minute run across several sleep cycles, as on 2026-09-11).
+// -s: also hold off system sleep while on AC power.
+// -u: declare user activity — turns the display on / promotes a DarkWake to a full wake
+//     when the lid is open, which is what lets Chrome + the OpenCLI extension respond.
+export const CAFFEINATE_ARGS = ['-i', '-s', '-u'];
+
 export function generatePlistContent({
   nodePath = process.execPath,
   scriptPath = path.join(__dirname, 'cli.js'),
@@ -479,7 +595,12 @@ export function generatePlistContent({
   logDir = path.join(ROOT_DIR, 'logs'),
   extendedPath = getExtendedPath(),
   homeDir = os.homedir(),
+  schedule = buildDailySchedule(),
+  caffeinatePath = CAFFEINATE_PATH,
 } = {}) {
+  const caffeinateArgs = caffeinatePath
+    ? [`        <string>${caffeinatePath}</string>`, ...CAFFEINATE_ARGS.map((a) => `        <string>${a}</string>`)].join('\n') + '\n'
+    : '';
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -488,7 +609,7 @@ export function generatePlistContent({
     <string>com.musinsa.price-tracker</string>
     <key>ProgramArguments</key>
     <array>
-        <string>${nodePath}</string>
+${caffeinateArgs}        <string>${nodePath}</string>
         <string>${scriptPath}</string>
         <string>daily</string>
     </array>
@@ -500,12 +621,9 @@ export function generatePlistContent({
         <string>${homeDir}</string>
     </dict>
     <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key>
-        <integer>9</integer>
-        <key>Minute</key>
-        <integer>30</integer>
-    </dict>
+    <array>
+${renderCalendarIntervals(schedule)}
+    </array>
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
@@ -545,7 +663,8 @@ function handleInstallDaemon() {
     execSync(`launchctl load "${PLIST_TARGET}"`);
     console.log(`✅ Successfully installed & loaded macOS background daemon!`);
     console.log(`   Service: ${PLIST_NAME}`);
-    console.log(`   Schedule: Daily at 09:30 AM (Catch-up on boot enabled)`);
+    console.log(`   Schedule: Daily at 09:30 AM + catch-up checks every 30 min until 22:00`);
+    console.log(`   Sleep-aware: wrapped in caffeinate; defers OpenCLI while the Mac is asleep/lid closed`);
     console.log(`   Logs: ${path.join(logDir, 'daily.log')}`);
   } catch (err) {
     console.error('Failed to load launchctl:', err.message);
@@ -700,6 +819,17 @@ async function main() {
     case 'daemon-uninstall':
       handleUninstallDaemon();
       break;
+    case 'power-status': {
+      const power = getMacPowerState();
+      const existingRun = db.getDailyRun(new Date().toISOString().split('T')[0]);
+      console.log(`🔋 Power state: ${formatPowerState(power)}`);
+      console.log(`   Browser bridge usable: ${power.bridgeUsable ? 'YES' : 'NO'} — ${power.reason}`);
+      if (power.lastWakeAt) console.log(`   Last wake event: ${power.lastWakeAt}`);
+      console.log(`   Today's run: ${existingRun ? `${existingRun.mode || 'full'} (completed ${existingRun.completed_at})` : 'none yet'}`);
+      const decision = decideDailyRun({ existingRun, bridgeUsable: power.bridgeUsable });
+      console.log(`   Next daily tick would: ${decision.action}${decision.action === 'run' ? ` (${decision.mode}${decision.upgrade ? ', upgrade' : ''})` : ''} — ${decision.reason}`);
+      break;
+    }
     default:
       console.log(`
 Project-Clot: Musinsa Automated Price Tracker & Wishlist Manager
@@ -708,7 +838,9 @@ Usage:
   node src/cli.js <command> [options]
 
 Commands:
-  daily [--force] [--concurrency=1-5] [--with-discovery]  Run daily sync & price tracking (default concurrency: 3)
+  daily [--force] [--concurrency=1-5] [--with-discovery] [--skip-opencli] [--assume-awake]
+                         Run daily sync & price tracking (default concurrency: 3).
+                         Defers OpenCLI automatically while the Mac is asleep / lid closed.
   discover [--category <codes>] [--limit <n>] [--min-likes <n>]  Discover popular products matching criteria
   sync                   Sync liked items from Musinsa account
   track [goodsNo] [--concurrency=1-5]  Track active items or promote discovery item to VIP
@@ -718,8 +850,9 @@ Commands:
   history <goodsNo>      View price history table for a specific product
   visualize [goodsNo]    Generate and launch interactive price trend dashboard
   export                 Export JSON snapshot for Git commit
-  daemon-install         Install macOS launchd background scheduler (09:30 AM)
+  daemon-install         Install macOS launchd background scheduler (09:30 AM + 30-min catch-up)
   daemon-uninstall       Uninstall macOS background scheduler
+  power-status           Show macOS power/wake state and what the next daily tick would do
 `);
       break;
   }

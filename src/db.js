@@ -106,6 +106,17 @@ export class ClotDatabase {
         if (!e.message.includes('duplicate column name')) throw e;
       }
     }
+
+    // daily_runs.mode: 'full' (OpenCLI authenticated prices), 'deferred' (Mac asleep/DarkWake,
+    // OpenCLI skipped on purpose), 'degraded' (OpenCLI attempted but failed -> direct parser).
+    const dailyRunCols = this.db.prepare("PRAGMA table_info(daily_runs)").all().map((c) => c.name);
+    if (!dailyRunCols.includes('mode')) {
+      try {
+        this.db.exec("ALTER TABLE daily_runs ADD COLUMN mode TEXT DEFAULT 'full';");
+      } catch (e) {
+        if (!e.message.includes('duplicate column name')) throw e;
+      }
+    }
   }
 
   getItem(goodsNo) {
@@ -332,6 +343,21 @@ export class ClotDatabase {
     return stmt.get(Number(goodsNo));
   }
 
+  /**
+   * Latest price log strictly before the given date (YYYY-MM-DD).
+   * Used as the price-drop baseline so that re-running the same day (e.g. a deferred
+   * run being upgraded once the Mac is awake) compares against yesterday, not itself.
+   */
+  getLatestPriceBefore(goodsNo, dateStr) {
+    const stmt = this.db.prepare(`
+      SELECT * FROM price_logs
+      WHERE goods_no = ? AND date < ?
+      ORDER BY date DESC, id DESC
+      LIMIT 1
+    `);
+    return stmt.get(Number(goodsNo), dateStr);
+  }
+
   getPriceLogs(goodsNo) {
     const stmt = this.db.prepare('SELECT * FROM price_logs WHERE goods_no = ? ORDER BY date ASC');
     return stmt.all(Number(goodsNo));
@@ -348,8 +374,12 @@ export class ClotDatabase {
   }
 
   hasRunToday(dateStr) {
+    return Boolean(this.getDailyRun(dateStr));
+  }
+
+  getDailyRun(dateStr) {
     const stmt = this.db.prepare('SELECT * FROM daily_runs WHERE date = ?');
-    return Boolean(stmt.get(dateStr));
+    return stmt.get(dateStr) || null;
   }
 
   recordDailyRun({
@@ -358,12 +388,13 @@ export class ClotDatabase {
     price_dropped_count = 0,
     restocked_count = 0,
     duration_ms = 0,
+    mode = 'full',
   }) {
     const now = new Date().toISOString();
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO daily_runs (
-        date, total_tracked, price_dropped_count, restocked_count, duration_ms, completed_at
-      ) VALUES (?, ?, ?, ?, ?, ?)
+        date, total_tracked, price_dropped_count, restocked_count, duration_ms, completed_at, mode
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       date,
@@ -371,7 +402,8 @@ export class ClotDatabase {
       price_dropped_count,
       restocked_count,
       duration_ms,
-      now
+      now,
+      mode
     );
   }
 
