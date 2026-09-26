@@ -92,3 +92,88 @@ describe('verifySession diagnostics', () => {
     assert.deepEqual(Object.keys(r).sort(), ['cookie', 'loggedIn', 'rotated']);
   });
 });
+
+const MAIN = /^https:\/\/www\.musinsa\.com\/$/;
+const PRODUCT = /^https:\/\/www\.musinsa\.com\/products\//;
+const LOGIN = /login-status/;
+
+describe('probeExpiredSession', () => {
+  test('visits main, product, login-status in order with a chained cookie jar', async () => {
+    const { fetchFn, calls } = router([
+      [MAIN, () => res(200, { setCookies: [`app_atk=${NEW_ATK}; Path=/; Max-Age=86400`] })],
+      [PRODUCT, () => res(200, { body: productHtml(true) })],
+      [LOGIN, () => res(200, { body: loginBody(true) })],
+    ]);
+    const r = await session.probeExpiredSession(COOKIE, { fetchFn, goodsNo: 123, delayMs: 0 });
+    assert.deepEqual(calls.map((c) => c.url), [
+      'https://www.musinsa.com/', 'https://www.musinsa.com/products/123', session.LOGIN_STATUS_URL,
+    ]);
+    assert.equal(calls[0].redirect, 'manual');
+    assert.equal(calls[1].redirect, 'manual');
+    assert.equal(calls[1].cookie.includes(NEW_ATK), true);
+    assert.deepEqual(r.steps.map((s) => s.target), ['main', 'product', 'login-status']);
+    assert.equal(r.steps[0].authSetCookies[0].name, 'app_atk');
+    assert.equal(r.steps[1].pageLoggedIn, true);
+    assert.equal(r.steps[2].loggedIn, true);
+    assert.equal(r.renewed, true);
+    assert.equal(r.tokensChanged, true);
+    assert.equal(r.renewedCookie.includes(NEW_ATK), true);
+    assert.equal(JSON.stringify(r.steps).includes(NEW_ATK), false);
+  });
+
+  test('redirect Location keeps only the path', async () => {
+    const { fetchFn } = router([
+      [MAIN, () => res(302, { location: `https://www.musinsa.com/auth/login?returnUrl=%2F&t=${SECRET_ATK}` })],
+      [LOGIN, () => res(200, { body: loginBody(false) })],
+    ]);
+    const r = await session.probeExpiredSession(COOKIE, { fetchFn, delayMs: 0 });
+    assert.equal(r.steps[0].status, 302);
+    assert.equal(r.steps[0].location, '/auth/login');
+    assert.equal(JSON.stringify(r.steps).includes(SECRET_ATK), false);
+  });
+
+  test('a timed-out step is recorded and the probe continues', async () => {
+    const { fetchFn, calls } = router([
+      [MAIN, () => { throw Object.assign(new Error('t'), { name: 'TimeoutError' }); }],
+      [PRODUCT, () => { throw new TypeError('fetch failed'); }],
+      [LOGIN, () => res(200, { body: loginBody(false) })],
+    ]);
+    const r = await session.probeExpiredSession(COOKIE, { fetchFn, goodsNo: 1, delayMs: 0 });
+    assert.deepEqual(r.steps[0], { target: 'main', status: null, error: 'timeout' });
+    assert.deepEqual(r.steps[1], { target: 'product', status: null, error: 'network' });
+    assert.equal(calls.length, 3);
+    assert.equal(r.renewed, false);
+    assert.equal(r.renewedCookie, null);
+  });
+
+  test('no goodsNo: no product request', async () => {
+    const { fetchFn, calls } = router([
+      [MAIN, () => res(200)],
+      [LOGIN, () => res(200, { body: loginBody(false) })],
+    ]);
+    const r = await session.probeExpiredSession(COOKIE, { fetchFn, delayMs: 0 });
+    assert.equal(calls.length, 2);
+    assert.deepEqual(r.steps.map((s) => s.target), ['main', 'login-status']);
+  });
+
+  test('waits delayMs between the two www requests', async () => {
+    const { fetchFn, calls } = router([
+      [MAIN, () => res(200)],
+      [PRODUCT, () => res(200, { body: productHtml(false) })],
+      [LOGIN, () => res(200, { body: loginBody(false) })],
+    ]);
+    await session.probeExpiredSession(COOKIE, { fetchFn, goodsNo: 1, delayMs: 60 });
+    assert.ok(calls[1].at - calls[0].at >= 55);
+  });
+
+  test('expired cookie accepted again on the final check: renewed, tokensChanged false', async () => {
+    const { fetchFn } = router([
+      [MAIN, () => res(200)],
+      [LOGIN, () => res(200, { body: loginBody(true) })],
+    ]);
+    const r = await session.probeExpiredSession(COOKIE, { fetchFn, delayMs: 0 });
+    assert.equal(r.renewed, true);
+    assert.equal(r.tokensChanged, false);
+    assert.equal(r.renewedCookie, COOKIE);
+  });
+});

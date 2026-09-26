@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { getExecOptions } from './env.js';
-import { USER_AGENT } from './myprice.js';
+import { USER_AGENT, extractProductDetail } from './myprice.js';
 
 /**
  * Musinsa login cookie cache for authenticated HTTPS price collection.
@@ -17,6 +17,7 @@ const AUTH_COOKIE_NAMES = ['app_atk', 'app_rtk', 'mss_mac'];
 const MAX_LIFETIME_SAMPLES = 10;
 const HOUR_MS = 3_600_000;
 const KEEPER_BRIDGE_BACKOFF_MS = 2 * HOUR_MS;
+const PROBE_DELAY_MS = 700;
 
 // RFC 6265 cookie-octet. Anything else (CR/LF, spaces, quotes) would break or smuggle into the
 // Cookie header — and Node's header-validation error would print the whole value to the log.
@@ -158,6 +159,71 @@ async function verifyOnce(cookie, fetchFn) {
     }
   }
   return done({ loggedIn: true, cookie: serializeAuthCookies(jar), rotated });
+}
+
+const sleep = (ms) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve());
+
+function locationPath(res, base) {
+  const loc = res.headers?.get?.('location');
+  if (!loc) return null;
+  try {
+    return new URL(loc, base).pathname; // the query may carry tokens (returnUrl, t=…)
+  } catch {
+    return null;
+  }
+}
+
+async function probeStep(target, url, jar, fetchFn, goodsNo = null) {
+  let res;
+  try {
+    res = await fetchFn(url, {
+      headers: { Cookie: jar.cookie, 'User-Agent': USER_AGENT, Accept: 'text/html,application/xhtml+xml', Referer: 'https://www.musinsa.com/' },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(LOGIN_STATUS_TIMEOUT_MS),
+    });
+  } catch (err) {
+    const timedOut = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+    return { target, status: null, error: timedOut ? 'timeout' : 'network' };
+  }
+  const setCookies = res.headers?.getSetCookie?.() ?? [];
+  jar.cookie = mergeAuthSetCookies(jar.cookie, setCookies).cookie;
+  const step = {
+    target,
+    status: typeof res.status === 'number' ? res.status : null,
+    location: locationPath(res, url),
+    authSetCookies: summarizeAuthSetCookies(setCookies),
+  };
+  if (goodsNo !== null) {
+    try {
+      step.pageLoggedIn = res.ok ? extractProductDetail(await res.text(), goodsNo)?.loggedIn ?? null : null;
+    } catch {
+      step.pageLoggedIn = null;
+    }
+  }
+  return step;
+}
+
+/**
+ * Replays what a browser does with an expired cookie — main page, one product page (SSR), then
+ * login-status — carrying any auth Set-Cookie forward, to see whether the server refreshes tokens.
+ * renewedCookie is for the caller only; never store it in meta or print it.
+ */
+export async function probeExpiredSession(cookie, { fetchFn = fetch, goodsNo = null, delayMs = PROBE_DELAY_MS } = {}) {
+  const jar = { cookie };
+  const steps = [await probeStep('main', 'https://www.musinsa.com/', jar, fetchFn)];
+  if (goodsNo) {
+    await sleep(delayMs);
+    steps.push(await probeStep('product', `https://www.musinsa.com/products/${goodsNo}`, jar, fetchFn, goodsNo));
+  }
+  const final = await verifySession(jar.cookie, { fetchFn, diagnostics: true });
+  steps.push({ target: 'login-status', status: final.status, authSetCookies: final.authSetCookies, loggedIn: final.loggedIn });
+  const renewed = final.loggedIn === true && isUsable(parseAuthCookies(final.cookie));
+  return {
+    steps,
+    renewed,
+    tokensChanged: renewed && final.cookie !== cookie,
+    renewedCookie: renewed ? final.cookie : null,
+  };
 }
 
 function readSessionFile(sessionPath) {
