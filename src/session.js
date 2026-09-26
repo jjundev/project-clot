@@ -3,12 +3,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { getExecOptions } from './env.js';
+import { USER_AGENT } from './myprice.js';
 
 /**
  * Musinsa login cookie cache for authenticated HTTPS price collection.
  * Lives under ~/.clot — never inside the repo, because the daily run does `git add data/` and pushes.
  */
 export const DEFAULT_SESSION_PATH = path.join(os.homedir(), '.clot', 'musinsa-session.json');
+export const LOGIN_STATUS_URL = 'https://my.musinsa.com/api/member/v1/login-status';
 
 const AUTH_COOKIE_NAMES = ['app_atk', 'app_rtk', 'mss_mac'];
 const MAX_LIFETIME_SAMPLES = 10;
@@ -73,6 +75,44 @@ export function mergeAuthSetCookies(cookie, setCookieHeaders = [], now = Date.no
     }
   }
   return { cookie: serializeAuthCookies(jar), rotated, revoked };
+}
+
+/**
+ * One login-status call. loggedIn: true/false, or null when the answer is unknown
+ * (network error, non-2xx, non-JSON, missing flag) — callers then keep the cache.
+ * Picks up new tokens from Set-Cookie and from data.authTokenInfo (raw cookie values).
+ */
+export async function verifySession(cookie, { fetchFn = fetch } = {}) {
+  let res;
+  try {
+    res = await fetchFn(LOGIN_STATUS_URL, {
+      headers: { Cookie: cookie, 'User-Agent': USER_AGENT, Accept: 'application/json', Referer: 'https://www.musinsa.com/' },
+    });
+  } catch {
+    return { loggedIn: null, cookie, rotated: false };
+  }
+  const merged = mergeAuthSetCookies(cookie, res.headers?.getSetCookie?.() ?? []);
+  if (merged.revoked) return { loggedIn: false, cookie: merged.cookie, rotated: merged.rotated };
+  if (!res.ok) return { loggedIn: null, cookie, rotated: false };
+  let body;
+  try {
+    body = await res.json();
+  } catch {
+    return { loggedIn: null, cookie, rotated: false };
+  }
+  const loggedIn = typeof body?.data?.loggedIn === 'boolean' ? body.data.loggedIn : null;
+  if (loggedIn !== true) return { loggedIn, cookie: loggedIn === null ? cookie : merged.cookie, rotated: false };
+
+  const jar = parseAuthCookies(merged.cookie);
+  let rotated = merged.rotated;
+  const tokens = body.data.authTokenInfo || {};
+  for (const [name, value] of [['app_atk', tokens.accessToken], ['app_rtk', tokens.refreshToken]]) {
+    if (typeof value === 'string' && value && jar.get(name) !== value) {
+      jar.set(name, value);
+      rotated = true;
+    }
+  }
+  return { loggedIn: true, cookie: serializeAuthCookies(jar), rotated };
 }
 
 function readSessionFile(sessionPath) {
@@ -182,30 +222,73 @@ export function fetchSessionCookieFromBridge({ execFn = execSync, session = 'clo
   }
 }
 
-export async function getSessionCookie({
-  path: sessionPath = DEFAULT_SESSION_PATH,
-  allowBridge = true,
-  fetchFromBridge = fetchSessionCookieFromBridge,
-} = {}) {
+/** Verifies the cached cookie over HTTPS; persists rotations and records lifetime on death. */
+async function verifyCached(sessionPath, verify) {
   const cached = readSessionCookie(sessionPath);
-  if (cached) return cached;
+  if (!cached) return { cookie: null, loggedIn: false };
+  const result = await verify(cached);
+  if (result.loggedIn === true) {
+    if (result.cookie !== cached) writeSessionCookie(result.cookie, sessionPath);
+    updateSessionMeta({ lastVerifiedAt: new Date().toISOString() }, sessionPath);
+    return { cookie: result.cookie, loggedIn: true };
+  }
+  if (result.loggedIn === false) recordObservedLifetime(sessionPath);
+  return { cookie: cached, loggedIn: result.loggedIn };
+}
+
+async function renewFromBridge(sessionPath, allowBridge, fetchFromBridge) {
+  clearSessionCookie(sessionPath);
   if (!allowBridge) return null;
   const fresh = await fetchFromBridge();
   if (fresh) writeSessionCookie(fresh, sessionPath);
   return fresh || null;
 }
 
+export async function getSessionCookie({
+  path: sessionPath = DEFAULT_SESSION_PATH,
+  allowBridge = true,
+  fetchFromBridge = fetchSessionCookieFromBridge,
+  verify = verifySession,
+} = {}) {
+  const { cookie, loggedIn } = await verifyCached(sessionPath, verify);
+  // null = login-status unknown: keep using the cache rather than dropping a possibly-good session.
+  if (loggedIn !== false) return cookie;
+  return renewFromBridge(sessionPath, allowBridge, fetchFromBridge);
+}
+
+/** Called after a product page reported logged-out: only a confirmed HTTPS login avoids the bridge. */
 export async function refreshSessionCookie({
   path: sessionPath = DEFAULT_SESSION_PATH,
   allowBridge = true,
   fetchFromBridge = fetchSessionCookieFromBridge,
+  verify = verifySession,
 } = {}) {
-  clearSessionCookie(sessionPath);
-  return getSessionCookie({ path: sessionPath, allowBridge, fetchFromBridge });
+  const { cookie, loggedIn } = await verifyCached(sessionPath, verify);
+  if (loggedIn === true) return cookie;
+  return renewFromBridge(sessionPath, allowBridge, fetchFromBridge);
 }
 
 /** Builds the `sessionProvider` consumed by collectPricesForActiveItems. */
-export function makeSessionProvider({ allowBridge = true, path: sessionPath = DEFAULT_SESSION_PATH, fetchFromBridge } = {}) {
-  const opts = { path: sessionPath, allowBridge, ...(fetchFromBridge ? { fetchFromBridge } : {}) };
-  return async ({ refresh = false } = {}) => (refresh ? refreshSessionCookie(opts) : getSessionCookie(opts));
+export function makeSessionProvider({ allowBridge = true, path: sessionPath = DEFAULT_SESSION_PATH, fetchFromBridge, verify } = {}) {
+  const opts = {
+    path: sessionPath,
+    allowBridge,
+    ...(fetchFromBridge ? { fetchFromBridge } : {}),
+    ...(verify ? { verify } : {}),
+  };
+  const provider = async ({ refresh = false } = {}) => (refresh ? refreshSessionCookie(opts) : getSessionCookie(opts));
+  /** Applies Set-Cookie headers from an authenticated response to the cache. */
+  provider.absorb = (setCookieHeaders) => {
+    const current = readSessionCookie(sessionPath);
+    if (!current) return null;
+    const merged = mergeAuthSetCookies(current, setCookieHeaders);
+    if (merged.revoked) {
+      clearSessionCookie(sessionPath);
+      return { cookie: null, revoked: true };
+    }
+    if (merged.rotated) writeSessionCookie(merged.cookie, sessionPath);
+    return { cookie: merged.cookie, revoked: false };
+  };
+  provider.describe = () => describeSession(sessionPath);
+  return provider;
 }

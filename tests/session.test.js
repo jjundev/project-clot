@@ -9,11 +9,23 @@ import {
   DEFAULT_SESSION_PATH, pickAuthCookies, readSessionCookie, writeSessionCookie, clearSessionCookie,
   fetchSessionCookieFromBridge, getSessionCookie, refreshSessionCookie, makeSessionProvider,
   parseAuthCookies, serializeAuthCookies, mergeAuthSetCookies, readSessionMeta, updateSessionMeta,
-  recordObservedLifetime, describeSession, formatSessionSummary,
+  recordObservedLifetime, describeSession, formatSessionSummary, verifySession, LOGIN_STATUS_URL,
 } from '../src/session.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const COOKIE = 'app_atk=AAA; app_rtk=BBB; mss_mac=CCC';
+const okVerify = async (cookie) => ({ loggedIn: true, cookie, rotated: false });
+const deadVerify = async (cookie) => ({ loggedIn: false, cookie, rotated: false });
+const unknownVerify = async (cookie) => ({ loggedIn: null, cookie, rotated: false });
+
+function jsonRes(status, body, setCookies = []) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { getSetCookie: () => setCookies },
+    json: async () => (typeof body === 'string' ? JSON.parse(body) : body),
+  };
+}
 let tmpPath;
 
 beforeEach(() => {
@@ -93,40 +105,158 @@ describe('fetchSessionCookieFromBridge', () => {
   });
 });
 
-describe('getSessionCookie / refreshSessionCookie / makeSessionProvider', () => {
-  test('cache hit does not touch the bridge', async () => {
-    writeSessionCookie(COOKIE, tmpPath);
-    let bridgeCalls = 0;
-    const cookie = await getSessionCookie({ path: tmpPath, allowBridge: true, fetchFromBridge: () => { bridgeCalls++; return 'x'; } });
-    assert.equal(cookie, COOKIE);
-    assert.equal(bridgeCalls, 0);
+describe('verifySession', () => {
+  test('logged in: sends the cookie to login-status and returns it unchanged', async () => {
+    const calls = [];
+    const fetchFn = async (url, opts) => {
+      calls.push({ url, opts });
+      return jsonRes(200, { data: { loggedIn: true, authTokenInfo: { accessToken: 'AAA', refreshToken: 'BBB' } } });
+    };
+    assert.deepEqual(await verifySession(COOKIE, { fetchFn }), { loggedIn: true, cookie: COOKIE, rotated: false });
+    assert.equal(calls[0].url, LOGIN_STATUS_URL);
+    assert.equal(calls[0].opts.headers.Cookie, COOKIE);
   });
 
-  test('cache miss + allowBridge fetches and caches', async () => {
-    const cookie = await getSessionCookie({ path: tmpPath, allowBridge: true, fetchFromBridge: () => COOKIE });
-    assert.equal(cookie, COOKIE);
+  test('authTokenInfo with new tokens rotates the cookie', async () => {
+    const fetchFn = async () => jsonRes(200, { data: { loggedIn: true, authTokenInfo: { accessToken: 'A2', refreshToken: 'B2' } } });
+    assert.deepEqual(await verifySession(COOKIE, { fetchFn }), {
+      loggedIn: true, cookie: 'app_atk=A2; app_rtk=B2; mss_mac=CCC', rotated: true,
+    });
+  });
+
+  test('Set-Cookie rotation is applied', async () => {
+    const fetchFn = async () => jsonRes(200, { data: { loggedIn: true } }, ['app_atk=A3; Path=/']);
+    const r = await verifySession(COOKIE, { fetchFn });
+    assert.equal(r.cookie, 'app_atk=A3; app_rtk=BBB; mss_mac=CCC');
+    assert.equal(r.rotated, true);
+  });
+
+  test('loggedIn false and revoking Set-Cookie both report false', async () => {
+    assert.equal((await verifySession(COOKIE, { fetchFn: async () => jsonRes(200, { data: { loggedIn: false } }) })).loggedIn, false);
+    const revoking = async () => jsonRes(200, { data: { loggedIn: true } }, ['app_atk=; Max-Age=0']);
+    assert.equal((await verifySession(COOKIE, { fetchFn: revoking })).loggedIn, false);
+  });
+
+  test('unknown status (throw, 5xx, HTML, missing flag) is null and keeps the cookie', async () => {
+    const cases = [
+      async () => { throw new Error('ECONNRESET'); },
+      async () => jsonRes(503, {}),
+      async () => jsonRes(200, '<html>cf challenge</html>'),
+      async () => jsonRes(200, { data: {} }),
+    ];
+    for (const fetchFn of cases) {
+      assert.deepEqual(await verifySession(COOKIE, { fetchFn }), { loggedIn: null, cookie: COOKIE, rotated: false });
+    }
+  });
+});
+
+describe('getSessionCookie / refreshSessionCookie / makeSessionProvider', () => {
+  const bridgeSpy = (value) => {
+    const fn = async () => { fn.calls++; return value; };
+    fn.calls = 0;
+    return fn;
+  };
+
+  test('valid cache: verified, bridge untouched, lastVerifiedAt stamped', async () => {
+    writeSessionCookie(COOKIE, tmpPath);
+    const bridge = bridgeSpy('x');
+    assert.equal(await getSessionCookie({ path: tmpPath, fetchFromBridge: bridge, verify: okVerify }), COOKIE);
+    assert.equal(bridge.calls, 0);
+    assert.ok(readSessionMeta(tmpPath).lastVerifiedAt);
+  });
+
+  test('rotated cookie from verify is persisted', async () => {
+    writeSessionCookie(COOKIE, tmpPath);
+    const verify = async () => ({ loggedIn: true, cookie: 'app_atk=NEW; app_rtk=BBB; mss_mac=CCC', rotated: true });
+    assert.equal(await getSessionCookie({ path: tmpPath, verify }), 'app_atk=NEW; app_rtk=BBB; mss_mac=CCC');
+    assert.equal(readSessionCookie(tmpPath), 'app_atk=NEW; app_rtk=BBB; mss_mac=CCC');
+  });
+
+  test('unknown status keeps cache: returns it, no bridge, not cleared', async () => {
+    writeSessionCookie(COOKIE, tmpPath);
+    const bridge = bridgeSpy('x');
+    assert.equal(await getSessionCookie({ path: tmpPath, fetchFromBridge: bridge, verify: unknownVerify }), COOKIE);
+    assert.equal(bridge.calls, 0);
     assert.equal(readSessionCookie(tmpPath), COOKIE);
   });
 
-  test('cache miss + bridge not allowed returns null without calling the bridge', async () => {
-    let bridgeCalls = 0;
-    const cookie = await getSessionCookie({ path: tmpPath, allowBridge: false, fetchFromBridge: () => { bridgeCalls++; return COOKIE; } });
-    assert.equal(cookie, null);
-    assert.equal(bridgeCalls, 0);
+  test('dead cache + bridge allowed: records lifetime, renews via bridge', async () => {
+    writeSessionCookie(COOKIE, tmpPath, { now: new Date(Date.now() - 2 * 3_600_000) });
+    const fresh = 'app_atk=NEW; app_rtk=R2; mss_mac=CCC';
+    assert.equal(await getSessionCookie({ path: tmpPath, fetchFromBridge: bridgeSpy(fresh), verify: deadVerify }), fresh);
+    assert.equal(readSessionCookie(tmpPath), fresh);
+    assert.equal(readSessionMeta(tmpPath).observedLifetimeHours.length, 1);
   });
 
-  test('refresh clears the stale cache even when the bridge is not allowed', async () => {
+  test('dead cache + bridge not allowed: cleared, null, bridge untouched', async () => {
     writeSessionCookie(COOKIE, tmpPath);
-    assert.equal(await refreshSessionCookie({ path: tmpPath, allowBridge: false, fetchFromBridge: () => 'x' }), null);
+    const bridge = bridgeSpy('x');
+    assert.equal(await getSessionCookie({ path: tmpPath, allowBridge: false, fetchFromBridge: bridge, verify: deadVerify }), null);
+    assert.equal(bridge.calls, 0);
+    assert.equal(readSessionCookie(tmpPath), null);
+  });
+
+  test('cache miss + allowBridge fetches and caches; verify is not called', async () => {
+    let verifyCalls = 0;
+    const verify = async (c) => { verifyCalls++; return okVerify(c); };
+    assert.equal(await getSessionCookie({ path: tmpPath, fetchFromBridge: bridgeSpy(COOKIE), verify }), COOKIE);
+    assert.equal(readSessionCookie(tmpPath), COOKIE);
+    assert.equal(verifyCalls, 0);
+  });
+
+  test('cache miss + bridge not allowed returns null without calling the bridge', async () => {
+    const bridge = bridgeSpy(COOKIE);
+    assert.equal(await getSessionCookie({ path: tmpPath, allowBridge: false, fetchFromBridge: bridge, verify: okVerify }), null);
+    assert.equal(bridge.calls, 0);
+  });
+
+  test('refresh: HTTPS verify succeeding avoids the bridge and keeps the cache', async () => {
+    writeSessionCookie(COOKIE, tmpPath);
+    const bridge = bridgeSpy('x');
+    assert.equal(await refreshSessionCookie({ path: tmpPath, fetchFromBridge: bridge, verify: okVerify }), COOKIE);
+    assert.equal(bridge.calls, 0);
+    assert.equal(readSessionCookie(tmpPath), COOKIE);
+  });
+
+  test('refresh: unknown status is not trusted (page already said expired) -> bridge', async () => {
+    writeSessionCookie(COOKIE, tmpPath);
+    const fresh = 'app_atk=NEW; app_rtk=R2';
+    assert.equal(await refreshSessionCookie({ path: tmpPath, fetchFromBridge: bridgeSpy(fresh), verify: unknownVerify }), fresh);
+  });
+
+  test('refresh clears the stale cache when the bridge is not allowed', async () => {
+    writeSessionCookie(COOKIE, tmpPath);
+    assert.equal(await refreshSessionCookie({ path: tmpPath, allowBridge: false, fetchFromBridge: bridgeSpy('x'), verify: deadVerify }), null);
     assert.equal(readSessionCookie(tmpPath), null);
   });
 
   test('provider: refresh=false reads cache, refresh=true re-fetches', async () => {
     writeSessionCookie('app_atk=OLD; app_rtk=R', tmpPath);
-    const provider = makeSessionProvider({ path: tmpPath, allowBridge: true, fetchFromBridge: () => 'app_atk=NEW; app_rtk=R' });
+    let alive = true;
+    const verify = async (c) => (alive ? okVerify(c) : deadVerify(c));
+    const provider = makeSessionProvider({ path: tmpPath, fetchFromBridge: async () => 'app_atk=NEW; app_rtk=R', verify });
     assert.equal(await provider(), 'app_atk=OLD; app_rtk=R');
+    alive = false;
     assert.equal(await provider({ refresh: true }), 'app_atk=NEW; app_rtk=R');
     assert.equal(readSessionCookie(tmpPath), 'app_atk=NEW; app_rtk=R');
+  });
+
+  test('provider.absorb: rotation persisted, revocation clears, no cache -> null', () => {
+    const provider = makeSessionProvider({ path: tmpPath, verify: okVerify });
+    assert.equal(provider.absorb(['app_atk=X']), null);
+    writeSessionCookie(COOKIE, tmpPath);
+    assert.deepEqual(provider.absorb(['__cf_bm=1']), { cookie: COOKIE, revoked: false });
+    assert.deepEqual(provider.absorb(['app_atk=A2; Path=/']), { cookie: 'app_atk=A2; app_rtk=BBB; mss_mac=CCC', revoked: false });
+    assert.equal(readSessionCookie(tmpPath), 'app_atk=A2; app_rtk=BBB; mss_mac=CCC');
+    assert.deepEqual(provider.absorb(['app_rtk=; Max-Age=0']), { cookie: null, revoked: true });
+    assert.equal(readSessionCookie(tmpPath), null);
+  });
+
+  test('provider.describe reports cache state', () => {
+    const provider = makeSessionProvider({ path: tmpPath, verify: okVerify });
+    assert.equal(provider.describe().cached, false);
+    writeSessionCookie(COOKIE, tmpPath);
+    assert.equal(provider.describe().cached, true);
   });
 });
 
