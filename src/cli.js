@@ -377,6 +377,9 @@ async function handleDailyRun(flags) {
   }
 
   const deferred = decision.mode === 'deferred';
+  // One provider for likes sync and prices: a dead cookie is probed/renewed once and absorbed rotations carry over.
+  // Cached cookie works while asleep; only fetch a fresh one when the browser bridge is usable.
+  const sessionProvider = makeSessionProvider({ allowBridge: !deferred, probe: sessionProbeOptions() });
 
   console.log(`\n========================================`);
   console.log(`🚀 [Project-Clot] Daily Run: ${today}${deferred ? ' (deferred mode)' : decision.upgrade ? ' (upgrade run)' : ''}`);
@@ -384,27 +387,29 @@ async function handleDailyRun(flags) {
   console.log(`🔋 Power state: ${formatPowerState(power)} — ${power.reason}`);
   if (deferred) {
     console.log(
-      `⏸ [Deferred Mode] Browser bridge unavailable. Skipping OpenCLI (likes sync + my-prices) and collecting public prices via direct parser.\n   Will automatically upgrade to authenticated prices on the next check once the Mac is fully awake.`
+      `⏸ [Deferred Mode] Browser bridge unavailable. Skipping OpenCLI; likes sync and VIP prices use the cached HTTPS session only.\n   Upgrades on the next awake check unless HTTPS covered both.`
     );
   } else if (decision.upgrade) {
     console.log(`🔁 [Upgrade Run] Morning run was deferred; re-collecting with the authenticated Chrome session.`);
   }
 
-  // 1. Sync liked items from Musinsa (needs the browser bridge)
-  if (deferred) {
-    console.log('🔄 Liked items sync skipped (deferred mode).');
-  } else {
-    try {
-      const syncRes = await syncLikedItemsFromMusinsa({ prewarmFn: prewarmMusinsaSession });
-      const promotedCount = syncRes.promotedItems?.length || 0;
-      console.log(
-        `📊 Sync Summary: +${syncRes.newItems.length} new, ${syncRes.reactivatedItems.length} reactivated, ${promotedCount} promoted, ${syncRes.unlikedItems.length} unliked, ${syncRes.unchangedCount} unchanged.`
-      );
-    } catch (err) {
-      console.warn(`⚠️ Warning: Liked items sync failed, proceeding with existing items. (${err.message})`);
-      if (err.message.includes('로그인이 필요합니다') || err.message.includes('AUTH_REQUIRED')) {
-        await notifySessionWarning({ reason: '무신사 좋아요 목록 동기화 인증 실패 (로그인 만료)' });
-      }
+  // 1. Sync liked items: HTTPS first; OpenCLI fallback only when the browser bridge is usable
+  let likesSynced = false;
+  try {
+    const syncRes = await syncLikedItemsFromMusinsa({
+      sessionProvider,
+      allowOpenCli: !deferred,
+      prewarmFn: deferred ? null : prewarmMusinsaSession,
+    });
+    likesSynced = true;
+    const promotedCount = syncRes.promotedItems?.length || 0;
+    console.log(
+      `📊 Sync Summary (${syncRes.source}): +${syncRes.newItems.length} new, ${syncRes.reactivatedItems.length} reactivated, ${promotedCount} promoted, ${syncRes.unlikedItems.length} unliked, ${syncRes.unchangedCount} unchanged.`
+    );
+  } catch (err) {
+    console.warn(`⚠️ Warning: Liked items sync failed, proceeding with existing items. (${err.message})`);
+    if (err.message.includes('로그인이 필요합니다') || err.message.includes('AUTH_REQUIRED')) {
+      await notifySessionWarning({ reason: '무신사 좋아요 목록 동기화 인증 실패 (로그인 만료)' });
     }
   }
 
@@ -416,8 +421,8 @@ async function handleDailyRun(flags) {
     concurrency,
     prewarmFn: deferred ? null : prewarmMusinsaSession,
     skipOpenCli: deferred,
-    // Cached cookie works while asleep; only fetch a fresh one when the browser bridge is usable.
-    sessionProvider: makeSessionProvider({ allowBridge: !deferred, probe: sessionProbeOptions() }),
+    sessionProvider,
+    likesSynced,
     enableSelfHealing: !deferred,
     onSessionWarning: notifySessionWarning,
     onProgress: ({ current, total, item, priceInfo }) => {
@@ -771,10 +776,14 @@ async function main() {
       await handleDiscover(flags);
       break;
     case 'sync': {
-      const syncRes = await syncLikedItemsFromMusinsa({ ...flags, prewarmFn: prewarmMusinsaSession });
+      const syncRes = await syncLikedItemsFromMusinsa({
+        ...flags,
+        prewarmFn: prewarmMusinsaSession,
+        sessionProvider: makeSessionProvider({ allowBridge: true, probe: sessionProbeOptions() }),
+      });
       const promotedCount = syncRes.promotedItems?.length || 0;
       console.log(
-        `📊 Sync Summary: +${syncRes.newItems.length} new, ${syncRes.reactivatedItems.length} reactivated, ${promotedCount} promoted from discovery, ${syncRes.unlikedItems.length} unliked, ${syncRes.unchangedCount} unchanged.`
+        `📊 Sync Summary (${syncRes.source}): +${syncRes.newItems.length} new, ${syncRes.reactivatedItems.length} reactivated, ${promotedCount} promoted from discovery, ${syncRes.unlikedItems.length} unliked, ${syncRes.unchangedCount} unchanged.`
       );
       if (syncRes.newItems.length > 0) {
         console.log('🆕 Newly Added Items:');
