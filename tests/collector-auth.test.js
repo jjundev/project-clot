@@ -62,6 +62,29 @@ describe('collectAuthenticatedPrices', () => {
     assert.deepEqual([...map.keys()], [1, 2]);
   });
 
+  test('3 consecutive non-session failures stop the stage (systemic block) and leave the rest for fallback', async () => {
+    let fetches = 0;
+    const map = await collectAuthenticatedPrices({
+      goodsNos: [1, 2, 3, 4, 5, 6],
+      sessionProvider: async () => 'app_atk=x',
+      authFetchFn: async () => { fetches++; throw new Error('Product page unavailable after 4 attempts'); },
+      authDelayMs: 0,
+    });
+    assert.equal(fetches, 3);
+    assert.equal(map.size, 0);
+  });
+
+  test('a success resets the consecutive-failure count', async () => {
+    const outcomes = { 1: 'fail', 2: 'fail', 3: 'ok', 4: 'fail', 5: 'fail', 6: 'ok' };
+    const map = await collectAuthenticatedPrices({
+      goodsNos: [1, 2, 3, 4, 5, 6],
+      sessionProvider: async () => 'app_atk=x',
+      authFetchFn: async (g) => { if (outcomes[g] === 'fail') throw new Error('HTTP 500'); return authInfo(g, 1); },
+      authDelayMs: 0,
+    });
+    assert.deepEqual([...map.keys()], [3, 6]);
+  });
+
   test('refresh that still yields an expired session stops the stage (no loop)', async () => {
     let fetches = 0;
     const map = await collectAuthenticatedPrices({
@@ -76,7 +99,24 @@ describe('collectAuthenticatedPrices', () => {
 });
 
 describe('collectPricesForActiveItems with sessionProvider', () => {
-  test('all VIP items priced over HTTPS: no OpenCLI, no direct fetch, mode=full even when bridge unusable', async () => {
+  test('all VIP items priced over HTTPS with the bridge usable: mode=full and OpenCLI never spawned', async () => {
+    const { db, recorded } = makeDb();
+    let execCalls = 0;
+    const results = await collectPricesForActiveItems({
+      dbInstance: db,
+      execFn: () => { execCalls++; throw new Error('should not be called'); },
+      fetchFn: directFetch,
+      sessionProvider: async () => 'app_atk=x',
+      authFetchFn: async (g) => authInfo(g, 13000 + g),
+      authDelayMs: 0,
+      delayMs: 0,
+    });
+    assert.equal(execCalls, 0);
+    assert.equal(results.mode, 'full');
+    assert.equal(recorded.runs[0].mode, 'full');
+  });
+
+  test('all VIP items priced over HTTPS while asleep: no OpenCLI, no direct fetch, but mode stays deferred so the awake upgrade run still syncs likes', async () => {
     const { db, recorded } = makeDb();
     let execCalls = 0;
     let directCalls = 0;
@@ -92,9 +132,9 @@ describe('collectPricesForActiveItems with sessionProvider', () => {
     });
     assert.equal(execCalls, 0);
     assert.equal(directCalls, 0);
-    assert.equal(results.mode, 'full');
+    assert.equal(results.mode, 'deferred');
     assert.equal(results.authPriced, 2);
-    assert.equal(recorded.runs[0].mode, 'full');
+    assert.equal(recorded.runs[0].mode, 'deferred');
     assert.deepEqual(recorded.logs.map((l) => l.my_price).sort(), [13001, 13002]);
   });
 

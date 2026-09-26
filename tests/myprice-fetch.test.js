@@ -129,6 +129,14 @@ describe('fetchAuthenticatedPriceInfo', () => {
     );
   });
 
+  test('card-promotion 200 with an unexpected body rejects instead of dropping the card discount', async () => {
+    const fetchFn = makeFetch({ promos: res(200, { data: null }) });
+    await assert.rejects(
+      fetchAuthenticatedPriceInfo(GOODS, { cookie: 'app_atk=x', fetchFn, backoffBaseMs: 0 }),
+      /Unexpected card-promotion API response/
+    );
+  });
+
   test('passes specialtyCodes to the coupon API when present', async () => {
     const fetchFn = makeFetch({ pages: [pageHtml({ detail: { ...DETAIL, specialtyCodes: ['sneaker'] } })] });
     await fetchAuthenticatedPriceInfo(GOODS, { cookie: 'app_atk=x', fetchFn, backoffBaseMs: 0 });

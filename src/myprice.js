@@ -130,6 +130,8 @@ export async function fetchAuthenticatedPriceInfo(
   ]);
   const coupons = couponRes?.data?.list;
   if (!Array.isArray(coupons)) throw new Error(`Unexpected coupon API response for goods ${goodsNo}`);
+  const promotions = promoRes?.data?.promotions;
+  if (!Array.isArray(promotions)) throw new Error(`Unexpected card-promotion API response for goods ${goodsNo}`);
   const bestCoupon = coupons.reduce((best, c) => ((c.salePrice || 0) > (best?.salePrice || 0) ? c : best), null);
 
   const isLimitedDc = Boolean(det.isLimitedDc);
@@ -147,7 +149,7 @@ export async function fetchAuthenticatedPriceInfo(
     isGivenPoint: Boolean(det.isGivenPoint),
     memberSavePointRate: gp.memberSavePointRate || 0,
     savePoint: gp.savePoint || 0,
-    cardPromotions: promoRes?.data?.promotions || [],
+    cardPromotions: promotions,
   });
 
   const couponPrice = gp.couponPrice ?? salePrice;

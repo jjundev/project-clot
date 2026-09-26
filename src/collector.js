@@ -157,6 +157,8 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
   throw new Error(`Failed to fetch product ${goodsNo} after ${retries} attempts`);
 }
 
+const AUTH_MAX_CONSECUTIVE_FAILURES = 3;
+
 /**
  * Stage 1 of VIP price collection: exact myPrice over authenticated HTTPS.
  * Sequential with a delay — concurrent product-page requests get soft rate-limited
@@ -181,11 +183,13 @@ export async function collectAuthenticatedPrices({
   let cookie = await getCookie(false);
   if (!cookie) return into;
   let refreshed = false;
+  let consecutiveFailures = 0;
 
   for (let i = 0; i < goodsNos.length; i++) {
     const goodsNo = goodsNos[i];
     try {
       into.set(goodsNo, await authFetchFn(goodsNo, { cookie }));
+      consecutiveFailures = 0;
     } catch (err) {
       if (err?.name === 'SessionExpiredError') {
         if (refreshed) {
@@ -202,6 +206,12 @@ export async function collectAuthenticatedPrices({
         continue;
       }
       console.warn(`[HTTPS Auth Notice] ${goodsNo}: ${err.message}`);
+      if (++consecutiveFailures >= AUTH_MAX_CONSECUTIVE_FAILURES) {
+        console.warn(
+          `⚡ [HTTPS Auth CircuitBreaker] ${consecutiveFailures} consecutive failures (rate limit or page change?). Leaving ${goodsNos.length - i - 1} items for fallback.`
+        );
+        break;
+      }
     }
     if (authDelayMs > 0 && i < goodsNos.length - 1) {
       await new Promise((r) => setTimeout(r, authDelayMs));
@@ -277,11 +287,14 @@ export async function collectPricesForActiveItems({
   // Stage 2 (OpenCLI) and Stage 3 (direct parser) only handle what Stage 1 left behind.
   const remainingVipGoodsNos = vipGoodsNos.filter((g) => !authPriceMap.has(g));
 
-  if (skipOpenCli && remainingVipGoodsNos.length > 0) {
-    console.warn(
-      `⏸ [OpenCLI Deferred] Browser bridge unavailable (Mac asleep/DarkWake). Skipping OpenCLI for ${remainingVipGoodsNos.length} VIP items; using fast direct parser.`
-    );
+  if (skipOpenCli && vipGoodsNos.length > 0) {
+    // Stays 'deferred' even when HTTPS priced every item: the awake upgrade run is what syncs liked items.
     results.mode = 'deferred';
+    if (remainingVipGoodsNos.length > 0) {
+      console.warn(
+        `⏸ [OpenCLI Deferred] Browser bridge unavailable (Mac asleep/DarkWake). Skipping OpenCLI for ${remainingVipGoodsNos.length} VIP items; using fast direct parser.`
+      );
+    }
   }
 
   // Pre-warm Chrome Musinsa session in background before batching VIP items
@@ -376,7 +389,7 @@ export async function collectPricesForActiveItems({
   }
 
 
-  if (vipGoodsNos.length > 0 && remainingVipGoodsNos.length === 0) {
+  if (!skipOpenCli && vipGoodsNos.length > 0 && remainingVipGoodsNos.length === 0) {
     results.mode = 'full'; // every VIP item has an authenticated HTTPS price
   } else if (!skipOpenCli && remainingVipGoodsNos.length > 0) {
     results.mode = results.sessionWarningTriggered || openCliPriceMap.size === 0 ? 'degraded' : 'full';
