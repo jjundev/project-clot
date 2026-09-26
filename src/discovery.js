@@ -236,3 +236,21 @@ export function summarizeMyPriceGap(pairs = []) {
   const medianDiff = diffs.length % 2 ? diffs[mid] : Math.round((diffs[mid - 1] + diffs[mid]) / 2);
   return { n: diffs.length, medianDiff, belowEstimate: diffs.filter((d) => d < 0).length };
 }
+
+/** A discovery goods missing from this many consecutive complete scans becomes DROPPED. */
+export const DISCOVERY_DROP_AFTER_MISSES = 2;
+/** A category returning less than this share of `limit` means the listing page probably broke. */
+export const DISCOVERY_MIN_CATEGORY_FILL = 0.5;
+
+// Changing any of these changes what the listing covers, so "missing" can't be told apart from "out of scope".
+const DISCOVERY_SCOPE_FLAGS = ['category', 'limit', 'min-likes', 'years'];
+
+export function isDefaultDiscoveryScan(flags = {}) {
+  return DISCOVERY_SCOPE_FLAGS.every((k) => flags[k] === undefined);
+}
+
+/** Only a complete scan may count misses: default scope, every category ok and at least half full. */
+export function isCompleteDiscoveryScan(flags, categoryStats = [], limit) {
+  if (!isDefaultDiscoveryScan(flags) || categoryStats.length === 0) return false;
+  return categoryStats.every((s) => s.ok && s.count >= limit * DISCOVERY_MIN_CATEGORY_FILL);
+}
