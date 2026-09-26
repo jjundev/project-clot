@@ -18,6 +18,7 @@ const MAX_LIFETIME_SAMPLES = 10;
 const HOUR_MS = 3_600_000;
 const KEEPER_BRIDGE_BACKOFF_MS = 2 * HOUR_MS;
 const PROBE_DELAY_MS = 700;
+const MAX_EXPIRY_PROBES = 3;
 
 // RFC 6265 cookie-octet. Anything else (CR/LF, spaces, quotes) would break or smuggle into the
 // Cookie header — and Node's header-validation error would print the whole value to the log.
@@ -313,6 +314,48 @@ export function formatSessionSummary({ cached, ageHours, observedLifetimeHours =
   return lives.length ? `${age}, observed lifetimes: ${lives.join('h, ')}h` : age;
 }
 
+function probeAges(meta, now) {
+  const ageBasis = meta.issuedAt ? 'issuedAt' : meta.savedAt ? 'savedAt' : null;
+  return {
+    ageHours: ageBasis ? hoursSince(meta[ageBasis], now) : null,
+    ageBasis,
+    sinceLastVerifiedHours: hoursSince(meta.lastVerifiedAt, now),
+  };
+}
+
+function appendExpiryProbe(entry, sessionPath) {
+  const prev = readSessionMeta(sessionPath).expiryProbes;
+  const list = Array.isArray(prev) ? prev : [];
+  updateSessionMeta({ expiryProbes: [...list, entry].slice(-MAX_EXPIRY_PROBES) }, sessionPath);
+}
+
+/** First sight of a dead cookie: record how the server reacts to it. Never throws. */
+async function runExpiryProbe(sessionPath, cached, initial, probe, trigger) {
+  try {
+    const now = new Date();
+    const ages = probeAges(readSessionMeta(sessionPath), now);
+    let https;
+    try {
+      https = await probeExpiredSession(cached, { fetchFn: probe.fetchFn, goodsNo: probe.goodsNo, delayMs: probe.delayMs });
+    } catch {
+      https = { steps: [], renewed: false, tokensChanged: false, renewedCookie: null };
+    }
+    const entry = {
+      at: now.toISOString(),
+      trigger,
+      ...ages,
+      initialVerify: { status: initial.status ?? null, authSetCookies: initial.authSetCookies ?? [] },
+      httpsProbe: { steps: https.steps, renewed: https.renewed, tokensChanged: https.tokensChanged },
+      browser: null,
+    };
+    appendExpiryProbe(entry, sessionPath);
+    return { probeAt: entry.at, renewedCookie: https.renewedCookie };
+  } catch (err) {
+    console.warn(`[Session Probe Notice] ${err.message}`);
+    return { probeAt: null, renewedCookie: null };
+  }
+}
+
 // Runs in the Chrome page: `opencli browser eval` awaits the Promise (verified 2026-09-26).
 // Contains no single quotes — it is embedded in a single-quoted shell argument.
 const BRIDGE_LOGIN_CHECK_JS =
@@ -356,18 +399,29 @@ export function fetchSessionCookieFromBridge({ execFn = execSync, session = 'clo
   }
 }
 
-/** Verifies the cached cookie over HTTPS; persists rotations and records lifetime on death. */
-async function verifyCached(sessionPath, verify) {
+/**
+ * Verifies the cached cookie over HTTPS; persists rotations and records lifetime on death.
+ * With `probe`, the first death is also probed (runExpiryProbe) before the caller clears the cache.
+ */
+async function verifyCached(sessionPath, verify, probe = null, trigger = 'collect') {
   const cached = readSessionCookie(sessionPath);
   if (!cached) return { cookie: null, loggedIn: false };
-  const result = await verify(cached);
+  const result = await verify(cached, probe ? { diagnostics: true } : undefined);
   if (result.loggedIn === true) {
     if (result.cookie !== cached) writeSessionCookie(result.cookie, sessionPath);
     updateSessionMeta({ lastVerifiedAt: new Date().toISOString() }, sessionPath);
     return { cookie: result.cookie, loggedIn: true };
   }
-  if (result.loggedIn === false) recordObservedLifetime(sessionPath);
-  return { cookie: cached, loggedIn: result.loggedIn };
+  if (result.loggedIn !== false) return { cookie: cached, loggedIn: result.loggedIn };
+  recordObservedLifetime(sessionPath);
+  if (!probe) return { cookie: cached, loggedIn: false };
+  const { probeAt, renewedCookie } = await runExpiryProbe(sessionPath, cached, result, probe, trigger);
+  if (renewedCookie) {
+    writeSessionCookie(renewedCookie, sessionPath);
+    updateSessionMeta({ lastVerifiedAt: new Date().toISOString() }, sessionPath);
+    return { cookie: renewedCookie, loggedIn: true, probeAt, renewedByProbe: true };
+  }
+  return { cookie: cached, loggedIn: false, probeAt, expiredCookie: cached };
 }
 
 async function renewFromBridge(sessionPath, allowBridge, fetchFromBridge) {
@@ -383,10 +437,11 @@ export async function getSessionCookie({
   allowBridge = true,
   fetchFromBridge = fetchSessionCookieFromBridge,
   verify = verifySession,
+  probe = null,
 } = {}) {
-  const { cookie, loggedIn } = await verifyCached(sessionPath, verify);
+  const v = await verifyCached(sessionPath, verify, probe, 'collect');
   // null = login-status unknown: keep using the cache rather than dropping a possibly-good session.
-  if (loggedIn !== false) return cookie;
+  if (v.loggedIn !== false) return v.cookie;
   return renewFromBridge(sessionPath, allowBridge, fetchFromBridge);
 }
 
@@ -401,19 +456,21 @@ export async function refreshSessionCookie({
   fetchFromBridge = fetchSessionCookieFromBridge,
   verify = verifySession,
   failedCookie = null,
+  probe = null,
 } = {}) {
-  const { cookie, loggedIn } = await verifyCached(sessionPath, verify);
-  if (loggedIn === true && cookie !== failedCookie) return cookie;
+  const v = await verifyCached(sessionPath, verify, probe, 'refresh');
+  if (v.loggedIn === true && v.cookie !== failedCookie) return v.cookie;
   return renewFromBridge(sessionPath, allowBridge, fetchFromBridge);
 }
 
 /** Builds the `sessionProvider` consumed by collectPricesForActiveItems. */
-export function makeSessionProvider({ allowBridge = true, path: sessionPath = DEFAULT_SESSION_PATH, fetchFromBridge, verify } = {}) {
+export function makeSessionProvider({ allowBridge = true, path: sessionPath = DEFAULT_SESSION_PATH, fetchFromBridge, verify, probe = null } = {}) {
   const opts = {
     path: sessionPath,
     allowBridge,
     ...(fetchFromBridge ? { fetchFromBridge } : {}),
     ...(verify ? { verify } : {}),
+    ...(probe ? { probe } : {}),
   };
   const provider = async ({ refresh = false, failedCookie = null } = {}) =>
     refresh ? refreshSessionCookie({ ...opts, failedCookie }) : getSessionCookie(opts);
@@ -443,10 +500,11 @@ export async function keepSessionAlive({
   verify = verifySession,
   fetchFromBridge = fetchSessionCookieFromBridge,
   now = new Date(),
+  probe = null,
 } = {}) {
   if (!bridgeUsable) return { status: 'skipped' };
-  const { loggedIn } = await verifyCached(sessionPath, verify);
-  if (loggedIn !== false) return { status: 'ok', ...describeSession(sessionPath, now) };
+  const v = await verifyCached(sessionPath, verify, probe, 'keeper');
+  if (v.loggedIn !== false) return { status: v.renewedByProbe ? 'renewed' : 'ok', ...describeSession(sessionPath, now) };
   // Chrome logged out: don't flash a tab on every 30-minute tick; retry at most every 2 h.
   const lastFail = Date.parse(readSessionMeta(sessionPath).lastBridgeFailedAt);
   if (Number.isFinite(lastFail) && now - lastFail < KEEPER_BRIDGE_BACKOFF_MS) {

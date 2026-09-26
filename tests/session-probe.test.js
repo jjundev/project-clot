@@ -177,3 +177,130 @@ describe('probeExpiredSession', () => {
     assert.equal(r.renewedCookie, COOKIE);
   });
 });
+
+const FRESH = 'app_atk=BRIDGEATK; app_rtk=BRIDGERTK';
+const hoursAgo = (h) => new Date(Date.now() - h * 3_600_000).toISOString();
+const probeRoutes = ({ renew = false } = {}) => router([
+  [MAIN, () => res(200, renew ? { setCookies: [`app_atk=${NEW_ATK}; Path=/`] } : {})],
+  [PRODUCT, () => res(200, { body: productHtml(renew) })],
+  [LOGIN, () => res(200, { body: loginBody(renew) })],
+]);
+const probes = () => session.readSessionMeta(tmpPath).expiryProbes;
+
+describe('expiry probe recording', () => {
+  test('probe is off by default: a dead cache sends no probe request and records nothing', async () => {
+    session.writeSessionCookie(COOKIE, tmpPath);
+    const origFetch = globalThis.fetch;
+    let fetched = 0;
+    globalThis.fetch = async () => { fetched++; throw new Error('no network in tests'); };
+    try {
+      await session.getSessionCookie({ path: tmpPath, verify: deadVerify, fetchFromBridge: async () => null });
+      await session.keepSessionAlive({ bridgeUsable: true, path: tmpPath, verify: deadVerify, fetchFromBridge: async () => null });
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+    assert.equal(fetched, 0);
+    assert.equal(probes(), undefined);
+  });
+
+  test('keeper records one entry for a legacy cache file, then renews through the bridge', async () => {
+    fs.writeFileSync(tmpPath, JSON.stringify({ cookie: COOKIE, savedAt: hoursAgo(10) }), { mode: 0o600 });
+    const { fetchFn } = probeRoutes();
+    const verifyArgs = [];
+    const verify = async (c, opts) => { verifyArgs.push(opts); return { ...(await deadVerify(c)), status: 200, authSetCookies: [] }; };
+    const r = await session.keepSessionAlive({
+      bridgeUsable: true, path: tmpPath, verify, fetchFromBridge: async () => FRESH,
+      probe: { fetchFn, goodsNo: 123, delayMs: 0 },
+    });
+    assert.equal(r.status, 'renewed');
+    assert.equal(session.readSessionCookie(tmpPath), FRESH);
+    assert.deepEqual(verifyArgs[0], { diagnostics: true });
+    const [e] = probes();
+    assert.equal(probes().length, 1);
+    assert.equal(e.trigger, 'keeper');
+    assert.equal(e.ageBasis, 'savedAt');
+    assert.equal(e.ageHours, 10);
+    assert.equal(e.sinceLastVerifiedHours, null);
+    assert.deepEqual(e.initialVerify, { status: 200, authSetCookies: [] });
+    assert.deepEqual(e.httpsProbe.steps.map((s) => s.target), ['main', 'product', 'login-status']);
+    assert.equal(e.httpsProbe.renewed, false);
+    assert.equal(e.browser, null);
+  });
+
+  test('issuedAt, when present, is the age basis', async () => {
+    session.writeSessionCookie(COOKIE, tmpPath, { now: new Date(hoursAgo(7)) });
+    session.updateSessionMeta({ lastVerifiedAt: hoursAgo(0.5) }, tmpPath);
+    const { fetchFn } = probeRoutes();
+    await session.getSessionCookie({ path: tmpPath, allowBridge: false, verify: deadVerify, probe: { fetchFn, delayMs: 0 } });
+    const [e] = probes();
+    assert.equal(e.ageBasis, 'issuedAt');
+    assert.equal(e.ageHours, 7);
+    assert.equal(e.sinceLastVerifiedHours, 0.5);
+    assert.equal(e.trigger, 'collect');
+  });
+
+  test('HTTPS renewal is adopted and the bridge is skipped', async () => {
+    session.writeSessionCookie(COOKIE, tmpPath);
+    const { fetchFn } = probeRoutes({ renew: true });
+    let bridgeCalls = 0;
+    const r = await session.keepSessionAlive({
+      bridgeUsable: true, path: tmpPath, verify: deadVerify,
+      fetchFromBridge: async () => { bridgeCalls++; return FRESH; },
+      probe: { fetchFn, goodsNo: 1, delayMs: 0 },
+    });
+    assert.equal(r.status, 'renewed');
+    assert.equal(bridgeCalls, 0);
+    assert.equal(session.readSessionCookie(tmpPath).includes(NEW_ATK), true);
+    assert.equal(probes()[0].httpsProbe.renewed, true);
+    assert.equal(probes()[0].httpsProbe.tokensChanged, true);
+    assert.equal(JSON.stringify(probes()).includes(NEW_ATK), false);
+  });
+
+  test('refresh trigger: a renewed cookie different from the failed one is returned', async () => {
+    session.writeSessionCookie(COOKIE, tmpPath);
+    const { fetchFn } = probeRoutes({ renew: true });
+    const c = await session.refreshSessionCookie({
+      path: tmpPath, verify: deadVerify, failedCookie: COOKIE, fetchFromBridge: async () => null,
+      probe: { fetchFn, delayMs: 0 },
+    });
+    assert.equal(c.includes(NEW_ATK), true);
+    assert.equal(probes()[0].trigger, 'refresh');
+  });
+
+  test('keeps only the 3 most recent probes', async () => {
+    for (let i = 0; i < 4; i++) {
+      session.writeSessionCookie(COOKIE, tmpPath);
+      const { fetchFn } = probeRoutes();
+      await session.getSessionCookie({ path: tmpPath, allowBridge: false, verify: deadVerify, probe: { fetchFn, delayMs: 0 } });
+    }
+    assert.equal(probes().length, 3);
+  });
+
+  test('unknown login-status: no probe', async () => {
+    session.writeSessionCookie(COOKIE, tmpPath);
+    const { fetchFn, calls } = probeRoutes();
+    await session.getSessionCookie({
+      path: tmpPath, verify: async (c) => ({ loggedIn: null, cookie: c, rotated: false }), probe: { fetchFn, delayMs: 0 },
+    });
+    assert.equal(calls.length, 0);
+    assert.equal(probes(), undefined);
+  });
+
+  test('every probe request failing does not break the flow', async () => {
+    session.writeSessionCookie(COOKIE, tmpPath);
+    const fetchFn = async () => { throw new TypeError('fetch failed'); };
+    const c = await session.getSessionCookie({ path: tmpPath, verify: deadVerify, fetchFromBridge: async () => FRESH, probe: { fetchFn, delayMs: 0 } });
+    assert.equal(c, FRESH);
+    assert.deepEqual(probes()[0].httpsProbe.steps.map((s) => s.error ?? s.loggedIn), ['network', null]);
+  });
+
+  test('makeSessionProvider forwards probe', async () => {
+    session.writeSessionCookie(COOKIE, tmpPath);
+    const { fetchFn } = probeRoutes();
+    const provider = session.makeSessionProvider({
+      allowBridge: false, path: tmpPath, verify: deadVerify, probe: { fetchFn, delayMs: 0 },
+    });
+    await provider();
+    assert.equal(probes().length, 1);
+  });
+});
