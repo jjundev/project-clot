@@ -97,6 +97,28 @@ describe('collectAuthenticatedPrices', () => {
     assert.equal(map.size, 0);
     assert.equal(fetches, 2); // original + one retry after refresh
   });
+  test('a rotated cookie absorbed mid-run is used for the next item', async () => {
+    const provider = async () => 'app_atk=old; app_rtk=r';
+    provider.absorb = (headers) => (headers.length ? { cookie: 'app_atk=new; app_rtk=r', revoked: false } : null);
+    provider.describe = () => ({ cached: true, ageHours: 1, observedLifetimeHours: [] });
+    const seenCookies = [];
+    const authFetchFn = async (g, { cookie, onSetCookie }) => {
+      seenCookies.push(cookie);
+      if (g === 1) onSetCookie(['app_atk=new']);
+      return authInfo(g, 13000);
+    };
+    await collectAuthenticatedPrices({ goodsNos: [1, 2], sessionProvider: provider, authFetchFn, authDelayMs: 0 });
+    assert.deepEqual(seenCookies, ['app_atk=old; app_rtk=r', 'app_atk=new; app_rtk=r']);
+  });
+
+  test('providers without absorb/describe still work (onSetCookie is undefined)', async () => {
+    let received;
+    await collectAuthenticatedPrices({
+      goodsNos: [1], sessionProvider: async () => 'app_atk=x; app_rtk=y',
+      authFetchFn: async (g, opts) => { received = opts; return authInfo(g, 1); }, authDelayMs: 0,
+    });
+    assert.equal(received.onSetCookie, undefined);
+  });
 });
 
 describe('collectPricesForActiveItems with sessionProvider', () => {

@@ -155,4 +155,18 @@ describe('fetchAuthenticatedPriceInfo', () => {
     const couponUrl = new URL(fetchFn.calls.find((c) => c.url.includes('getUsableCoupons')).url);
     assert.equal(couponUrl.searchParams.get('specialtyCodes'), 'sneaker');
   });
+
+  test('forwards product-page Set-Cookie headers to onSetCookie', async () => {
+    const page = { ...res(200, pageHtml()), headers: { getSetCookie: () => ['app_atk=NEW; Path=/'] } };
+    const fetchFn = makeFetch({ pages: [page] });
+    const seen = [];
+    await fetchAuthenticatedPriceInfo(GOODS, { cookie: 'app_atk=OLD; app_rtk=R', fetchFn, onSetCookie: (h) => seen.push(h) });
+    assert.deepEqual(seen, [['app_atk=NEW; Path=/']]);
+  });
+
+  test('responses without headers or Set-Cookie do not call onSetCookie', async () => {
+    const seen = [];
+    await fetchAuthenticatedPriceInfo(GOODS, { cookie: 'app_atk=OLD; app_rtk=R', fetchFn: makeFetch(), onSetCookie: (h) => seen.push(h) });
+    assert.deepEqual(seen, []);
+  });
 });

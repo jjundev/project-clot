@@ -4,6 +4,7 @@ import { getExecOptions } from './env.js';
 import { mapConcurrent } from './pool.js';
 import { estimateMemberPrice } from './discovery.js';
 import { fetchAuthenticatedPriceInfo } from './myprice.js';
+import { formatSessionSummary } from './session.js';
 
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
@@ -181,14 +182,24 @@ export async function collectAuthenticatedPrices({
   };
 
   let cookie = await getCookie(false);
+  if (sessionProvider.describe) {
+    console.log(`🔐 [Session] ${cookie ? 'ready' : 'unavailable'} — ${formatSessionSummary(sessionProvider.describe())}`);
+  }
   if (!cookie) return into;
+  // A rotated cookie seen on any product-page response is used from the next request on.
+  const onSetCookie = sessionProvider.absorb
+    ? (headers) => {
+        const absorbed = sessionProvider.absorb(headers);
+        if (absorbed?.cookie) cookie = absorbed.cookie;
+      }
+    : undefined;
   let refreshed = false;
   let consecutiveFailures = 0;
 
   for (let i = 0; i < goodsNos.length; i++) {
     const goodsNo = goodsNos[i];
     try {
-      into.set(goodsNo, await authFetchFn(goodsNo, { cookie }));
+      into.set(goodsNo, await authFetchFn(goodsNo, { cookie, onSetCookie }));
       consecutiveFailures = 0;
     } catch (err) {
       if (err?.name === 'SessionExpiredError') {

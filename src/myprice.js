@@ -70,10 +70,12 @@ export function extractProductDetail(html, goodsNo) {
   return { detail, loggedIn };
 }
 
-async function fetchProductPage(goodsNo, headers, fetchFn, retries, backoffBaseMs) {
+async function fetchProductPage(goodsNo, headers, fetchFn, retries, backoffBaseMs, onSetCookie) {
   const url = `https://www.musinsa.com/products/${goodsNo}`;
   for (let attempt = 1; attempt <= retries; attempt++) {
     const res = await fetchFn(url, { headers: { ...headers, Accept: 'text/html,application/xhtml+xml' } });
+    const setCookies = res.headers?.getSetCookie?.() ?? [];
+    if (onSetCookie && setCookies.length) onSetCookie(setCookies);
     if (res.status === 404) return { discontinued: true };
     if (res.ok) {
       const parsed = extractProductDetail(await res.text(), goodsNo);
@@ -99,11 +101,11 @@ async function fetchJson(url, headers, fetchFn) {
  */
 export async function fetchAuthenticatedPriceInfo(
   goodsNo,
-  { cookie, fetchFn = fetch, retries = 4, backoffBaseMs = 2000 } = {}
+  { cookie, fetchFn = fetch, retries = 4, backoffBaseMs = 2000, onSetCookie = null } = {}
 ) {
   const headers = { 'User-Agent': USER_AGENT, Referer: 'https://www.musinsa.com/', Cookie: cookie };
 
-  const page = await fetchProductPage(goodsNo, headers, fetchFn, retries, backoffBaseMs);
+  const page = await fetchProductPage(goodsNo, headers, fetchFn, retries, backoffBaseMs, onSetCookie);
   if (page.discontinued) return { status: 404, discontinued: true };
   if (page.loggedIn === false) throw new SessionExpiredError();
   if (page.loggedIn !== true) throw new Error(`Goods ${goodsNo}: login status unknown (no LoginStatus on page)`);
