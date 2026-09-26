@@ -420,6 +420,13 @@ describe('session metadata', () => {
     assert.equal(readSessionMeta(tmpPath).observedLifetimeHours, undefined);
   });
 
+  test('describe reports no age once the cookie is gone (metadata issuedAt survives clear)', () => {
+    writeSessionCookie(COOKIE, tmpPath, { now: new Date('2026-09-26T00:00:00Z') });
+    clearSessionCookie(tmpPath);
+    assert.equal(readSessionMeta(tmpPath).issuedAt, '2026-09-26T00:00:00.000Z');
+    assert.equal(describeSession(tmpPath, new Date('2026-09-27T00:00:00Z')).ageHours, null);
+  });
+
   test('describe + format', () => {
     writeSessionCookie(COOKIE, tmpPath, { now: new Date('2026-09-26T00:00:00Z') });
     updateSessionMeta({ observedLifetimeHours: [11, 12.5, 13] }, tmpPath);

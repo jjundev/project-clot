@@ -188,9 +188,11 @@ export function recordObservedLifetime(sessionPath = DEFAULT_SESSION_PATH, now =
 
 export function describeSession(sessionPath = DEFAULT_SESSION_PATH, now = new Date()) {
   const meta = readSessionMeta(sessionPath);
+  const cached = readSessionCookie(sessionPath) !== null;
   return {
-    cached: readSessionCookie(sessionPath) !== null,
-    ageHours: hoursSince(meta.issuedAt, now),
+    cached,
+    // issuedAt survives clearSessionCookie; without a cookie there is no age to report.
+    ageHours: cached ? hoursSince(meta.issuedAt, now) : null,
     observedLifetimeHours: Array.isArray(meta.observedLifetimeHours) ? meta.observedLifetimeHours : [],
   };
 }
