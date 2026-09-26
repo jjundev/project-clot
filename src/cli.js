@@ -75,11 +75,24 @@ export function parseConcurrency(val, defaultVal = 3) {
  * so a real lowest is never shown next to an estimated current price.
  */
 export function pickDisplayPrices(latest, item = {}) {
-  if (latest?.my_price) return { current: latest.my_price, lowest: item.lowest_my_price ?? latest.my_price };
-  if (latest?.estimated_my_price) return { current: latest.estimated_my_price, lowest: item.lowest_estimated_price ?? null };
-  if (latest?.sale_price) return { current: latest.sale_price, lowest: item.lowest_sale_price || null };
+  // lowest_price_date is shared and, once a real lowest exists, dated to it (db.updateLowestEstimatedPrice).
+  const hasRealLowest = item.lowest_my_price != null;
+  const date = item.lowest_price_date ?? null;
+  if (latest?.my_price) {
+    return { current: latest.my_price, lowest: item.lowest_my_price ?? latest.my_price, lowestDate: hasRealLowest ? date : null };
+  }
+  if (latest?.estimated_my_price) {
+    return { current: latest.estimated_my_price, lowest: item.lowest_estimated_price ?? null, lowestDate: hasRealLowest ? null : date };
+  }
+  if (latest?.sale_price) {
+    return { current: latest.sale_price, lowest: item.lowest_sale_price || null, lowestDate: hasRealLowest ? null : date };
+  }
   // No price log yet: nothing to pair with, keep the old fallback chain.
-  return { current: null, lowest: item.lowest_my_price || item.lowest_estimated_price || item.lowest_sale_price || null };
+  return {
+    current: null,
+    lowest: item.lowest_my_price || item.lowest_estimated_price || item.lowest_sale_price || null,
+    lowestDate: date,
+  };
 }
 
 export function exportDataForGit({ dbInstance = db, dataDir = DATA_DIR } = {}) {
@@ -96,7 +109,7 @@ export function exportDataForGit({ dbInstance = db, dataDir = DATA_DIR } = {}) {
     unliked_items: items.filter((it) => it.status === 'UNLIKED').length,
     items: items.map((it) => {
       const latest = dbInstance.getLatestPrice(it.goods_no);
-      const { current, lowest } = pickDisplayPrices(latest, it);
+      const { current, lowest, lowestDate } = pickDisplayPrices(latest, it);
       const tag = it.source === 'discovery' ? '[탐색]' : '[VIP]';
       const cleanName = (it.goods_name || '').replace(/^\[(VIP|탐색)\]\s*/, '');
       return {
@@ -108,7 +121,7 @@ export function exportDataForGit({ dbInstance = db, dataDir = DATA_DIR } = {}) {
         url: it.url,
         current_price: current,
         lowest_price: lowest,
-        lowest_price_date: it.lowest_price_date || null,
+        lowest_price_date: lowestDate,
         is_sold_out: Boolean(latest?.is_sold_out),
         last_checked: it.last_checked_at,
       };
@@ -248,7 +261,8 @@ export async function handleDiscover(
     });
 
     if (myPrice) {
-      const baseline = dbInstance.getLatestPriceBefore(item.goodsNo, today);
+      // Most discovery rows are estimate-only (capped rotation), so skip back to the last real price.
+      const baseline = dbInstance.getLatestMyPriceBefore(item.goodsNo, today);
       if (baseline?.my_price && myPrice < baseline.my_price) myPriceDrops++;
       if (item.estimatedMyPrice) gapPairs.push({ myPrice, estimatedMyPrice: item.estimatedMyPrice });
     }

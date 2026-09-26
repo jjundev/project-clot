@@ -256,6 +256,16 @@ export class ClotDatabase {
     stmt.run(price, date, Number(goodsNo));
   }
 
+  /** Latest price log with a real my_price strictly before the date: the like-for-like drop baseline. */
+  getLatestMyPriceBefore(goodsNo, dateStr) {
+    return this.db
+      .prepare(
+        `SELECT * FROM price_logs WHERE goods_no = ? AND date < ? AND my_price IS NOT NULL
+         ORDER BY date DESC, id DESC LIMIT 1`
+      )
+      .get(Number(goodsNo), dateStr);
+  }
+
   /** Latest date with a real (authenticated) my_price per goods. Goods with none are absent. */
   getLastMyPriceDates(goodsNos = []) {
     const map = new Map();

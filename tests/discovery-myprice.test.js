@@ -116,28 +116,28 @@ test('summarizeMyPriceGap: median of myPrice - estimate and count below estimate
 test('pickDisplayPrices: real latest pairs with real lowest', () => {
   assert.deepEqual(
     pickDisplayPrices({ my_price: 9000, estimated_my_price: 9500, sale_price: 10000 }, { lowest_my_price: 8500, lowest_estimated_price: 9000 }),
-    { current: 9000, lowest: 8500 }
+    { current: 9000, lowest: 8500, lowestDate: null }
   );
-  assert.deepEqual(pickDisplayPrices({ my_price: 9000 }, {}), { current: 9000, lowest: 9000 });
+  assert.deepEqual(pickDisplayPrices({ my_price: 9000 }, {}), { current: 9000, lowest: 9000, lowestDate: null });
 });
 
 test('pickDisplayPrices: estimate-only latest does not pair with a real lowest', () => {
   assert.deepEqual(
     pickDisplayPrices({ my_price: null, estimated_my_price: 9500, sale_price: 10000 }, { lowest_my_price: 8500, lowest_estimated_price: 9200 }),
-    { current: 9500, lowest: 9200 }
+    { current: 9500, lowest: 9200, lowestDate: null }
   );
   assert.deepEqual(
     pickDisplayPrices({ my_price: null, estimated_my_price: 9500 }, { lowest_my_price: 8500 }),
-    { current: 9500, lowest: null }
+    { current: 9500, lowest: null, lowestDate: null }
   );
 });
 
 test('pickDisplayPrices: sale-only and missing latest', () => {
-  assert.deepEqual(pickDisplayPrices({ sale_price: 10000 }, { lowest_sale_price: 9000 }), { current: 10000, lowest: 9000 });
-  assert.deepEqual(pickDisplayPrices(undefined, {}), { current: null, lowest: null });
+  assert.deepEqual(pickDisplayPrices({ sale_price: 10000 }, { lowest_sale_price: 9000 }), { current: 10000, lowest: 9000, lowestDate: null });
+  assert.deepEqual(pickDisplayPrices(undefined, {}), { current: null, lowest: null, lowestDate: null });
   // No price log yet: keep the old fallback chain (existing export test relies on it)
-  assert.deepEqual(pickDisplayPrices(undefined, { lowest_my_price: 45000, lowest_sale_price: 48000 }), { current: null, lowest: 45000 });
-  assert.deepEqual(pickDisplayPrices(undefined, { lowest_estimated_price: 72000 }), { current: null, lowest: 72000 });
+  assert.deepEqual(pickDisplayPrices(undefined, { lowest_my_price: 45000, lowest_sale_price: 48000 }), { current: null, lowest: 45000, lowestDate: null });
+  assert.deepEqual(pickDisplayPrices(undefined, { lowest_estimated_price: 72000 }), { current: null, lowest: 72000, lowestDate: null });
 });
 
 test('exportDataForGit uses paired display prices', (t) => {
@@ -327,4 +327,39 @@ test('parseArgs + parseAuthLimit: --auth-limit reaches handleDiscover as a numbe
 test('help text documents --auth-limit', () => {
   const src = fs.readFileSync(new URL('../src/cli.js', import.meta.url), 'utf-8');
   assert.match(src, /discover \[--category <codes>\] \[--limit <n>\] \[--min-likes <n>\] \[--auth-limit <n>\]/);
+});
+
+test('discover: drop baseline skips estimate-only days to the last real price', async (t) => {
+  const { db, dir } = tempDb(t);
+  db.upsertItem(itemRow(1));
+  db.recordPriceLog({ goods_no: 1, date: '2026-09-24', my_price: 9000, estimated_my_price: 9200 });
+  db.recordPriceLog({ goods_no: 1, date: '2026-09-25', my_price: null, estimated_my_price: 9200 });
+  const lines = [];
+  t.mock.method(console, 'log', (...args) => lines.push(args.join(' ')));
+  t.mock.method(console, 'warn', () => {});
+  await handleDiscover({ category: '001' }, db, {
+    discoverFn: byCategory({ '001': [listing(1)] }),
+    sessionProvider: async () => 'app_atk=fake',
+    authFetchFn: async (g) => authInfo(g, 8500),
+    authDelayMs: 0, dataDir: dir, today: '2026-09-26',
+  });
+  assert.ok(lines.some((l) => l.includes('myPrice drops vs last myPrice: 1')));
+});
+
+test('exportDataForGit: lowest_price_date belongs to the lowest price kind shown', (t) => {
+  const { db, dir } = tempDb(t);
+  db.upsertItem(itemRow(30));
+  db.recordPriceLog({ goods_no: 30, date: '2026-09-26', my_price: null, estimated_my_price: 47500 });
+  db.updateLowestPrice(30, 45000, null, '2026-09-20');
+  db.updateLowestEstimatedPrice(30, 47000, '2026-09-26');
+  db.upsertItem(itemRow(31));
+  db.recordPriceLog({ goods_no: 31, date: '2026-09-26', my_price: 44000, estimated_my_price: 47500 });
+  db.updateLowestPrice(31, 44000, null, '2026-09-26');
+
+  const rows = JSON.parse(fs.readFileSync(exportDataForGit({ dbInstance: db, dataDir: dir }), 'utf-8')).items;
+  const est = rows.find((it) => it.goods_no === 30);
+  assert.equal(est.lowest_price, 47000);
+  assert.equal(est.lowest_price_date, null); // the stored date is the real lowest's (09-20)
+  const real = rows.find((it) => it.goods_no === 31);
+  assert.equal(real.lowest_price_date, '2026-09-26');
 });
