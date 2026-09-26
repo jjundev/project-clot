@@ -11,7 +11,7 @@ import {
   selectDiscoveryAuthTargets,
   summarizeMyPriceGap,
 } from '../src/discovery.js';
-import { pickDisplayPrices, exportDataForGit, handleDiscover } from '../src/cli.js';
+import { pickDisplayPrices, exportDataForGit, handleDiscover, parseArgs } from '../src/cli.js';
 import { SessionExpiredError } from '../src/myprice.js';
 import { formatHotDealsSummary } from '../src/notifier.js';
 
@@ -316,4 +316,15 @@ test('hot deals: ranks by estimate and shows the real price when present', () =>
   assert.match(lines[1], /No real price/);
   assert.doesNotMatch(lines[1], /나의 할인가/);
   assert.match(lines[2], /Only real is cheap/);
+});
+
+test('parseArgs + parseAuthLimit: --auth-limit reaches handleDiscover as a number', () => {
+  assert.equal(parseAuthLimit(parseArgs(['discover', '--auth-limit', '50']).flags['auth-limit']), 50);
+  assert.equal(parseAuthLimit(parseArgs(['discover', '--auth-limit=0']).flags['auth-limit']), 0);
+  assert.equal(parseAuthLimit(parseArgs(['discover']).flags['auth-limit']), 120);
+});
+
+test('help text documents --auth-limit', () => {
+  const src = fs.readFileSync(new URL('../src/cli.js', import.meta.url), 'utf-8');
+  assert.match(src, /discover \[--category <codes>\] \[--limit <n>\] \[--min-likes <n>\] \[--auth-limit <n>\]/);
 });

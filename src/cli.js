@@ -519,7 +519,8 @@ async function handleDailyRun(flags) {
   if (flags['with-discovery']) {
     console.log(`\n🌐 [Discovery Mode] Running catalog discovery...`);
     try {
-      const discovered = await handleDiscover(flags);
+      // Shares the daily provider: one refresh budget, and deferred runs stay bridge-free.
+      const discovered = await handleDiscover(flags, db, { sessionProvider });
       if (discovered && discovered.length > 0) {
         const hotDealsSummary = formatHotDealsSummary(discovered);
         if (hotDealsSummary) {
@@ -842,7 +843,9 @@ async function main() {
       await handleDailyRun(flags);
       break;
     case 'discover':
-      await handleDiscover(flags);
+      await handleDiscover(flags, db, {
+        sessionProvider: makeSessionProvider({ allowBridge: true, probe: sessionProbeOptions() }),
+      });
       break;
     case 'sync': {
       const syncRes = await syncLikedItemsFromMusinsa({
@@ -995,7 +998,8 @@ Commands:
                          Defers OpenCLI automatically while the Mac is asleep / lid closed.
   skip [date]            Skip today's (or specified date's) price collection and stop running tasks
   audit [date] [--json]  Audit collection integrity, OpenCLI auth rate & health status
-  discover [--category <codes>] [--limit <n>] [--min-likes <n>]  Discover popular products matching criteria
+  discover [--category <codes>] [--limit <n>] [--min-likes <n>] [--auth-limit <n>]
+                         Discover popular products; real prices for up to <n> of them (default 120, 0 = off)
   sync                   Sync liked items from Musinsa account
   track [goodsNo] [--concurrency=1-5]  Track active items or promote discovery item to VIP
   watch <url/goodsNo>    Manually add a product to track
