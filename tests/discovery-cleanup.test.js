@@ -6,6 +6,7 @@ import {
   DISCOVERY_MIN_CATEGORY_FILL,
   isDefaultDiscoveryScan,
   isCompleteDiscoveryScan,
+  partialScanReasons,
   discoverCategoryGoods,
 } from '../src/discovery.js';
 import fs from 'node:fs';
@@ -36,6 +37,25 @@ test('isDefaultDiscoveryScan: only the four scope flags make a scan non-default'
   assert.equal(isDefaultDiscoveryScan({ limit: true }), false); // bare `--limit`
   assert.equal(isDefaultDiscoveryScan({ 'min-likes': '500' }), false);
   assert.equal(isDefaultDiscoveryScan({ years: '3' }), false);
+});
+
+test('partialScanReasons names every reason a scan cannot count misses', () => {
+  assert.deepEqual(partialScanReasons({}, okStats([100, 50]), 100), []);
+  assert.deepEqual(partialScanReasons({ category: '001', years: '3' }, okStats([100]), 100), ['옵션 지정(--category, --years)']);
+  assert.deepEqual(partialScanReasons({}, [], 100), ['스캔한 카테고리 없음']);
+  assert.deepEqual(
+    partialScanReasons(
+      {},
+      [
+        { cat: '001', ok: true, count: 100 },
+        { cat: '002', ok: false, count: 80, reason: '좋아요 조회 실패' },
+        { cat: '003', ok: false, count: 0, reason: '스캔 실패' },
+        { cat: '004', ok: true, count: 42 },
+      ],
+      100
+    ),
+    ['002: 좋아요 조회 실패', '003: 스캔 실패', '004: 42/100 미달']
+  );
 });
 
 test('isCompleteDiscoveryScan: default flags, all ok, each category >= 50% of limit', () => {
@@ -218,13 +238,13 @@ test('discover: two consecutive complete misses drop a goods, one miss keeps it'
 });
 
 const PARTIAL_SCANS = [
-  ['--category 001', { category: '001' }, fullScan({ '001': [listing(2)] })],
-  ['--limit 50', { limit: '50' }, fullScan({ '001': [listing(2)] })],
-  ['a failing category', {}, fullScan({ '001': [listing(2)] }, { fail: ['003'] })],
-  ['a category under 50% of limit', {}, fullScan({ '001': [listing(2)] }, { counts: { '004': 49 } })],
+  ['--category 001', { category: '001' }, fullScan({ '001': [listing(2)] }), '옵션 지정(--category)'],
+  ['--limit 50', { limit: '50' }, fullScan({ '001': [listing(2)] }), '옵션 지정(--limit)'],
+  ['a failing category', {}, fullScan({ '001': [listing(2)] }, { fail: ['003'] }), '003: 스캔 실패'],
+  ['a category under 50% of limit', {}, fullScan({ '001': [listing(2)] }, { counts: { '004': 49 } }), '004: 49/100 미달'],
 ];
 
-for (const [label, flags, discoverFn] of PARTIAL_SCANS) {
+for (const [label, flags, discoverFn, reason] of PARTIAL_SCANS) {
   test(`discover: partial scan (${label}) changes no miss counts or statuses`, async (t) => {
     const { db, dir } = tempDb(t);
     const logs = quiet(t);
@@ -234,7 +254,7 @@ for (const [label, flags, discoverFn] of PARTIAL_SCANS) {
     await discover(db, dir, discoverFn, flags);
     assert.equal(db.getItem(1).status, 'ACTIVE');
     assert.equal(db.getItem(1).discovery_misses, 0);
-    assert.ok(logs.includes('🧹 [Discovery] 부분 스캔이라 정리를 건너뜀'));
+    assert.ok(logs.includes(`🧹 [Discovery] 부분 스캔이라 정리를 건너뜀 — ${reason}`));
   });
 }
 
@@ -264,7 +284,7 @@ test('discover: a partial scan also revives a DROPPED goods', async (t) => {
   await discover(db, dir, fullScan({ '001': [listing(1)] }), { category: '001' });
   assert.equal(db.getItem(1).status, 'ACTIVE');
   assert.equal(db.getItem(1).discovery_misses, 0);
-  assert.ok(logs.includes('🧹 [Discovery] 부분 스캔이라 정리를 건너뜀 (재등장 1개 복귀)'));
+  assert.ok(logs.includes('🧹 [Discovery] 부분 스캔이라 정리를 건너뜀 — 옵션 지정(--category) (재등장 1개 복귀)'));
 });
 
 test('discover: a partial-scan sighting restarts the miss count', async (t) => {
@@ -364,7 +384,7 @@ test('discover: a category with a failed like-count batch makes the scan partial
   await discover(db, dir, flaky);
   assert.equal(db.getItem(1).status, 'ACTIVE');
   assert.equal(db.getItem(1).discovery_misses, 0);
-  assert.ok(logs.includes('🧹 [Discovery] 부분 스캔이라 정리를 건너뜀'));
+  assert.ok(logs.includes('🧹 [Discovery] 부분 스캔이라 정리를 건너뜀 — 002: 좋아요 조회 실패'));
 });
 
 const watchInfo = (goodsNo, extra = {}) => ({

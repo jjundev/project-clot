@@ -252,8 +252,19 @@ export function isDefaultDiscoveryScan(flags = {}) {
   return DISCOVERY_SCOPE_FLAGS.every((k) => flags[k] === undefined);
 }
 
-/** Only a complete scan may count misses: default scope, every category ok and at least half full. */
+/** Why a scan may not count misses; empty means complete (default scope, every category ok and at least half full). */
+export function partialScanReasons(flags = {}, categoryStats = [], limit) {
+  const reasons = [];
+  const scoped = DISCOVERY_SCOPE_FLAGS.filter((k) => flags[k] !== undefined);
+  if (scoped.length > 0) reasons.push(`옵션 지정(${scoped.map((k) => `--${k}`).join(', ')})`);
+  if (categoryStats.length === 0) reasons.push('스캔한 카테고리 없음');
+  for (const s of categoryStats) {
+    if (!s.ok) reasons.push(`${s.cat}: ${s.reason || '스캔 실패'}`);
+    else if (s.count < limit * DISCOVERY_MIN_CATEGORY_FILL) reasons.push(`${s.cat}: ${s.count}/${limit} 미달`);
+  }
+  return reasons;
+}
+
 export function isCompleteDiscoveryScan(flags, categoryStats = [], limit) {
-  if (!isDefaultDiscoveryScan(flags) || categoryStats.length === 0) return false;
-  return categoryStats.every((s) => s.ok && s.count >= limit * DISCOVERY_MIN_CATEGORY_FILL);
+  return partialScanReasons(flags, categoryStats, limit).length === 0;
 }

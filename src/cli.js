@@ -16,7 +16,7 @@ import {
   parseAuthLimit,
   selectDiscoveryAuthTargets,
   summarizeMyPriceGap,
-  isCompleteDiscoveryScan,
+  partialScanReasons,
   DISCOVERY_DROP_AFTER_MISSES,
 } from './discovery.js';
 import { setupEnvironment, getExtendedPath } from './env.js';
@@ -215,7 +215,7 @@ export async function handleDiscover(
       let degraded = false;
       const items = await discoverFn({ categoryCode: cat, limit, minLikes, years, onDegraded: () => { degraded = true; } });
       console.log(`   ✓ Found ${items.length} items matching criteria in category [${cat}].`);
-      categoryStats.push({ cat, ok: !degraded, count: items.length });
+      categoryStats.push({ cat, ok: !degraded, count: items.length, reason: degraded ? '좋아요 조회 실패' : undefined });
 
       for (const item of items) {
         allDiscovered.push(item);
@@ -228,7 +228,7 @@ export async function handleDiscover(
         toRecord.push({ item, existing, cat });
       }
     } catch (err) {
-      categoryStats.push({ cat, ok: false, count: 0 });
+      categoryStats.push({ cat, ok: false, count: 0, reason: '스캔 실패' });
       console.error(`❌ Failed scanning category ${cat}:`, err.message);
     }
   }
@@ -326,12 +326,13 @@ export async function handleDiscover(
   // 4. Cleanup. Seen goods restart their count on any scan; only a complete scan counts misses.
   const seenGoodsNos = [...seen];
   dbInstance.markDiscoverySeen(seenGoodsNos);
-  if (isCompleteDiscoveryScan(flags, categoryStats, limit)) {
+  const partialReasons = partialScanReasons(flags, categoryStats, limit);
+  if (partialReasons.length === 0) {
     const { dropped } = dbInstance.markDiscoveryUnseen(seenGoodsNos, DISCOVERY_DROP_AFTER_MISSES);
     console.log(`🧹 [Discovery] ${DISCOVERY_DROP_AFTER_MISSES}회 연속 미노출 ${dropped}개 → DROPPED, 재등장 ${revivedCount}개 복귀`);
   } else {
     const revivedNote = revivedCount > 0 ? ` (재등장 ${revivedCount}개 복귀)` : '';
-    console.log(`🧹 [Discovery] 부분 스캔이라 정리를 건너뜀${revivedNote}`);
+    console.log(`🧹 [Discovery] 부분 스캔이라 정리를 건너뜀 — ${partialReasons.join(', ')}${revivedNote}`);
   }
 
   if (gapPairs.length > 0) {
