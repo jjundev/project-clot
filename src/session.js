@@ -10,33 +10,146 @@ import { getExecOptions } from './env.js';
  */
 export const DEFAULT_SESSION_PATH = path.join(os.homedir(), '.clot', 'musinsa-session.json');
 
-const AUTH_COOKIE_RE = /^(app_atk|app_rtk|mss_mac)=/;
+const AUTH_COOKIE_NAMES = ['app_atk', 'app_rtk', 'mss_mac'];
+const MAX_LIFETIME_SAMPLES = 10;
+const HOUR_MS = 3_600_000;
 
-export function pickAuthCookies(documentCookie) {
-  return String(documentCookie || '')
-    .split(/;\s*/)
-    .filter((c) => AUTH_COOKIE_RE.test(c))
-    .join('; ');
+/** 'a=1; b=2' -> Map of only the auth cookies (values kept raw, still URL-encoded). */
+export function parseAuthCookies(cookie) {
+  const jar = new Map();
+  for (const part of String(cookie || '').split(/;\s*/)) {
+    const eq = part.indexOf('=');
+    if (eq <= 0) continue;
+    const name = part.slice(0, eq).trim();
+    if (AUTH_COOKIE_NAMES.includes(name)) jar.set(name, part.slice(eq + 1));
+  }
+  return jar;
 }
 
-export function readSessionCookie(sessionPath = DEFAULT_SESSION_PATH) {
+export function serializeAuthCookies(jar) {
+  return AUTH_COOKIE_NAMES.filter((n) => jar.get(n)).map((n) => `${n}=${jar.get(n)}`).join('; ');
+}
+
+export function pickAuthCookies(documentCookie) {
+  return serializeAuthCookies(parseAuthCookies(documentCookie));
+}
+
+// Musinsa authenticates only with app_atk AND app_rtk together (verified 2026-09-26).
+const isUsable = (jar) => Boolean(jar.get('app_atk') && jar.get('app_rtk'));
+
+function isDeletion(attrs, value, now) {
+  if (!value) return true;
+  for (const attr of attrs) {
+    const eq = attr.indexOf('=');
+    const key = (eq < 0 ? attr : attr.slice(0, eq)).trim().toLowerCase();
+    const val = eq < 0 ? '' : attr.slice(eq + 1).trim();
+    if (key === 'max-age' && val !== '' && Number(val) <= 0) return true;
+    if (key === 'expires' && Date.parse(val) <= now) return true;
+  }
+  return false;
+}
+
+/**
+ * Applies Set-Cookie headers to the auth cookie string.
+ * revoked = the server deleted app_atk or app_rtk (logged out).
+ */
+export function mergeAuthSetCookies(cookie, setCookieHeaders = [], now = Date.now()) {
+  const jar = parseAuthCookies(cookie);
+  let rotated = false;
+  let revoked = false;
+  for (const header of setCookieHeaders || []) {
+    const [pair, ...attrs] = String(header).split(';');
+    const eq = pair.indexOf('=');
+    if (eq <= 0) continue;
+    const name = pair.slice(0, eq).trim();
+    if (!AUTH_COOKIE_NAMES.includes(name)) continue;
+    const value = pair.slice(eq + 1).trim();
+    if (isDeletion(attrs, value, now)) {
+      jar.delete(name);
+      if (name !== 'mss_mac') revoked = true;
+    } else if (jar.get(name) !== value) {
+      jar.set(name, value);
+      rotated = true;
+    }
+  }
+  return { cookie: serializeAuthCookies(jar), rotated, revoked };
+}
+
+function readSessionFile(sessionPath) {
   try {
-    const { cookie } = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
-    const filtered = typeof cookie === 'string' ? pickAuthCookies(cookie) : '';
-    return filtered.includes('app_atk=') ? filtered : null;
+    const data = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
+    return data && typeof data === 'object' ? data : {};
   } catch {
-    return null;
+    return {};
   }
 }
 
-export function writeSessionCookie(cookie, sessionPath = DEFAULT_SESSION_PATH) {
+function writeSessionFile(data, sessionPath) {
   fs.mkdirSync(path.dirname(sessionPath), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(sessionPath, JSON.stringify({ cookie, savedAt: new Date().toISOString() }), { mode: 0o600 });
+  fs.writeFileSync(sessionPath, JSON.stringify(data), { mode: 0o600 });
   fs.chmodSync(sessionPath, 0o600);
 }
 
+export function readSessionCookie(sessionPath = DEFAULT_SESSION_PATH) {
+  const { cookie } = readSessionFile(sessionPath);
+  if (typeof cookie !== 'string') return null;
+  const jar = parseAuthCookies(cookie);
+  return isUsable(jar) ? serializeAuthCookies(jar) : null;
+}
+
+export function readSessionMeta(sessionPath = DEFAULT_SESSION_PATH) {
+  const { cookie, ...meta } = readSessionFile(sessionPath);
+  return meta;
+}
+
+export function updateSessionMeta(patch, sessionPath = DEFAULT_SESSION_PATH) {
+  writeSessionFile({ ...readSessionFile(sessionPath), ...patch }, sessionPath);
+}
+
+/** Stores the cookie, keeping metadata. issuedAt moves only when app_atk changed (a new token). */
+export function writeSessionCookie(cookie, sessionPath = DEFAULT_SESSION_PATH, { now = new Date() } = {}) {
+  const prev = readSessionFile(sessionPath);
+  const prevAtk = parseAuthCookies(prev.cookie).get('app_atk');
+  const sameToken = prevAtk && prevAtk === parseAuthCookies(cookie).get('app_atk') && prev.issuedAt;
+  const iso = now.toISOString();
+  writeSessionFile({ ...prev, cookie, savedAt: iso, issuedAt: sameToken ? prev.issuedAt : iso }, sessionPath);
+}
+
+/** Drops the cookie but keeps metadata (lifetime samples, lastWarnedOn). */
 export function clearSessionCookie(sessionPath = DEFAULT_SESSION_PATH) {
-  fs.rmSync(sessionPath, { force: true });
+  if (!fs.existsSync(sessionPath)) return;
+  writeSessionFile(readSessionMeta(sessionPath), sessionPath);
+}
+
+const hoursSince = (iso, now) => {
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? Math.round(((now - t) / HOUR_MS) * 10) / 10 : null;
+};
+
+/** Upper bound of the token lifetime: issuedAt -> the moment it was first seen invalid. */
+export function recordObservedLifetime(sessionPath = DEFAULT_SESSION_PATH, now = new Date()) {
+  const meta = readSessionMeta(sessionPath);
+  const hours = hoursSince(meta.issuedAt, now);
+  if (hours === null) return;
+  const prev = Array.isArray(meta.observedLifetimeHours) ? meta.observedLifetimeHours : [];
+  updateSessionMeta({ observedLifetimeHours: [...prev, hours].slice(-MAX_LIFETIME_SAMPLES) }, sessionPath);
+}
+
+export function describeSession(sessionPath = DEFAULT_SESSION_PATH, now = new Date()) {
+  const meta = readSessionMeta(sessionPath);
+  return {
+    cached: readSessionCookie(sessionPath) !== null,
+    ageHours: hoursSince(meta.issuedAt, now),
+    observedLifetimeHours: Array.isArray(meta.observedLifetimeHours) ? meta.observedLifetimeHours : [],
+  };
+}
+
+/** Log-safe one-liner: never contains cookie values. */
+export function formatSessionSummary({ cached, ageHours, observedLifetimeHours = [] }) {
+  if (!cached) return 'no cached session';
+  const age = ageHours === null ? 'age ?' : `age ${ageHours}h`;
+  const lives = observedLifetimeHours.slice(-3);
+  return lives.length ? `${age}, observed lifetimes: ${lives.join('h, ')}h` : age;
 }
 
 /**
