@@ -212,9 +212,10 @@ export async function handleDiscover(
   for (const cat of categories) {
     try {
       console.log(`📂 Scanning category [${cat}]...`);
-      const items = await discoverFn({ categoryCode: cat, limit, minLikes, years });
+      let degraded = false;
+      const items = await discoverFn({ categoryCode: cat, limit, minLikes, years, onDegraded: () => { degraded = true; } });
       console.log(`   ✓ Found ${items.length} items matching criteria in category [${cat}].`);
-      categoryStats.push({ cat, ok: true, count: items.length });
+      categoryStats.push({ cat, ok: !degraded, count: items.length });
 
       for (const item of items) {
         allDiscovered.push(item);
@@ -593,7 +594,10 @@ async function handleDailyRun(flags) {
 }
 
 
-async function handleWatch(positional) {
+export async function handleWatch(
+  positional,
+  { dbInstance = db, fetchInfoFn = fetchProductPriceInfo, dataDir = DATA_DIR } = {}
+) {
   const target = positional[0];
   if (!target) {
     console.error('Usage: clot watch <url_or_goodsNo>');
@@ -609,13 +613,15 @@ async function handleWatch(positional) {
   }
 
   console.log(`🔍 Inspecting product ${goodsNo}...`);
-  const info = await fetchProductPriceInfo(goodsNo);
+  const info = await fetchInfoFn(goodsNo);
   if (info.discontinued) {
     console.error(`❌ Product ${goodsNo} does not exist or has been discontinued.`);
     process.exit(1);
   }
 
-  db.upsertItem({
+  // upsertItem keeps an existing row's source and status, so a discovery goods has to be claimed explicitly.
+  if (dbInstance.getItem(goodsNo)?.source === 'discovery') dbInstance.claimDiscoveryItem(goodsNo, 'manual');
+  dbInstance.upsertItem({
     goods_no: goodsNo,
     goods_name: info.goodsName,
     brand_name: info.brandName,
@@ -626,7 +632,7 @@ async function handleWatch(positional) {
   });
 
   const today = new Date().toISOString().split('T')[0];
-  db.recordPriceLog({
+  dbInstance.recordPriceLog({
     goods_no: goodsNo,
     date: today,
     normal_price: info.normalPrice,
@@ -638,7 +644,7 @@ async function handleWatch(positional) {
     is_sold_out: info.isSoldOut,
   });
 
-  exportDataForGit();
+  exportDataForGit({ dbInstance, dataDir });
   console.log(`✅ Successfully added [${info.brandName}] ${info.goodsName} to watchlist!`);
   const displayPrice = (info.myPrice || info.salePrice)?.toLocaleString() || '-';
   console.log(`   Current price: ${displayPrice}원 (Normal: ${info.normalPrice?.toLocaleString()}원)`);

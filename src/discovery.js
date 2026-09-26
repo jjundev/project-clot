@@ -132,6 +132,7 @@ export async function discoverCategoryGoods({
   years = 2,
   fetchFn = fetch,
   delayMs = 300,
+  onDegraded = () => {},
 }) {
   const discovered = [];
   let currentUrl = null;
@@ -152,6 +153,8 @@ export async function discoverCategoryGoods({
       // Step 2: Batch like count query
       const ids = recentCandidates.map((it) => it.goodsNo);
       const likesMap = await fetchLikeCountsBatch(ids, fetchFn);
+      // A failed batch comes back empty and silently filters the page out, so the result is not the real top list.
+      if (likesMap.size === 0) onDegraded();
 
       for (const item of recentCandidates) {
         const likeCount = likesMap.get(item.goodsNo) ?? 0;

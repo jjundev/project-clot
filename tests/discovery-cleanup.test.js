@@ -6,6 +6,7 @@ import {
   DISCOVERY_MIN_CATEGORY_FILL,
   isDefaultDiscoveryScan,
   isCompleteDiscoveryScan,
+  discoverCategoryGoods,
 } from '../src/discovery.js';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -13,7 +14,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { ClotDatabase } from '../src/db.js';
 import { buildClotDataPayload } from '../src/visualizer.js';
-import { handleDiscover, exportDataForGit } from '../src/cli.js';
+import { handleDiscover, handleWatch, exportDataForGit } from '../src/cli.js';
 
 const okStats = (counts) => counts.map((count, i) => ({ cat: `c${i}`, ok: true, count }));
 
@@ -319,4 +320,80 @@ test('export: DROPPED goods stay in latest_prices.json with their status and a c
   const summary = JSON.parse(fs.readFileSync(exportDataForGit({ dbInstance: db, dataDir: dir }), 'utf-8'));
   assert.equal(summary.dropped_items, 1);
   assert.equal(summary.items.find((it) => it.goods_no === 1).status, 'DROPPED');
+});
+
+// One listing page with a single recent goods; `likesOk` decides whether the like-count API answers.
+function listingPageFetch({ likesOk }) {
+  return async (url) => {
+    if (url.includes('like.musinsa.com')) {
+      if (!likesOk) return { ok: false, status: 503 };
+      return { ok: true, json: async () => ({ data: { contents: { items: [{ relationId: '7001', count: 1500 }] } } }) };
+    }
+    const nextData = { props: { pageProps: { dehydratedState: { queries: [{ queryKey: ['001'], state: { data: { pages: [{ data: {
+      list: [{ goodsNo: 7001, goodsName: 'P', brandName: 'B', price: 50000, finalPrice: 45000,
+        thumbnail: 'https://image.msscdn.net/images/goods_img/20260701/7001/7001_1_500.jpg' }],
+      pagination: { hasNext: false },
+    } }] } } }] } } } };
+    return { ok: true, text: async () => `<script id="__NEXT_DATA__">${JSON.stringify(nextData)}</script>` };
+  };
+}
+
+test('discoverCategoryGoods reports a failed like-count batch through onDegraded', async (t) => {
+  t.mock.method(console, 'warn', () => {});
+  let degraded = 0;
+  const onDegraded = () => { degraded++; };
+  const base = { categoryCode: '001', limit: 10, minLikes: 1000, years: 2, delayMs: 0, onDegraded };
+
+  assert.equal((await discoverCategoryGoods({ ...base, fetchFn: listingPageFetch({ likesOk: true }) })).length, 1);
+  assert.equal(degraded, 0);
+  assert.equal((await discoverCategoryGoods({ ...base, fetchFn: listingPageFetch({ likesOk: false }) })).length, 0);
+  assert.equal(degraded, 1);
+});
+
+test('discover: a category with a failed like-count batch makes the scan partial', async (t) => {
+  const { db, dir } = tempDb(t);
+  const logs = quiet(t);
+  await seed(db, dir, [listing(1), listing(2)]);
+
+  const inner = fullScan({ '001': [listing(2)] });
+  const flaky = async (args) => {
+    if (args.categoryCode === '002') args.onDegraded?.(); // one like batch failed, the rest still came back
+    return inner(args);
+  };
+  await discover(db, dir, flaky);
+  await discover(db, dir, flaky);
+  assert.equal(db.getItem(1).status, 'ACTIVE');
+  assert.equal(db.getItem(1).discovery_misses, 0);
+  assert.ok(logs.includes('🧹 [Discovery] 부분 스캔이라 정리를 건너뜀'));
+});
+
+const watchInfo = (goodsNo, extra = {}) => ({
+  goodsNo, goodsName: `G${goodsNo}`, brandName: 'B', url: `https://www.musinsa.com/products/${goodsNo}`,
+  imageUrl: '', normalPrice: 20000, salePrice: 12000, saleRate: 40, myPrice: null,
+  isSoldOut: false, discontinued: false, ...extra,
+});
+
+test('watch: a DROPPED discovery goods becomes a tracked manual goods', async (t) => {
+  const { db, dir } = tempDb(t);
+  quiet(t);
+  await dropGoods1(db, dir);
+
+  await handleWatch(['1'], { dbInstance: db, dataDir: dir, fetchInfoFn: async (g) => watchInfo(g) });
+  const it = db.getItem(1);
+  assert.equal(it.source, 'manual'); // not 'like': sync would unlike a goods missing from Musinsa likes
+  assert.equal(it.status, 'ACTIVE');
+  assert.equal(it.discovery_misses, 0);
+  assert.ok(db.getActiveVipItems().some((r) => r.goods_no === 1));
+});
+
+test('watch: a watched discovery goods is no longer subject to cleanup', async (t) => {
+  const { db, dir } = tempDb(t);
+  quiet(t);
+  await seed(db, dir, [listing(1), listing(2)]);
+  await handleWatch(['1'], { dbInstance: db, dataDir: dir, fetchInfoFn: async (g) => watchInfo(g) });
+
+  await discover(db, dir, fullScan({ '001': [listing(2)] }));
+  await discover(db, dir, fullScan({ '001': [listing(2)] }));
+  assert.equal(db.getItem(1).status, 'ACTIVE');
+  assert.equal(db.getItem(1).source, 'manual');
 });

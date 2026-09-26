@@ -160,15 +160,19 @@ export class ClotDatabase {
   }
 
   promoteItemToLike(goodsNo) {
-    // A liked goods must be tracked again even if discovery had dropped it.
+    this.claimDiscoveryItem(goodsNo, 'like');
+  }
+
+  /** Hands a discovery goods to the user (like/manual); it must be tracked again even if discovery had dropped it. */
+  claimDiscoveryItem(goodsNo, source) {
     const stmt = this.db.prepare(`
       UPDATE items SET
-        source = 'like',
+        source = ?,
         status = CASE WHEN status = 'DROPPED' THEN 'ACTIVE' ELSE status END,
         discovery_misses = 0
       WHERE goods_no = ?
     `);
-    stmt.run(Number(goodsNo));
+    stmt.run(source, Number(goodsNo));
   }
 
   markDiscoverySeen(goodsNos = []) {
