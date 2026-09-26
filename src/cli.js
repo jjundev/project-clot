@@ -7,10 +7,11 @@ import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { db } from './db.js';
 import { syncLikedItemsFromMusinsa } from './sync.js';
-import { collectPricesForActiveItems, fetchProductPriceInfo, prewarmMusinsaSession } from './collector.js';
+import { collectPricesForActiveItems, collectAuthenticatedPrices, fetchProductPriceInfo, prewarmMusinsaSession } from './collector.js';
+import { fetchAuthenticatedPriceInfo } from './myprice.js';
 import { makeSessionProvider, keepSessionAlive, readSessionMeta, updateSessionMeta, DEFAULT_SESSION_PATH } from './session.js';
 import { notifyPriceDropsAndRestocks, sendMacNotification, formatHotDealsSummary, sendTelegramMessage, notifySessionWarning, notifySessionLost, notifyExpiryProbe } from './notifier.js';
-import { discoverCategoryGoods } from './discovery.js';
+import { discoverCategoryGoods, parseAuthLimit, selectDiscoveryAuthTargets, summarizeMyPriceGap } from './discovery.js';
 import { setupEnvironment, getExtendedPath } from './env.js';
 import { generateDashboardHtml } from './visualizer.js';
 import { classifyCategory } from './classifier.js';
@@ -150,7 +151,19 @@ function tryGitAutoCommit() {
   }
 }
 
-export async function handleDiscover(flags = {}, dbInstance = db) {
+export async function handleDiscover(
+  flags = {},
+  dbInstance = db,
+  {
+    discoverFn = discoverCategoryGoods,
+    sessionProvider = null,
+    authFetchFn = fetchAuthenticatedPriceInfo,
+    authDelayMs = 700,
+    authLimit = parseAuthLimit(flags['auth-limit']),
+    dataDir = DATA_DIR,
+    today = new Date().toISOString().split('T')[0],
+  } = {}
+) {
   const limit = (typeof flags.limit === 'string' || typeof flags.limit === 'number') ? Number(flags.limit) : 100;
   const minLikes = (typeof flags['min-likes'] === 'string' || typeof flags['min-likes'] === 'number') ? Number(flags['min-likes']) : 1000;
   const years = (typeof flags.years === 'string' || typeof flags.years === 'number') ? Number(flags.years) : 2;
@@ -168,79 +181,122 @@ export async function handleDiscover(flags = {}, dbInstance = db) {
   console.log(`   Limit per category: ${limit} (Min likes: ${minLikes.toLocaleString()})`);
   console.log(`========================================\n`);
 
+  // 1. Scan every category first so the auth stage can prioritize across the whole catalog.
   const allDiscovered = [];
+  const toRecord = []; // discovery-owned goods, one entry per goodsNo
+  const seen = new Set();
   let newlyIngestedCount = 0;
-  const today = new Date().toISOString().split('T')[0];
 
   for (const cat of categories) {
     try {
       console.log(`📂 Scanning category [${cat}]...`);
-      const items = await discoverCategoryGoods({
-        categoryCode: cat,
-        limit,
-        minLikes,
-        years,
-      });
+      const items = await discoverFn({ categoryCode: cat, limit, minLikes, years });
       console.log(`   ✓ Found ${items.length} items matching criteria in category [${cat}].`);
 
       for (const item of items) {
         allDiscovered.push(item);
+        if (seen.has(item.goodsNo)) continue;
+        seen.add(item.goodsNo);
         const existing = dbInstance.getItem(item.goodsNo);
-        const isNew = !existing;
-        if (isNew) {
-          newlyIngestedCount++;
-        }
-
-        if (existing && existing.source !== 'discovery') {
-          // Do not overwrite price_logs for VIP items during discovery scan
-          continue;
-        }
-
-        dbInstance.upsertItem({
-          goods_no: item.goodsNo,
-          goods_name: item.goodsName,
-          brand_name: item.brandName,
-          url: item.url,
-          image_url: item.imageUrl,
-          source: existing ? existing.source : 'discovery',
-          status: item.isSoldOut ? 'SOLDOUT' : 'ACTIVE',
-          category: classifyCategory(item.goodsName, item.brandName, cat),
-        });
-
-        dbInstance.recordPriceLog({
-          goods_no: item.goodsNo,
-          date: today,
-          normal_price: item.normalPrice,
-          sale_price: item.salePrice,
-          coupon_price: item.couponPrice,
-          sale_rate:
-            item.normalPrice && item.salePrice && item.normalPrice > item.salePrice
-              ? Math.round(((item.normalPrice - item.salePrice) / item.normalPrice) * 100)
-              : 0,
-          my_price: null,
-          estimated_my_price: item.estimatedMyPrice,
-          coupon_name:
-            item.couponPrice && item.salePrice && item.couponPrice < item.salePrice
-              ? '쿠폰 적용가'
-              : null,
-          coupon_discount:
-            item.couponPrice && item.salePrice && item.couponPrice < item.salePrice
-              ? item.salePrice - item.couponPrice
-              : 0,
-          is_sold_out: item.isSoldOut ? 1 : 0,
-        });
-
-        if (
-          !existing ||
-          !existing.lowest_estimated_price ||
-          (item.estimatedMyPrice && item.estimatedMyPrice < existing.lowest_estimated_price)
-        ) {
-          dbInstance.updateLowestEstimatedPrice(item.goodsNo, item.estimatedMyPrice, today);
-        }
+        if (!existing) newlyIngestedCount++;
+        // Do not overwrite price_logs for VIP items during discovery scan
+        if (existing && existing.source !== 'discovery') continue;
+        toRecord.push({ item, existing, cat });
       }
     } catch (err) {
       console.error(`❌ Failed scanning category ${cat}:`, err.message);
     }
+  }
+
+  // 2. Authenticated real prices for a rotating, capped subset. Anything missing stays estimate-only.
+  let authMap = new Map();
+  if (sessionProvider && authLimit > 0 && toRecord.length > 0) {
+    try {
+      const lastDates = dbInstance.getLastMyPriceDates(toRecord.map((e) => e.item.goodsNo));
+      const { goodsNos, eligible } = selectDiscoveryAuthTargets(toRecord.map((e) => e.item), lastDates, authLimit);
+      authMap = await collectAuthenticatedPrices({ goodsNos, sessionProvider, authFetchFn, authDelayMs });
+      const priced = [...authMap.values()].filter((a) => a && !a.discontinued && a.myPrice).length;
+      console.log(
+        `🔐 [Discovery Auth] ${priced}/${goodsNos.length} priced (cap ${authLimit}, ${eligible - goodsNos.length} deferred to later runs).`
+      );
+    } catch (err) {
+      console.warn(`⚠️ [Discovery Auth] Skipped: ${err.message}`);
+      authMap = new Map();
+    }
+  }
+  const realPriceOf = (goodsNo) => {
+    const a = authMap.get(goodsNo);
+    return a && !a.discontinued && a.myPrice ? a.myPrice : null;
+  };
+
+  // 3. Record. Real prices only compare with real prices; the listing estimate keeps its own series.
+  const gapPairs = [];
+  let myPriceDrops = 0;
+  for (const { item, existing, cat } of toRecord) {
+    const myPrice = realPriceOf(item.goodsNo);
+    item.myPrice = myPrice;
+
+    dbInstance.upsertItem({
+      goods_no: item.goodsNo,
+      goods_name: item.goodsName,
+      brand_name: item.brandName,
+      url: item.url,
+      image_url: item.imageUrl,
+      source: existing ? existing.source : 'discovery',
+      status: item.isSoldOut ? 'SOLDOUT' : 'ACTIVE',
+      category: classifyCategory(item.goodsName, item.brandName, cat),
+    });
+
+    if (myPrice) {
+      const baseline = dbInstance.getLatestPriceBefore(item.goodsNo, today);
+      if (baseline?.my_price && myPrice < baseline.my_price) myPriceDrops++;
+      if (item.estimatedMyPrice) gapPairs.push({ myPrice, estimatedMyPrice: item.estimatedMyPrice });
+    }
+
+    dbInstance.recordPriceLog({
+      goods_no: item.goodsNo,
+      date: today,
+      normal_price: item.normalPrice,
+      sale_price: item.salePrice,
+      coupon_price: item.couponPrice,
+      sale_rate:
+        item.normalPrice && item.salePrice && item.normalPrice > item.salePrice
+          ? Math.round(((item.normalPrice - item.salePrice) / item.normalPrice) * 100)
+          : 0,
+      my_price: myPrice,
+      estimated_my_price: item.estimatedMyPrice,
+      coupon_name:
+        item.couponPrice && item.salePrice && item.couponPrice < item.salePrice
+          ? '쿠폰 적용가'
+          : null,
+      coupon_discount:
+        item.couponPrice && item.salePrice && item.couponPrice < item.salePrice
+          ? item.salePrice - item.couponPrice
+          : 0,
+      is_sold_out: item.isSoldOut ? 1 : 0,
+    });
+
+    // Real lowest first: the estimated update below then keeps the real lowest's date.
+    if (myPrice && (!existing?.lowest_my_price || myPrice < existing.lowest_my_price)) {
+      dbInstance.updateLowestPrice(item.goodsNo, myPrice, existing?.lowest_sale_price ?? null, today);
+    }
+    if (
+      !existing ||
+      !existing.lowest_estimated_price ||
+      (item.estimatedMyPrice && item.estimatedMyPrice < existing.lowest_estimated_price)
+    ) {
+      dbInstance.updateLowestEstimatedPrice(item.goodsNo, item.estimatedMyPrice, today);
+    }
+  }
+
+  if (gapPairs.length > 0) {
+    const gap = summarizeMyPriceGap(gapPairs);
+    console.log(
+      `📐 [Discovery Auth] myPrice vs estimate: n=${gap.n}, median ${gap.medianDiff.toLocaleString()}원, myPrice<estimate ${gap.belowEstimate}`
+    );
+  }
+  if (authMap.size > 0) {
+    console.log(`📉 [Discovery] myPrice drops vs last myPrice: ${myPriceDrops}`);
   }
 
   // Summary statistics
@@ -277,7 +333,7 @@ export async function handleDiscover(flags = {}, dbInstance = db) {
   console.log(`  • Estimated Price Range: ${priceRangeStr}`);
   console.log(`========================================\n`);
 
-  exportDataForGit({ dbInstance });
+  exportDataForGit({ dbInstance, dataDir });
   return allDiscovered;
 }
 

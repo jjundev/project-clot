@@ -11,7 +11,8 @@ import {
   selectDiscoveryAuthTargets,
   summarizeMyPriceGap,
 } from '../src/discovery.js';
-import { pickDisplayPrices, exportDataForGit } from '../src/cli.js';
+import { pickDisplayPrices, exportDataForGit, handleDiscover } from '../src/cli.js';
+import { SessionExpiredError } from '../src/myprice.js';
 
 function tempDb(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-disc-myprice-'));
@@ -149,4 +150,155 @@ test('exportDataForGit uses paired display prices', (t) => {
   const row = JSON.parse(fs.readFileSync(jsonPath, 'utf-8')).items.find((it) => it.goods_no === 20);
   assert.equal(row.current_price, 9500);
   assert.equal(row.lowest_price, 9200);
+});
+
+const listing = (goodsNo, extra = {}) => ({
+  goodsNo, goodsName: `G${goodsNo}`, brandName: 'B', url: `https://www.musinsa.com/products/${goodsNo}`,
+  imageUrl: '', normalPrice: 20000, salePrice: 12000, couponPrice: 10000, estimatedMyPrice: 9200,
+  likeCount: 5000, isSoldOut: false, source: 'discovery', ...extra,
+});
+const authInfo = (goodsNo, myPrice) => ({
+  goodsNo, goodsName: `G${goodsNo}`, brandName: 'B', normalPrice: 20000, salePrice: 12000, couponPrice: 10000,
+  myPrice, estimatedMyPrice: 9300, isSoldOut: false, discontinued: false, priceSource: 'https-auth',
+});
+const byCategory = (map) => async ({ categoryCode }) => map[categoryCode] || [];
+
+function runDiscover(t, db, dir, overrides = {}) {
+  t.mock.method(console, 'log', () => {});
+  t.mock.method(console, 'warn', () => {});
+  return handleDiscover({ category: '001' }, db, {
+    discoverFn: byCategory({ '001': [listing(1), listing(2)] }),
+    sessionProvider: async () => 'app_atk=fake',
+    authFetchFn: async (g) => authInfo(g, 8000 + g),
+    authDelayMs: 0,
+    dataDir: dir,
+    today: '2026-09-26',
+    ...overrides,
+  });
+}
+
+test('discover: records real my_price next to the listing estimate', async (t) => {
+  const { db, dir } = tempDb(t);
+  const out = await runDiscover(t, db, dir);
+  const log = db.getLatestPrice(1);
+  assert.equal(log.my_price, 8001);
+  assert.equal(log.estimated_my_price, 9200); // listing estimate, not the auth one (9300)
+  assert.equal(db.getItem(1).lowest_my_price, 8001);
+  assert.equal(db.getItem(1).lowest_estimated_price, 9200);
+  assert.equal(out.find((it) => it.goodsNo === 2).myPrice, 8002);
+});
+
+test('discover: no session provider keeps today behavior (estimate only)', async (t) => {
+  const { db, dir } = tempDb(t);
+  let calls = 0;
+  await runDiscover(t, db, dir, { sessionProvider: null, authFetchFn: async () => { calls++; } });
+  assert.equal(calls, 0);
+  assert.equal(db.getLatestPrice(1).my_price, null);
+  assert.equal(db.getLatestPrice(1).estimated_my_price, 9200);
+  assert.equal(db.getItem(1).lowest_my_price, null);
+});
+
+test('discover: authLimit 0 skips the auth stage', async (t) => {
+  const { db, dir } = tempDb(t);
+  let calls = 0;
+  await runDiscover(t, db, dir, { authLimit: 0, authFetchFn: async () => { calls++; } });
+  assert.equal(calls, 0);
+  assert.equal(db.getLatestPrice(1).my_price, null);
+});
+
+test('discover: expired session with failed refresh leaves the rest estimate-only', async (t) => {
+  const { db, dir } = tempDb(t);
+  await runDiscover(t, db, dir, {
+    discoverFn: byCategory({ '001': [listing(1), listing(2), listing(3)] }),
+    sessionProvider: async ({ refresh } = {}) => (refresh ? null : 'app_atk=fake'),
+    authFetchFn: async (g) => { if (g === 2) throw new SessionExpiredError(); return authInfo(g, 8000 + g); },
+  });
+  assert.equal(db.getLatestPrice(1).my_price, 8001);
+  assert.equal(db.getLatestPrice(2).my_price, null);
+  assert.equal(db.getLatestPrice(3).my_price, null);
+  assert.equal(db.getLatestPrice(3).estimated_my_price, 9200);
+});
+
+test('discover: same-day rerun without auth keeps the real price', async (t) => {
+  const { db, dir } = tempDb(t);
+  await runDiscover(t, db, dir);
+  await runDiscover(t, db, dir, { sessionProvider: null });
+  assert.equal(db.getLatestPrice(1).my_price, 8001);
+});
+
+test('discover: never auth-fetches or records VIP items', async (t) => {
+  const { db, dir } = tempDb(t);
+  db.upsertItem(itemRow(2, { goods_name: 'VIP', source: 'like' }));
+  db.recordPriceLog({ goods_no: 2, date: '2026-09-26', my_price: 7000, sale_price: 12000 });
+  const fetched = [];
+  await runDiscover(t, db, dir, { authFetchFn: async (g) => { fetched.push(g); return authInfo(g, 8000 + g); } });
+  assert.deepEqual(fetched, [1]);
+  assert.equal(db.getLatestPrice(2).my_price, 7000);
+  assert.equal(db.getItem(2).source, 'like');
+});
+
+test('discover: dedupes goods seen in two categories', async (t) => {
+  const { db, dir } = tempDb(t);
+  t.mock.method(console, 'log', () => {});
+  t.mock.method(console, 'warn', () => {});
+  const fetched = [];
+  await handleDiscover({ category: '001,002' }, db, {
+    discoverFn: byCategory({ '001': [listing(1)], '002': [listing(1), listing(2)] }),
+    sessionProvider: async () => 'app_atk=fake',
+    authFetchFn: async (g) => { fetched.push(g); return authInfo(g, 8000 + g); },
+    authDelayMs: 0, dataDir: dir, today: '2026-09-26',
+  });
+  assert.deepEqual(fetched, [1, 2]);
+  assert.equal(db.getLatestPrice(1).my_price, 8001);
+});
+
+test('discover: discontinued auth result records no my_price', async (t) => {
+  const { db, dir } = tempDb(t);
+  await runDiscover(t, db, dir, {
+    authFetchFn: async (g) => (g === 1 ? { status: 404, discontinued: true } : authInfo(g, 8002)),
+  });
+  assert.equal(db.getLatestPrice(1).my_price, null);
+  assert.equal(db.getLatestPrice(1).estimated_my_price, 9200);
+  assert.equal(db.getLatestPrice(2).my_price, 8002);
+});
+
+test('discover: prioritizes goods never priced, respects the cap, logs drops like-for-like', async (t) => {
+  const { db, dir } = tempDb(t);
+  db.upsertItem(itemRow(1));
+  db.recordPriceLog({ goods_no: 1, date: '2026-09-25', my_price: 9000, estimated_my_price: 9200 });
+  db.upsertItem(itemRow(2));
+  db.recordPriceLog({ goods_no: 2, date: '2026-09-25', my_price: null, estimated_my_price: 9900 });
+
+  const lines = [];
+  t.mock.method(console, 'log', (...args) => lines.push(args.join(' ')));
+  t.mock.method(console, 'warn', () => {});
+  const fetched = [];
+  await handleDiscover({ category: '001' }, db, {
+    discoverFn: byCategory({ '001': [listing(1), listing(2), listing(3)] }),
+    sessionProvider: async () => 'app_atk=fake',
+    authFetchFn: async (g) => { fetched.push(g); return authInfo(g, 8000 + g); },
+    authDelayMs: 0, authLimit: 2, dataDir: dir, today: '2026-09-26',
+  });
+
+  assert.deepEqual(fetched, [2, 3]); // goods 1 was priced most recently -> deferred
+  assert.ok(lines.some((l) => l.includes('[Discovery Auth] 2/2 priced (cap 2, 1 deferred')));
+  assert.ok(lines.some((l) => l.includes('myPrice drops vs last myPrice: 0'))); // goods 2 had no real baseline
+});
+
+test('discover: counts a real drop only against a previous real price', async (t) => {
+  const { db, dir } = tempDb(t);
+  db.upsertItem(itemRow(1));
+  db.recordPriceLog({ goods_no: 1, date: '2026-09-25', my_price: 9000, estimated_my_price: 9200 });
+  const lines = [];
+  t.mock.method(console, 'log', (...args) => lines.push(args.join(' ')));
+  t.mock.method(console, 'warn', () => {});
+  await handleDiscover({ category: '001' }, db, {
+    discoverFn: byCategory({ '001': [listing(1)] }),
+    sessionProvider: async () => 'app_atk=fake',
+    authFetchFn: async (g) => authInfo(g, 8500),
+    authDelayMs: 0, dataDir: dir, today: '2026-09-26',
+  });
+  assert.ok(lines.some((l) => l.includes('myPrice drops vs last myPrice: 1')));
+  assert.ok(lines.some((l) => l.includes('myPrice vs estimate: n=1')));
+  assert.ok(!lines.some((l) => l.includes('app_atk')));
 });
