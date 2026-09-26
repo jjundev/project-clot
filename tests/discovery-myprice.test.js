@@ -5,6 +5,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ClotDatabase } from '../src/db.js';
+import {
+  DEFAULT_DISCOVERY_AUTH_LIMIT,
+  parseAuthLimit,
+  selectDiscoveryAuthTargets,
+  summarizeMyPriceGap,
+} from '../src/discovery.js';
 
 function tempDb(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-disc-myprice-'));
@@ -49,4 +55,57 @@ test('db: estimated lowest update keeps the real lowest date once lowest_my_pric
   assert.equal(db.getItem(10).lowest_price_date, '2026-09-20');
   assert.equal(db.getItem(11).lowest_estimated_price, 800);
   assert.equal(db.getItem(11).lowest_price_date, '2026-09-26');
+});
+
+test('parseAuthLimit: default, zero, bad values', () => {
+  assert.equal(DEFAULT_DISCOVERY_AUTH_LIMIT, 120);
+  assert.equal(parseAuthLimit(undefined), 120);
+  assert.equal(parseAuthLimit(''), 120);
+  assert.equal(parseAuthLimit(true), 120);
+  assert.equal(parseAuthLimit('abc'), 120);
+  assert.equal(parseAuthLimit('-5'), 120);
+  assert.equal(parseAuthLimit('0'), 0);
+  assert.equal(parseAuthLimit('50'), 50);
+  assert.equal(parseAuthLimit(7.9), 7);
+});
+
+test('selectDiscoveryAuthTargets: never-priced first, then oldest, skips sold out and duplicates', () => {
+  const items = [
+    { goodsNo: 5, isSoldOut: false },
+    { goodsNo: 3, isSoldOut: false },
+    { goodsNo: 4, isSoldOut: true },
+    { goodsNo: 2, isSoldOut: false },
+    { goodsNo: 1, isSoldOut: false },
+    { goodsNo: 3, isSoldOut: false },
+  ];
+  const last = new Map([[5, '2026-09-20'], [2, '2026-09-10'], [1, '2026-09-20']]);
+
+  const all = selectDiscoveryAuthTargets(items, last, 10);
+  assert.deepEqual(all.goodsNos, [3, 2, 1, 5]);
+  assert.equal(all.eligible, 4);
+
+  const capped = selectDiscoveryAuthTargets(items, last, 2);
+  assert.deepEqual(capped.goodsNos, [3, 2]);
+  assert.equal(capped.eligible, 4);
+
+  assert.deepEqual(selectDiscoveryAuthTargets(items, last, 0).goodsNos, []);
+});
+
+test('summarizeMyPriceGap: median of myPrice - estimate and count below estimate', () => {
+  assert.deepEqual(summarizeMyPriceGap([]), { n: 0, medianDiff: null, belowEstimate: 0 });
+  assert.deepEqual(
+    summarizeMyPriceGap([
+      { myPrice: 900, estimatedMyPrice: 1000 },
+      { myPrice: 1000, estimatedMyPrice: 1000 },
+      { myPrice: 700, estimatedMyPrice: 1000 },
+    ]),
+    { n: 3, medianDiff: -100, belowEstimate: 2 }
+  );
+  assert.deepEqual(
+    summarizeMyPriceGap([
+      { myPrice: 900, estimatedMyPrice: 1000 },
+      { myPrice: 750, estimatedMyPrice: 1000 },
+    ]),
+    { n: 2, medianDiff: -175, belowEstimate: 2 }
+  );
 });

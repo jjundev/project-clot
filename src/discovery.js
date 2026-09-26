@@ -194,3 +194,44 @@ export async function discoverCategoryGoods({
 
   return discovered;
 }
+
+export const DEFAULT_DISCOVERY_AUTH_LIMIT = 120;
+
+/** `--auth-limit` value: 0 disables the auth stage; missing or invalid values use the default. */
+export function parseAuthLimit(val, defaultVal = DEFAULT_DISCOVERY_AUTH_LIMIT) {
+  if (typeof val === 'boolean' || val === undefined || val === null || val === '') return defaultVal;
+  const n = Number(val);
+  if (!Number.isFinite(n) || n < 0) return defaultVal;
+  return Math.floor(n);
+}
+
+/**
+ * Picks which discovered goods get an authenticated price this run. Never-priced goods first,
+ * then the ones whose last real price is oldest, so capped runs rotate through the catalog.
+ */
+export function selectDiscoveryAuthTargets(items = [], lastMyPriceDates = new Map(), limit = DEFAULT_DISCOVERY_AUTH_LIMIT) {
+  const seen = new Set();
+  const eligible = [];
+  for (const it of items) {
+    const goodsNo = Number(it.goodsNo);
+    if (!goodsNo || it.isSoldOut || seen.has(goodsNo)) continue;
+    seen.add(goodsNo);
+    eligible.push(goodsNo);
+  }
+  eligible.sort((a, b) => {
+    const da = lastMyPriceDates.get(a) ?? '';
+    const db = lastMyPriceDates.get(b) ?? '';
+    if (da !== db) return da < db ? -1 : 1;
+    return a - b;
+  });
+  return { goodsNos: eligible.slice(0, Math.max(0, limit)), eligible: eligible.length };
+}
+
+/** Value-free stats of real price vs same-day listing estimate (diff = myPrice - estimate). */
+export function summarizeMyPriceGap(pairs = []) {
+  if (pairs.length === 0) return { n: 0, medianDiff: null, belowEstimate: 0 };
+  const diffs = pairs.map((p) => p.myPrice - p.estimatedMyPrice).sort((a, b) => a - b);
+  const mid = Math.floor(diffs.length / 2);
+  const medianDiff = diffs.length % 2 ? diffs[mid] : Math.round((diffs[mid - 1] + diffs[mid]) / 2);
+  return { n: diffs.length, medianDiff, belowEstimate: diffs.filter((d) => d < 0).length };
+}
