@@ -80,23 +80,41 @@ describe('session cache', () => {
 });
 
 describe('fetchSessionCookieFromBridge', () => {
-  test('opens musinsa, reads document.cookie (JSON-quoted), filters, and always closes', () => {
+  const makeExec = ({ login = 'LOGGED_IN', cookie = JSON.stringify('_ga=1; app_atk=AAA; app_rtk=BBB; mss_mac=CCC') } = {}) => {
     const cmds = [];
     const execFn = (cmd) => {
       cmds.push(cmd);
-      if (cmd.includes(' eval ')) return JSON.stringify('_ga=1; app_atk=AAA; app_rtk=BBB; mss_mac=CCC');
+      if (cmd.includes('login-status')) return login;
+      if (cmd.includes('document.cookie')) return cookie;
       return '';
     };
+    return { execFn, cmds };
+  };
+
+  test('opens musinsa, confirms login in-page, reads document.cookie, always closes', () => {
+    const { execFn, cmds } = makeExec();
     assert.equal(fetchSessionCookieFromBridge({ execFn }), COOKIE);
     assert.match(cmds[0], /^opencli browser clot-auth open https:\/\/www\.musinsa\.com\/$/);
+    assert.match(cmds[1], /eval '.*login-status.*credentials:"include".*'$/);
+    assert.match(cmds[2], /eval 'document\.cookie'$/);
     assert.match(cmds.at(-1), /^opencli browser clot-auth close$/);
   });
 
-  test('returns null when logged out (no app_atk) and still closes', () => {
-    const cmds = [];
-    const execFn = (cmd) => { cmds.push(cmd); return cmd.includes(' eval ') ? '"_ga=1"' : ''; };
+  test('login check output may be JSON-quoted', () => {
+    const { execFn } = makeExec({ login: '"LOGGED_IN"\n' });
+    assert.equal(fetchSessionCookieFromBridge({ execFn }), COOKIE);
+  });
+
+  test('LOGGED_OUT: returns null without reading cookies, still closes', () => {
+    const { execFn, cmds } = makeExec({ login: 'LOGGED_OUT' });
     assert.equal(fetchSessionCookieFromBridge({ execFn }), null);
+    assert.equal(cmds.some((c) => c.includes('document.cookie')), false);
     assert.match(cmds.at(-1), /close$/);
+  });
+
+  test('logged in but cookie lacks app_rtk -> null', () => {
+    const { execFn } = makeExec({ cookie: '"_ga=1; app_atk=AAA"' });
+    assert.equal(fetchSessionCookieFromBridge({ execFn }), null);
   });
 
   test('returns null when the bridge throws', () => {

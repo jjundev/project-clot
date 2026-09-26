@@ -192,6 +192,13 @@ export function formatSessionSummary({ cached, ageHours, observedLifetimeHours =
   return lives.length ? `${age}, observed lifetimes: ${lives.join('h, ')}h` : age;
 }
 
+// Runs in the Chrome page: `opencli browser eval` awaits the Promise (verified 2026-09-26).
+// Contains no single quotes — it is embedded in a single-quoted shell argument.
+const BRIDGE_LOGIN_CHECK_JS =
+  `fetch("${LOGIN_STATUS_URL}",{credentials:"include"})` +
+  '.then(r=>r.json()).then(j=>j&&j.data&&j.data.loggedIn===true?"LOGGED_IN":"LOGGED_OUT")' +
+  '.catch(()=>"LOGGED_OUT")';
+
 /**
  * Reads the auth cookies from the logged-in Chrome through the OpenCLI browser bridge.
  * @returns {string|null} null when the bridge is unavailable or Chrome is logged out
@@ -200,6 +207,12 @@ export function fetchSessionCookieFromBridge({ execFn = execSync, session = 'clo
   const opts = getExecOptions({ encoding: 'utf8', timeout: 60000, stdio: ['ignore', 'pipe', 'ignore'] });
   try {
     execFn(`opencli browser ${session} open https://www.musinsa.com/`, opts);
+    // Confirm the page's session is live (this also lets the page refresh its tokens) before reading cookies.
+    const status = String(execFn(`opencli browser ${session} eval '${BRIDGE_LOGIN_CHECK_JS}'`, opts) || '');
+    if (!status.includes('LOGGED_IN')) {
+      console.warn('[Session Notice] Chrome is not logged in to Musinsa (bridge login-status check).');
+      return null;
+    }
     const raw = String(execFn(`opencli browser ${session} eval 'document.cookie'`, opts) || '').trim();
     let value = raw;
     try {
@@ -208,8 +221,8 @@ export function fetchSessionCookieFromBridge({ execFn = execSync, session = 'clo
     } catch {
       // plain (unquoted) output
     }
-    const cookie = pickAuthCookies(value);
-    return cookie.includes('app_atk=') ? cookie : null;
+    const jar = parseAuthCookies(value);
+    return jar.get('app_atk') && jar.get('app_rtk') ? serializeAuthCookies(jar) : null;
   } catch (err) {
     console.warn(`[Session Notice] Could not read Musinsa cookies from browser bridge: ${err.message}`);
     return null;
