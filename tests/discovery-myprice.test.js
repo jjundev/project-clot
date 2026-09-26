@@ -70,6 +70,9 @@ test('parseAuthLimit: default, zero, bad values', () => {
   assert.equal(parseAuthLimit('0'), 0);
   assert.equal(parseAuthLimit('50'), 50);
   assert.equal(parseAuthLimit(7.9), 7);
+  // A fraction below 1 is a typo, not a request to turn auth off
+  assert.equal(parseAuthLimit(0.5), 120);
+  assert.equal(parseAuthLimit('0.9'), 120);
 });
 
 test('selectDiscoveryAuthTargets: never-priced first, then oldest, skips sold out and duplicates', () => {

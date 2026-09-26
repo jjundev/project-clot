@@ -197,11 +197,12 @@ export async function discoverCategoryGoods({
 
 export const DEFAULT_DISCOVERY_AUTH_LIMIT = 120;
 
-/** `--auth-limit` value: 0 disables the auth stage; missing or invalid values use the default. */
+/** `--auth-limit` value: 0 disables the auth stage; missing, invalid, or fractional (<1) values use the default. */
 export function parseAuthLimit(val, defaultVal = DEFAULT_DISCOVERY_AUTH_LIMIT) {
   if (typeof val === 'boolean' || val === undefined || val === null || val === '') return defaultVal;
   const n = Number(val);
-  if (!Number.isFinite(n) || n < 0) return defaultVal;
+  // Only an explicit 0 turns auth off; a fraction below 1 would floor to 0 by accident.
+  if (!Number.isFinite(n) || n < 0 || (n > 0 && n < 1)) return defaultVal;
   return Math.floor(n);
 }
 
