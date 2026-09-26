@@ -1,23 +1,10 @@
 {
-  "updated_at": "2026-09-26T01:36:53.552Z",
-  "total_items": 611,
-  "active_items": 592,
+  "updated_at": "2026-09-26T02:10:06.384Z",
+  "total_items": 613,
+  "active_items": 594,
   "soldout_items": 14,
   "unliked_items": 5,
   "items": [
-    {
-      "goods_no": 7102173,
-      "goods_name": "[VIP] [2PACK] 리브드 머슬핏 헨리넥 긴팔 티셔츠  _5color",
-      "brand_name": "센테어",
-      "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/7102173",
-      "current_price": 35790,
-      "lowest_price": 27510,
-      "lowest_price_date": "2026-09-22",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:53.268Z"
-    },
     {
       "goods_no": 7241257,
       "goods_name": "[VIP] 크롭 레글런 긴팔 티셔츠[네이비]",
@@ -25,24 +12,24 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/7241257",
-      "current_price": 24090,
+      "current_price": 21210,
       "lowest_price": 18510,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:53.167Z"
+      "last_checked": "2026-09-26T02:10:06.098Z"
     },
     {
-      "goods_no": 7061981,
-      "goods_name": "[VIP] 레이어드 슬럽 헨리넥 롱 슬리브_4color",
-      "brand_name": "트릴리온",
+      "goods_no": 7102173,
+      "goods_name": "[VIP] [2PACK] 리브드 머슬핏 헨리넥 긴팔 티셔츠  _5color",
+      "brand_name": "센테어",
       "source": "like",
       "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/7061981",
-      "current_price": 33990,
-      "lowest_price": 31620,
-      "lowest_price_date": "2026-09-13",
+      "url": "https://www.musinsa.com/products/7102173",
+      "current_price": 33150,
+      "lowest_price": 27510,
+      "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:52.774Z"
+      "last_checked": "2026-09-26T02:10:05.847Z"
     },
     {
       "goods_no": 7074174,
@@ -55,7 +42,33 @@
       "lowest_price": 33990,
       "lowest_price_date": "2026-09-26",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:52.760Z"
+      "last_checked": "2026-09-26T02:10:05.847Z"
+    },
+    {
+      "goods_no": 7061981,
+      "goods_name": "[VIP] 레이어드 슬럽 헨리넥 롱 슬리브_4color",
+      "brand_name": "트릴리온",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/7061981",
+      "current_price": 33990,
+      "lowest_price": 31620,
+      "lowest_price_date": "2026-09-13",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:10:05.846Z"
+    },
+    {
+      "goods_no": 7059555,
+      "goods_name": "[VIP] 슬럽 래글런 롱슬리브 [멜란지 그레이]",
+      "brand_name": "-",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/7059555",
+      "current_price": 44530,
+      "lowest_price": 44530,
+      "lowest_price_date": "2026-09-26",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:10:05.595Z"
     },
     {
       "goods_no": 7008812,
@@ -64,11 +77,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/7008812",
-      "current_price": 37110,
+      "current_price": 32670,
       "lowest_price": 32670,
       "lowest_price_date": "2026-09-26",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:50.357Z"
+      "last_checked": "2026-09-26T02:10:05.595Z"
     },
     {
       "goods_no": 7008018,
@@ -77,11 +90,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/7008018",
-      "current_price": 67200,
+      "current_price": 59130,
       "lowest_price": 53660,
       "lowest_price_date": "2026-09-07",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:50.325Z"
+      "last_checked": "2026-09-26T02:10:05.594Z"
     },
     {
       "goods_no": 7008015,
@@ -90,11 +103,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/7008015",
-      "current_price": 67200,
+      "current_price": 59130,
       "lowest_price": 53660,
       "lowest_price_date": "2026-09-12",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:50.225Z"
+      "last_checked": "2026-09-26T02:10:05.344Z"
     },
     {
       "goods_no": 7007740,
@@ -103,11 +116,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/7007740",
-      "current_price": 67200,
+      "current_price": 59130,
       "lowest_price": 53660,
       "lowest_price_date": "2026-09-07",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:47.458Z"
+      "last_checked": "2026-09-26T02:10:05.342Z"
     },
     {
       "goods_no": 6982363,
@@ -120,7 +133,7 @@
       "lowest_price": 36180,
       "lowest_price_date": "2026-09-04",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:47.368Z"
+      "last_checked": "2026-09-26T02:10:05.342Z"
     },
     {
       "goods_no": 6969629,
@@ -133,7 +146,20 @@
       "lowest_price": 32550,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:47.297Z"
+      "last_checked": "2026-09-26T02:10:05.093Z"
+    },
+    {
+      "goods_no": 6968252,
+      "goods_name": "[VIP] 시티 유틸리티 체크 후드 윈드브레이커_3color",
+      "brand_name": "트릴리온",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/6968252",
+      "current_price": 44940,
+      "lowest_price": 41450,
+      "lowest_price_date": "2026-08-31",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:10:05.091Z"
     },
     {
       "goods_no": 6948316,
@@ -146,20 +172,7 @@
       "lowest_price": 18600,
       "lowest_price_date": "2026-09-13",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:46.959Z"
-    },
-    {
-      "goods_no": 6968252,
-      "goods_name": "[VIP] 시티 유틸리티 체크 후드 윈드브레이커_3color",
-      "brand_name": "트릴리온",
-      "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/6968252",
-      "current_price": 51060,
-      "lowest_price": 41450,
-      "lowest_price_date": "2026-08-31",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:46.855Z"
+      "last_checked": "2026-09-26T02:10:05.091Z"
     },
     {
       "goods_no": 6886755,
@@ -168,24 +181,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/6886755",
-      "current_price": 130200,
+      "current_price": 125200,
       "lowest_price": 118200,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:44.479Z"
-    },
-    {
-      "goods_no": 6710467,
-      "goods_name": "[VIP] 헨리 넥 스웨트셔츠 [다크 그레이]",
-      "brand_name": "무신사 스탠다드",
-      "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/6710467",
-      "current_price": 40130,
-      "lowest_price": 35320,
-      "lowest_price_date": "2026-09-22",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:44.308Z"
+      "last_checked": "2026-09-26T02:10:04.841Z"
     },
     {
       "goods_no": 6736331,
@@ -194,11 +194,24 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/6736331",
-      "current_price": 78230,
+      "current_price": 66510,
       "lowest_price": 60590,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:44.144Z"
+      "last_checked": "2026-09-26T02:10:04.840Z"
+    },
+    {
+      "goods_no": 6710467,
+      "goods_name": "[VIP] 헨리 넥 스웨트셔츠 [다크 그레이]",
+      "brand_name": "무신사 스탠다드",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/6710467",
+      "current_price": 35320,
+      "lowest_price": 35320,
+      "lowest_price_date": "2026-09-22",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:10:04.839Z"
     },
     {
       "goods_no": 6710465,
@@ -207,11 +220,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/6710465",
-      "current_price": 42960,
+      "current_price": 37820,
       "lowest_price": 37820,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:43.992Z"
+      "last_checked": "2026-09-26T02:10:04.589Z"
     },
     {
       "goods_no": 6708161,
@@ -220,24 +233,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/6708161",
-      "current_price": 31620,
+      "current_price": 27830,
       "lowest_price": 27830,
       "lowest_price_date": "2026-09-13",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:41.530Z"
-    },
-    {
-      "goods_no": 6461629,
-      "goods_name": "[VIP] 가먼트 멀티 스톤 네크리스 - 화이트 블랙",
-      "brand_name": "노이즈",
-      "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/6461629",
-      "current_price": 31250,
-      "lowest_price": 21880,
-      "lowest_price_date": "2026-09-05",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:41.457Z"
+      "last_checked": "2026-09-26T02:10:04.588Z"
     },
     {
       "goods_no": 6536568,
@@ -246,11 +246,24 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/6536568",
-      "current_price": 34230,
+      "current_price": 30130,
       "lowest_price": 25670,
       "lowest_price_date": "2026-08-31",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:41.453Z"
+      "last_checked": "2026-09-26T02:10:04.588Z"
+    },
+    {
+      "goods_no": 6461629,
+      "goods_name": "[VIP] 가먼트 멀티 스톤 네크리스 - 화이트 블랙",
+      "brand_name": "노이즈",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/6461629",
+      "current_price": 27510,
+      "lowest_price": 21880,
+      "lowest_price_date": "2026-09-05",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:10:04.337Z"
     },
     {
       "goods_no": 6445179,
@@ -259,11 +272,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/6445179",
-      "current_price": 29090,
+      "current_price": 26950,
       "lowest_price": 25940,
       "lowest_price_date": "2026-08-31",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:41.047Z"
+      "last_checked": "2026-09-26T02:10:04.337Z"
     },
     {
       "goods_no": 6425818,
@@ -276,7 +289,7 @@
       "lowest_price": 19990,
       "lowest_price_date": "2026-09-15",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:41.017Z"
+      "last_checked": "2026-09-26T02:10:04.336Z"
     },
     {
       "goods_no": 6391691,
@@ -289,7 +302,7 @@
       "lowest_price": 28740,
       "lowest_price_date": "2026-09-24",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:40.982Z"
+      "last_checked": "2026-09-26T02:10:04.087Z"
     },
     {
       "goods_no": 6263413,
@@ -298,11 +311,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/6263413",
-      "current_price": 51580,
+      "current_price": 50440,
       "lowest_price": 43720,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:40.529Z"
+      "last_checked": "2026-09-26T02:10:04.086Z"
     },
     {
       "goods_no": 6257984,
@@ -311,11 +324,11 @@
       "source": "like",
       "status": "SOLDOUT",
       "url": "https://www.musinsa.com/products/6257984",
-      "current_price": 175770,
+      "current_price": 158431,
       "lowest_price": 151431,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": true,
-      "last_checked": "2026-09-26T01:36:40.482Z"
+      "last_checked": "2026-09-26T02:10:04.085Z"
     },
     {
       "goods_no": 6239250,
@@ -324,11 +337,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/6239250",
-      "current_price": 23100,
+      "current_price": 20030,
       "lowest_price": 20030,
       "lowest_price_date": "2026-09-12",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:40.434Z"
+      "last_checked": "2026-09-26T02:10:03.834Z"
     },
     {
       "goods_no": 6237142,
@@ -337,24 +350,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/6237142",
-      "current_price": 30970,
+      "current_price": 27260,
       "lowest_price": 24780,
       "lowest_price_date": "2026-09-09",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:40.031Z"
-    },
-    {
-      "goods_no": 6187200,
-      "goods_name": "[VIP] DENIM HALF SHIRT (BLUE)",
-      "brand_name": "카네이테이",
-      "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/6187200",
-      "current_price": 42470,
-      "lowest_price": 31800,
-      "lowest_price_date": "2026-09-22",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:39.962Z"
+      "last_checked": "2026-09-26T02:10:03.834Z"
     },
     {
       "goods_no": 6197079,
@@ -363,11 +363,24 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/6197079",
-      "current_price": 31160,
+      "current_price": 27420,
       "lowest_price": 22890,
       "lowest_price_date": "2026-08-31",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:39.912Z"
+      "last_checked": "2026-09-26T02:10:03.833Z"
+    },
+    {
+      "goods_no": 6187200,
+      "goods_name": "[VIP] DENIM HALF SHIRT (BLUE)",
+      "brand_name": "카네이테이",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/6187200",
+      "current_price": 41530,
+      "lowest_price": 31800,
+      "lowest_price_date": "2026-09-22",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:10:03.582Z"
     },
     {
       "goods_no": 6154424,
@@ -376,24 +389,11 @@
       "source": "like",
       "status": "SOLDOUT",
       "url": "https://www.musinsa.com/products/6154424",
-      "current_price": 31530,
+      "current_price": 27760,
       "lowest_price": 27760,
       "lowest_price_date": "2026-09-12",
       "is_sold_out": true,
-      "last_checked": "2026-09-26T01:36:39.601Z"
-    },
-    {
-      "goods_no": 6084885,
-      "goods_name": "[VIP] 블랙 비드 링 팔찌 (2types)",
-      "brand_name": "아이엠제이",
-      "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/6084885",
-      "current_price": 15260,
-      "lowest_price": 12400,
-      "lowest_price_date": "2026-09-13",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:39.394Z"
+      "last_checked": "2026-09-26T02:10:03.582Z"
     },
     {
       "goods_no": 6103298,
@@ -406,7 +406,20 @@
       "lowest_price": 31700,
       "lowest_price_date": "2026-09-12",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:39.371Z"
+      "last_checked": "2026-09-26T02:10:03.579Z"
+    },
+    {
+      "goods_no": 6084885,
+      "goods_name": "[VIP] 블랙 비드 링 팔찌 (2types)",
+      "brand_name": "아이엠제이",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/6084885",
+      "current_price": 14690,
+      "lowest_price": 12400,
+      "lowest_price_date": "2026-09-13",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:10:03.328Z"
     },
     {
       "goods_no": 6078643,
@@ -415,11 +428,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/6078643",
-      "current_price": 43420,
+      "current_price": 36920,
       "lowest_price": 36920,
       "lowest_price_date": "2026-09-04",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:38.144Z"
+      "last_checked": "2026-09-26T02:10:03.328Z"
     },
     {
       "goods_no": 6063096,
@@ -428,11 +441,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/6063096",
-      "current_price": 33220,
+      "current_price": 30780,
       "lowest_price": 27410,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:37.701Z"
+      "last_checked": "2026-09-26T02:10:03.325Z"
     },
     {
       "goods_no": 6062891,
@@ -441,11 +454,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/6062891",
-      "current_price": 53010,
+      "current_price": 49110,
       "lowest_price": 47430,
       "lowest_price_date": "2026-09-18",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:37.622Z"
+      "last_checked": "2026-09-26T02:10:03.074Z"
     },
     {
       "goods_no": 6047897,
@@ -454,24 +467,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/6047897",
-      "current_price": 434260,
+      "current_price": 431211,
       "lowest_price": 374061,
       "lowest_price_date": "2026-09-06",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:37.589Z"
-    },
-    {
-      "goods_no": 5992266,
-      "goods_name": "[VIP] 드레이프 L2B 자켓[블랙]",
-      "brand_name": "후브스",
-      "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/5992266",
-      "current_price": 90400,
-      "lowest_price": 88540,
-      "lowest_price_date": "2026-09-26",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:37.185Z"
+      "last_checked": "2026-09-26T02:10:03.074Z"
     },
     {
       "goods_no": 5993364,
@@ -480,11 +480,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/5993364",
-      "current_price": 95980,
-      "lowest_price": 93980,
-      "lowest_price_date": "2026-09-24",
+      "current_price": 89980,
+      "lowest_price": 89980,
+      "lowest_price_date": "2026-09-26",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:37.159Z"
+      "last_checked": "2026-09-26T02:10:03.070Z"
     },
     {
       "goods_no": 5993286,
@@ -493,11 +493,50 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/5993286",
-      "current_price": 38530,
+      "current_price": 37670,
       "lowest_price": 37670,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:37.146Z"
+      "last_checked": "2026-09-26T02:10:02.819Z"
+    },
+    {
+      "goods_no": 5992266,
+      "goods_name": "[VIP] 드레이프 L2B 자켓[블랙]",
+      "brand_name": "후브스",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/5992266",
+      "current_price": 82540,
+      "lowest_price": 82540,
+      "lowest_price_date": "2026-09-26",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:10:02.818Z"
+    },
+    {
+      "goods_no": 5947867,
+      "goods_name": "[VIP] 카우 위빙 레더 벨트 [BLACK]",
+      "brand_name": "드로우핏",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/5947867",
+      "current_price": 30950,
+      "lowest_price": 30950,
+      "lowest_price_date": "2026-09-12",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:10:02.814Z"
+    },
+    {
+      "goods_no": 5932663,
+      "goods_name": "[VIP] [패션플래닛X미나브] 세미스퀘어 리얼 레더 벨트 [블랙]",
+      "brand_name": "미나브",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/5932663",
+      "current_price": 23740,
+      "lowest_price": 23740,
+      "lowest_price_date": "2026-09-12",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:10:02.563Z"
     },
     {
       "goods_no": 5909598,
@@ -510,46 +549,7 @@
       "lowest_price": 46200,
       "lowest_price_date": "2026-09-26",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:36.707Z"
-    },
-    {
-      "goods_no": 5947867,
-      "goods_name": "[VIP] 카우 위빙 레더 벨트 [BLACK]",
-      "brand_name": "드로우핏",
-      "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/5947867",
-      "current_price": 35160,
-      "lowest_price": 30950,
-      "lowest_price_date": "2026-09-12",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:36.701Z"
-    },
-    {
-      "goods_no": 5932663,
-      "goods_name": "[VIP] [패션플래닛X미나브] 세미스퀘어 리얼 레더 벨트 [블랙]",
-      "brand_name": "미나브",
-      "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/5932663",
-      "current_price": 26970,
-      "lowest_price": 23740,
-      "lowest_price_date": "2026-09-12",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T01:36:36.683Z"
-    },
-    {
-      "goods_no": 5903154,
-      "goods_name": "[VIP] 리버서블 와플 후드 집업_멜란지 그레이",
-      "brand_name": "키뮤어",
-      "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/5903154",
-      "current_price": 116350,
-      "lowest_price": 97190,
-      "lowest_price_date": "2026-09-22",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T01:24:25.472Z"
+      "last_checked": "2026-09-26T02:10:02.563Z"
     },
     {
       "goods_no": 5908832,
@@ -558,11 +558,24 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/5908832",
-      "current_price": 63800,
+      "current_price": 56150,
       "lowest_price": 54150,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:24:25.466Z"
+      "last_checked": "2026-09-26T02:10:02.562Z"
+    },
+    {
+      "goods_no": 5903154,
+      "goods_name": "[VIP] 리버서블 와플 후드 집업_멜란지 그레이",
+      "brand_name": "키뮤어",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/5903154",
+      "current_price": 99190,
+      "lowest_price": 97190,
+      "lowest_price_date": "2026-09-22",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:10:02.312Z"
     },
     {
       "goods_no": 5898838,
@@ -575,20 +588,7 @@
       "lowest_price": 30420,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:24:25.357Z"
-    },
-    {
-      "goods_no": 5885530,
-      "goods_name": "[VIP] [With 해수] 베를리너 레더 백 (소가죽 블랙)",
-      "brand_name": "하 아카이브",
-      "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/5885530",
-      "current_price": 119780,
-      "lowest_price": 114780,
-      "lowest_price_date": "2026-09-26",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T01:24:25.044Z"
+      "last_checked": "2026-09-26T02:10:02.312Z"
     },
     {
       "goods_no": 5898780,
@@ -597,11 +597,24 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/5898780",
-      "current_price": 37110,
+      "current_price": 32670,
       "lowest_price": 28880,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:24:25.026Z"
+      "last_checked": "2026-09-26T02:10:02.310Z"
+    },
+    {
+      "goods_no": 5885530,
+      "goods_name": "[VIP] [With 해수] 베를리너 레더 백 (소가죽 블랙)",
+      "brand_name": "하 아카이브",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/5885530",
+      "current_price": 113780,
+      "lowest_price": 113780,
+      "lowest_price_date": "2026-09-26",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:10:02.062Z"
     },
     {
       "goods_no": 5884422,
@@ -614,20 +627,7 @@
       "lowest_price": 37850,
       "lowest_price_date": "2026-09-11",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:24:24.895Z"
-    },
-    {
-      "goods_no": 5866558,
-      "goods_name": "[VIP] 브루니 커브드 데님팬츠 (생지)",
-      "brand_name": "어널러코드",
-      "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/5866558",
-      "current_price": 41670,
-      "lowest_price": 34640,
-      "lowest_price_date": "2026-08-31",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T01:24:24.540Z"
+      "last_checked": "2026-09-26T02:10:02.059Z"
     },
     {
       "goods_no": 5870347,
@@ -640,7 +640,20 @@
       "lowest_price": 39210,
       "lowest_price_date": "2026-09-18",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:24:24.450Z"
+      "last_checked": "2026-09-26T02:10:02.043Z"
+    },
+    {
+      "goods_no": 5866558,
+      "goods_name": "[VIP] 브루니 커브드 데님팬츠 (생지)",
+      "brand_name": "어널러코드",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/5866558",
+      "current_price": 41670,
+      "lowest_price": 34640,
+      "lowest_price_date": "2026-08-31",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:10:01.746Z"
     },
     {
       "goods_no": 5589130,
@@ -649,37 +662,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/5589130",
-      "current_price": 103930,
+      "current_price": 86770,
       "lowest_price": 71830,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:24:24.427Z"
-    },
-    {
-      "goods_no": 5386036,
-      "goods_name": "[VIP] [데일리룸X알리스] 페이디드 그레인 코튼 블루종 자켓 [빈티지브라운]",
-      "brand_name": "알리스",
-      "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/5386036",
-      "current_price": 89230,
-      "lowest_price": 85980,
-      "lowest_price_date": "2026-09-24",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T01:24:24.047Z"
-    },
-    {
-      "goods_no": 5425197,
-      "goods_name": "[VIP] 데님 로우 셔링백 [페이드 브라운]",
-      "brand_name": "밀로 아카이브",
-      "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/5425197",
-      "current_price": 95240,
-      "lowest_price": 57030,
-      "lowest_price_date": "2026-09-22",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T01:24:24.037Z"
+      "last_checked": "2026-09-26T02:10:01.745Z"
     },
     {
       "goods_no": 5561294,
@@ -688,11 +675,37 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/5561294",
-      "current_price": 30310,
+      "current_price": 28080,
       "lowest_price": 28080,
       "lowest_price_date": "2026-09-12",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:24:24.003Z"
+      "last_checked": "2026-09-26T02:10:01.740Z"
+    },
+    {
+      "goods_no": 5425197,
+      "goods_name": "[VIP] 데님 로우 셔링백 [페이드 브라운]",
+      "brand_name": "밀로 아카이브",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/5425197",
+      "current_price": 76460,
+      "lowest_price": 57030,
+      "lowest_price_date": "2026-09-22",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:10:01.491Z"
+    },
+    {
+      "goods_no": 5386036,
+      "goods_name": "[VIP] [데일리룸X알리스] 페이디드 그레인 코튼 블루종 자켓 [빈티지브라운]",
+      "brand_name": "알리스",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/5386036",
+      "current_price": 81980,
+      "lowest_price": 81980,
+      "lowest_price_date": "2026-09-26",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:10:01.489Z"
     },
     {
       "goods_no": 5384981,
@@ -701,11 +714,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/5384981",
-      "current_price": 27670,
+      "current_price": 24350,
       "lowest_price": 22140,
       "lowest_price_date": "2026-09-09",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:24:23.591Z"
+      "last_checked": "2026-09-26T02:10:01.488Z"
     },
     {
       "goods_no": 5336355,
@@ -714,11 +727,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/5336355",
-      "current_price": 31720,
+      "current_price": 27910,
       "lowest_price": 27910,
       "lowest_price_date": "2026-09-26",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:24:23.578Z"
+      "last_checked": "2026-09-26T02:10:01.240Z"
     },
     {
       "goods_no": 5329359,
@@ -727,11 +740,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/5329359",
-      "current_price": 94990,
+      "current_price": 77600,
       "lowest_price": 75600,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:24:23.500Z"
+      "last_checked": "2026-09-26T02:10:01.238Z"
     },
     {
       "goods_no": 5304466,
@@ -744,7 +757,7 @@
       "lowest_price": 41270,
       "lowest_price_date": "2026-08-31",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:24:23.138Z"
+      "last_checked": "2026-09-26T02:10:01.237Z"
     },
     {
       "goods_no": 5304429,
@@ -757,7 +770,7 @@
       "lowest_price": 56740,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:24:23.078Z"
+      "last_checked": "2026-09-26T02:10:00.987Z"
     },
     {
       "goods_no": 5295279,
@@ -766,11 +779,24 @@
       "source": "like",
       "status": "SOLDOUT",
       "url": "https://www.musinsa.com/products/5295279",
-      "current_price": 47640,
+      "current_price": 39900,
       "lowest_price": 34910,
       "lowest_price_date": "2026-09-10",
       "is_sold_out": true,
-      "last_checked": "2026-09-26T01:24:23.054Z"
+      "last_checked": "2026-09-26T02:10:00.985Z"
+    },
+    {
+      "goods_no": 5290721,
+      "goods_name": "[VIP] 울 헤어리 노르딕 라운드 가디건 [M.CHARCOAL]",
+      "brand_name": "드로우핏",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/5290721",
+      "current_price": 56730,
+      "lowest_price": 49560,
+      "lowest_price_date": "2026-09-09",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:10:00.984Z"
     },
     {
       "goods_no": 5288169,
@@ -783,7 +809,7 @@
       "lowest_price": 13020,
       "lowest_price_date": "2026-09-15",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:24:22.692Z"
+      "last_checked": "2026-09-26T02:10:00.734Z"
     },
     {
       "goods_no": 5180505,
@@ -796,20 +822,7 @@
       "lowest_price": 15200,
       "lowest_price_date": "2026-09-24",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:24:22.613Z"
-    },
-    {
-      "goods_no": 5290721,
-      "goods_name": "[VIP] 울 헤어리 노르딕 라운드 가디건 [M.CHARCOAL]",
-      "brand_name": "드로우핏",
-      "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/5290721",
-      "current_price": 64450,
-      "lowest_price": 49560,
-      "lowest_price_date": "2026-09-09",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T01:24:22.603Z"
+      "last_checked": "2026-09-26T02:10:00.733Z"
     },
     {
       "goods_no": 5087207,
@@ -818,24 +831,11 @@
       "source": "like",
       "status": "SOLDOUT",
       "url": "https://www.musinsa.com/products/5087207",
-      "current_price": 37110,
+      "current_price": 32670,
       "lowest_price": 32670,
       "lowest_price_date": "2026-09-12",
       "is_sold_out": true,
-      "last_checked": "2026-09-26T01:08:43.002Z"
-    },
-    {
-      "goods_no": 5045545,
-      "goods_name": "[VIP] 립브드 머슬핏 헨리넥 하프 슬리브_5color",
-      "brand_name": "드릭스",
-      "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/5045545",
-      "current_price": 27400,
-      "lowest_price": 21220,
-      "lowest_price_date": "2026-09-14",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T01:08:42.797Z"
+      "last_checked": "2026-09-26T02:10:00.732Z"
     },
     {
       "goods_no": 5049024,
@@ -844,11 +844,24 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/5049024",
-      "current_price": 27400,
+      "current_price": 24120,
       "lowest_price": 21210,
       "lowest_price_date": "2026-08-31",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:08:42.786Z"
+      "last_checked": "2026-09-26T02:10:00.482Z"
+    },
+    {
+      "goods_no": 5045545,
+      "goods_name": "[VIP] 립브드 머슬핏 헨리넥 하프 슬리브_5color",
+      "brand_name": "드릭스",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/5045545",
+      "current_price": 22950,
+      "lowest_price": 21220,
+      "lowest_price_date": "2026-09-14",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:10:00.482Z"
     },
     {
       "goods_no": 5021834,
@@ -861,20 +874,7 @@
       "lowest_price": 23800,
       "lowest_price_date": "2026-09-05",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:08:42.512Z"
-    },
-    {
-      "goods_no": 4987277,
-      "goods_name": "[VIP] 논페이드 밴딩 데님 팬츠 L03 다크 인디고",
-      "brand_name": "플랙",
-      "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/4987277",
-      "current_price": 47400,
-      "lowest_price": 27300,
-      "lowest_price_date": "2026-09-05",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T01:08:42.352Z"
+      "last_checked": "2026-09-26T02:10:00.480Z"
     },
     {
       "goods_no": 4987284,
@@ -887,7 +887,20 @@
       "lowest_price": 20860,
       "lowest_price_date": "2026-09-12",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:08:42.322Z"
+      "last_checked": "2026-09-26T02:10:00.218Z"
+    },
+    {
+      "goods_no": 4987277,
+      "goods_name": "[VIP] 논페이드 밴딩 데님 팬츠 L03 다크 인디고",
+      "brand_name": "플랙",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/4987277",
+      "current_price": 47400,
+      "lowest_price": 27300,
+      "lowest_price_date": "2026-09-05",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:10:00.218Z"
     },
     {
       "goods_no": 4929606,
@@ -896,24 +909,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/4929606",
-      "current_price": 50300,
+      "current_price": 43610,
       "lowest_price": 43610,
       "lowest_price_date": "2026-09-12",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:08:42.020Z"
-    },
-    {
-      "goods_no": 4787010,
-      "goods_name": "[VIP] 가젯 팬츠 Dune Pigment",
-      "brand_name": "그라미치",
-      "source": "like",
-      "status": "SOLDOUT",
-      "url": "https://www.musinsa.com/products/4787010",
-      "current_price": 118300,
-      "lowest_price": 85260,
-      "lowest_price_date": "2026-09-12",
-      "is_sold_out": true,
-      "last_checked": "2026-09-26T01:08:41.838Z"
+      "last_checked": "2026-09-26T02:10:00.216Z"
     },
     {
       "goods_no": 4862750,
@@ -922,11 +922,24 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/4862750",
-      "current_price": 32890,
+      "current_price": 28950,
       "lowest_price": 28950,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:08:41.836Z"
+      "last_checked": "2026-09-26T02:09:59.966Z"
+    },
+    {
+      "goods_no": 4787010,
+      "goods_name": "[VIP] 가젯 팬츠 Dune Pigment",
+      "brand_name": "그라미치",
+      "source": "like",
+      "status": "SOLDOUT",
+      "url": "https://www.musinsa.com/products/4787010",
+      "current_price": 100470,
+      "lowest_price": 85260,
+      "lowest_price_date": "2026-09-12",
+      "is_sold_out": true,
+      "last_checked": "2026-09-26T02:09:59.965Z"
     },
     {
       "goods_no": 4767951,
@@ -935,11 +948,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/4767951",
-      "current_price": 34630,
+      "current_price": 30480,
       "lowest_price": 27710,
       "lowest_price_date": "2026-08-31",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:08:41.607Z"
+      "last_checked": "2026-09-26T02:09:59.962Z"
     },
     {
       "goods_no": 4752738,
@@ -948,11 +961,11 @@
       "source": "like",
       "status": "SOLDOUT",
       "url": "https://www.musinsa.com/products/4752738",
-      "current_price": 78400,
+      "current_price": 72400,
       "lowest_price": 71400,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": true,
-      "last_checked": "2026-09-26T01:08:41.413Z"
+      "last_checked": "2026-09-26T02:09:59.711Z"
     },
     {
       "goods_no": 4699443,
@@ -965,7 +978,33 @@
       "lowest_price": 15900,
       "lowest_price_date": "2026-08-31",
       "is_sold_out": true,
-      "last_checked": "2026-09-26T01:08:41.384Z"
+      "last_checked": "2026-09-26T02:09:59.711Z"
+    },
+    {
+      "goods_no": 4663718,
+      "goods_name": "[VIP] 크롭 무브 가디건 [화이트 멜란지]",
+      "brand_name": "밀로 아카이브",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/4663718",
+      "current_price": 62760,
+      "lowest_price": 47650,
+      "lowest_price_date": "2026-09-22",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:09:59.710Z"
+    },
+    {
+      "goods_no": 4655025,
+      "goods_name": "[VIP] 릴렉스드 립 커프스 래글런 긴소매 티셔츠 [화이트/네이비]",
+      "brand_name": "무신사 스탠다드",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/4655025",
+      "current_price": 20890,
+      "lowest_price": 19160,
+      "lowest_price_date": "2026-09-12",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:09:59.458Z"
     },
     {
       "goods_no": 4645216,
@@ -978,33 +1017,7 @@
       "lowest_price": 90710,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:08:41.000Z"
-    },
-    {
-      "goods_no": 4663718,
-      "goods_name": "[VIP] 크롭 무브 가디건 [화이트 멜란지]",
-      "brand_name": "밀로 아카이브",
-      "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/4663718",
-      "current_price": 80360,
-      "lowest_price": 47650,
-      "lowest_price_date": "2026-09-22",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T01:08:40.994Z"
-    },
-    {
-      "goods_no": 4655025,
-      "goods_name": "[VIP] 릴렉스드 립 커프스 래글런 긴소매 티셔츠 [화이트/네이비]",
-      "brand_name": "무신사 스탠다드",
-      "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/4655025",
-      "current_price": 23740,
-      "lowest_price": 19160,
-      "lowest_price_date": "2026-09-12",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T01:08:40.928Z"
+      "last_checked": "2026-09-26T02:09:59.457Z"
     },
     {
       "goods_no": 4463982,
@@ -1013,24 +1026,11 @@
       "source": "like",
       "status": "SOLDOUT",
       "url": "https://www.musinsa.com/products/4463982",
-      "current_price": 79050,
+      "current_price": 63240,
       "lowest_price": 51860,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": true,
-      "last_checked": "2026-09-26T01:08:40.519Z"
-    },
-    {
-      "goods_no": 4326393,
-      "goods_name": "[VIP] 원 턱 와이드 카고 스웨트 팬츠 [블랙]",
-      "brand_name": "무신사 스탠다드",
-      "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/4326393",
-      "current_price": 36190,
-      "lowest_price": 27490,
-      "lowest_price_date": "2026-09-12",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T01:08:40.481Z"
+      "last_checked": "2026-09-26T02:09:59.455Z"
     },
     {
       "goods_no": 4400540,
@@ -1043,7 +1043,20 @@
       "lowest_price": 67000,
       "lowest_price_date": "2026-09-07",
       "is_sold_out": true,
-      "last_checked": "2026-09-26T01:08:40.476Z"
+      "last_checked": "2026-09-26T02:09:59.204Z"
+    },
+    {
+      "goods_no": 4326393,
+      "goods_name": "[VIP] 원 턱 와이드 카고 스웨트 팬츠 [블랙]",
+      "brand_name": "무신사 스탠다드",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/4326393",
+      "current_price": 36190,
+      "lowest_price": 27490,
+      "lowest_price_date": "2026-09-12",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:09:59.204Z"
     },
     {
       "goods_no": 4309651,
@@ -1052,24 +1065,11 @@
       "source": "like",
       "status": "SOLDOUT",
       "url": "https://www.musinsa.com/products/4309651",
-      "current_price": 52310,
+      "current_price": 46040,
       "lowest_price": 46040,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": true,
-      "last_checked": "2026-09-26T01:08:40.023Z"
-    },
-    {
-      "goods_no": 4272768,
-      "goods_name": "[VIP] 오버핏 하프집업 카라넥 스웨트 셔츠 [네이비]",
-      "brand_name": "리메인세컨드",
-      "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/4272768",
-      "current_price": 37450,
-      "lowest_price": 25500,
-      "lowest_price_date": "2026-08-31",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T01:08:40.004Z"
+      "last_checked": "2026-09-26T02:09:59.203Z"
     },
     {
       "goods_no": 4300665,
@@ -1082,20 +1082,20 @@
       "lowest_price": 38350,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:08:39.989Z"
+      "last_checked": "2026-09-26T02:09:58.951Z"
     },
     {
-      "goods_no": 4042935,
-      "goods_name": "[VIP] [SET] 버니위비+썸띵 레글런 반팔티셔츠 (MJST7718+MJST7708)",
-      "brand_name": "더블유브이프로젝트",
+      "goods_no": 4272768,
+      "goods_name": "[VIP] 오버핏 하프집업 카라넥 스웨트 셔츠 [네이비]",
+      "brand_name": "리메인세컨드",
       "source": "like",
       "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/4042935",
-      "current_price": 36470,
-      "lowest_price": 31620,
-      "lowest_price_date": "2026-09-12",
+      "url": "https://www.musinsa.com/products/4272768",
+      "current_price": 37450,
+      "lowest_price": 25500,
+      "lowest_price_date": "2026-08-31",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:08:39.550Z"
+      "last_checked": "2026-09-26T02:09:58.951Z"
     },
     {
       "goods_no": 4246352,
@@ -1104,11 +1104,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/4246352",
-      "current_price": 32520,
+      "current_price": 28630,
       "lowest_price": 25890,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:08:39.521Z"
+      "last_checked": "2026-09-26T02:09:58.950Z"
     },
     {
       "goods_no": 4104562,
@@ -1121,33 +1121,20 @@
       "lowest_price": 29900,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T01:08:39.478Z"
+      "last_checked": "2026-09-26T02:09:58.699Z"
     },
     {
-      "goods_no": 3982118,
-      "goods_name": "[VIP] No Time 나그랑 롱슬리브_네이비",
-      "brand_name": "어반에이지",
+      "goods_no": 4042935,
+      "goods_name": "[VIP] [SET] 버니위비+썸띵 레글런 반팔티셔츠 (MJST7718+MJST7708)",
+      "brand_name": "더블유브이프로젝트",
       "source": "like",
       "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/3982118",
-      "current_price": 22800,
-      "lowest_price": 18750,
-      "lowest_price_date": "2026-09-22",
+      "url": "https://www.musinsa.com/products/4042935",
+      "current_price": 31620,
+      "lowest_price": 31620,
+      "lowest_price_date": "2026-09-12",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T00:52:10.641Z"
-    },
-    {
-      "goods_no": 3933001,
-      "goods_name": "[VIP] 젤-1130 - 화이트:클라우드 그레이 / 1201A256-118",
-      "brand_name": "아식스",
-      "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/3933001",
-      "current_price": 110670,
-      "lowest_price": 89910,
-      "lowest_price_date": "2026-09-22",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T00:52:10.631Z"
+      "last_checked": "2026-09-26T02:09:58.698Z"
     },
     {
       "goods_no": 4026545,
@@ -1156,11 +1143,50 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/4026545",
-      "current_price": 47990,
+      "current_price": 42240,
       "lowest_price": 42240,
       "lowest_price_date": "2026-09-24",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T00:52:10.625Z"
+      "last_checked": "2026-09-26T02:09:58.697Z"
+    },
+    {
+      "goods_no": 3982118,
+      "goods_name": "[VIP] No Time 나그랑 롱슬리브_네이비",
+      "brand_name": "어반에이지",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/3982118",
+      "current_price": 18750,
+      "lowest_price": 18750,
+      "lowest_price_date": "2026-09-22",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:09:58.447Z"
+    },
+    {
+      "goods_no": 3933001,
+      "goods_name": "[VIP] 젤-1130 - 화이트:클라우드 그레이 / 1201A256-118",
+      "brand_name": "아식스",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/3933001",
+      "current_price": 97910,
+      "lowest_price": 89910,
+      "lowest_price_date": "2026-09-22",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:09:58.446Z"
+    },
+    {
+      "goods_no": 3830107,
+      "goods_name": "[VIP] 스트라이프 니트 카라 티셔츠 [베이지]",
+      "brand_name": "미나브",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/3830107",
+      "current_price": 40110,
+      "lowest_price": 30980,
+      "lowest_price_date": "2026-09-13",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:09:58.446Z"
     },
     {
       "goods_no": 3793560,
@@ -1169,11 +1195,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/3793560",
-      "current_price": 52120,
+      "current_price": 44310,
       "lowest_price": 43910,
       "lowest_price_date": "2026-09-18",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T00:52:10.181Z"
+      "last_checked": "2026-09-26T02:09:58.195Z"
     },
     {
       "goods_no": 3792018,
@@ -1186,20 +1212,7 @@
       "lowest_price": 29900,
       "lowest_price_date": "2026-09-24",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T00:52:10.179Z"
-    },
-    {
-      "goods_no": 3830107,
-      "goods_name": "[VIP] 스트라이프 니트 카라 티셔츠 [베이지]",
-      "brand_name": "미나브",
-      "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/3830107",
-      "current_price": 41020,
-      "lowest_price": 30980,
-      "lowest_price_date": "2026-09-13",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T00:52:10.174Z"
+      "last_checked": "2026-09-26T02:09:58.195Z"
     },
     {
       "goods_no": 3774989,
@@ -1212,7 +1225,7 @@
       "lowest_price": 33690,
       "lowest_price_date": "2026-08-31",
       "is_sold_out": true,
-      "last_checked": "2026-09-26T00:52:09.739Z"
+      "last_checked": "2026-09-26T02:09:58.192Z"
     },
     {
       "goods_no": 3659649,
@@ -1221,11 +1234,11 @@
       "source": "like",
       "status": "SOLDOUT",
       "url": "https://www.musinsa.com/products/3659649",
-      "current_price": 10920,
+      "current_price": 9480,
       "lowest_price": 9480,
       "lowest_price_date": "2026-09-12",
       "is_sold_out": true,
-      "last_checked": "2026-09-26T00:52:09.700Z"
+      "last_checked": "2026-09-26T02:09:57.942Z"
     },
     {
       "goods_no": 3646381,
@@ -1238,7 +1251,7 @@
       "lowest_price": 46200,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T00:52:09.629Z"
+      "last_checked": "2026-09-26T02:09:57.940Z"
     },
     {
       "goods_no": 3435698,
@@ -1247,11 +1260,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/3435698",
-      "current_price": 40370,
+      "current_price": 35530,
       "lowest_price": 35530,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T00:52:09.297Z"
+      "last_checked": "2026-09-26T02:09:57.939Z"
     },
     {
       "goods_no": 3155225,
@@ -1264,7 +1277,7 @@
       "lowest_price": 33020,
       "lowest_price_date": "2026-09-08",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T00:52:09.259Z"
+      "last_checked": "2026-09-26T02:09:57.690Z"
     },
     {
       "goods_no": 3155223,
@@ -1273,11 +1286,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/3155223",
-      "current_price": 38960,
+      "current_price": 34290,
       "lowest_price": 31090,
       "lowest_price_date": "2026-09-15",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T00:52:09.168Z"
+      "last_checked": "2026-09-26T02:09:57.689Z"
     },
     {
       "goods_no": 2995103,
@@ -1290,7 +1303,7 @@
       "lowest_price": 19990,
       "lowest_price_date": "2026-09-12",
       "is_sold_out": true,
-      "last_checked": "2026-09-26T00:52:08.808Z"
+      "last_checked": "2026-09-26T02:09:57.688Z"
     },
     {
       "goods_no": 2741521,
@@ -1303,7 +1316,7 @@
       "lowest_price": 48300,
       "lowest_price_date": "2026-09-26",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T00:52:08.782Z"
+      "last_checked": "2026-09-26T02:09:57.438Z"
     },
     {
       "goods_no": 2741233,
@@ -1312,24 +1325,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/2741233",
-      "current_price": 70960,
+      "current_price": 64960,
       "lowest_price": 63960,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T00:52:08.726Z"
-    },
-    {
-      "goods_no": 2341126,
-      "goods_name": "[VIP] 가젯 팬츠 Black",
-      "brand_name": "그라미치",
-      "source": "like",
-      "status": "SOLDOUT",
-      "url": "https://www.musinsa.com/products/2341126",
-      "current_price": 84880,
-      "lowest_price": 69050,
-      "lowest_price_date": "2026-09-22",
-      "is_sold_out": true,
-      "last_checked": "2026-09-26T00:52:08.334Z"
+      "last_checked": "2026-09-26T02:09:57.437Z"
     },
     {
       "goods_no": 2725419,
@@ -1338,11 +1338,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/2725419",
-      "current_price": 65040,
+      "current_price": 55290,
       "lowest_price": 52260,
       "lowest_price_date": "2026-09-09",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T00:52:08.330Z"
+      "last_checked": "2026-09-26T02:09:57.436Z"
     },
     {
       "goods_no": 2705799,
@@ -1351,24 +1351,24 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/2705799",
-      "current_price": 43420,
+      "current_price": 38220,
       "lowest_price": 34750,
       "lowest_price_date": "2026-08-31",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T00:52:08.285Z"
+      "last_checked": "2026-09-26T02:09:57.186Z"
     },
     {
-      "goods_no": 595040,
-      "goods_name": "[VIP] 1461 3홀 모노 블랙 / 14345001",
-      "brand_name": "닥터마틴",
+      "goods_no": 2341126,
+      "goods_name": "[VIP] 가젯 팬츠 Black",
+      "brand_name": "그라미치",
       "source": "like",
-      "status": "ACTIVE",
-      "url": "https://www.musinsa.com/products/595040",
-      "current_price": 209790,
-      "lowest_price": 163981,
-      "lowest_price_date": "2026-09-13",
-      "is_sold_out": false,
-      "last_checked": "2026-09-26T00:52:07.884Z"
+      "status": "SOLDOUT",
+      "url": "https://www.musinsa.com/products/2341126",
+      "current_price": 77000,
+      "lowest_price": 69050,
+      "lowest_price_date": "2026-09-22",
+      "is_sold_out": true,
+      "last_checked": "2026-09-26T02:09:57.185Z"
     },
     {
       "goods_no": 2322315,
@@ -1381,7 +1381,33 @@
       "lowest_price": 41620,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T00:52:07.852Z"
+      "last_checked": "2026-09-26T02:09:57.184Z"
+    },
+    {
+      "goods_no": 1220731,
+      "goods_name": "[VIP] 사피아노 신세틱 레더 벨트_30mm",
+      "brand_name": "-",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/1220731",
+      "current_price": 10990,
+      "lowest_price": 10990,
+      "lowest_price_date": "2026-09-26",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:09:56.933Z"
+    },
+    {
+      "goods_no": 595040,
+      "goods_name": "[VIP] 1461 3홀 모노 블랙 / 14345001",
+      "brand_name": "닥터마틴",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/595040",
+      "current_price": 193811,
+      "lowest_price": 163981,
+      "lowest_price_date": "2026-09-13",
+      "is_sold_out": false,
+      "last_checked": "2026-09-26T02:09:56.933Z"
     },
     {
       "goods_no": 595039,
@@ -1390,11 +1416,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/595039",
-      "current_price": 209790,
+      "current_price": 208671,
       "lowest_price": 199790,
       "lowest_price_date": "2026-08-31",
       "is_sold_out": false,
-      "last_checked": "2026-09-26T00:52:07.818Z"
+      "last_checked": "2026-09-26T02:09:56.916Z"
     },
     {
       "goods_no": 4316302,
