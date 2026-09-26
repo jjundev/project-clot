@@ -16,6 +16,7 @@ const LOGIN_STATUS_TIMEOUT_MS = 10_000;
 const AUTH_COOKIE_NAMES = ['app_atk', 'app_rtk', 'mss_mac'];
 const MAX_LIFETIME_SAMPLES = 10;
 const HOUR_MS = 3_600_000;
+const KEEPER_BRIDGE_BACKOFF_MS = 2 * HOUR_MS;
 
 // RFC 6265 cookie-octet. Anything else (CR/LF, spaces, quotes) would break or smuggle into the
 // Cookie header — and Node's header-validation error would print the whole value to the log.
@@ -341,10 +342,17 @@ export async function keepSessionAlive({
   path: sessionPath = DEFAULT_SESSION_PATH,
   verify = verifySession,
   fetchFromBridge = fetchSessionCookieFromBridge,
+  now = new Date(),
 } = {}) {
   if (!bridgeUsable) return { status: 'skipped' };
   const { loggedIn } = await verifyCached(sessionPath, verify);
-  if (loggedIn !== false) return { status: 'ok', ...describeSession(sessionPath) };
+  if (loggedIn !== false) return { status: 'ok', ...describeSession(sessionPath, now) };
+  // Chrome logged out: don't flash a tab on every 30-minute tick; retry at most every 2 h.
+  const lastFail = Date.parse(readSessionMeta(sessionPath).lastBridgeFailedAt);
+  if (Number.isFinite(lastFail) && now - lastFail < KEEPER_BRIDGE_BACKOFF_MS) {
+    return { status: 'lost', ...describeSession(sessionPath, now) };
+  }
   const fresh = await renewFromBridge(sessionPath, true, fetchFromBridge);
-  return { status: fresh ? 'renewed' : 'lost', ...describeSession(sessionPath) };
+  updateSessionMeta({ lastBridgeFailedAt: fresh ? null : now.toISOString() }, sessionPath);
+  return { status: fresh ? 'renewed' : 'lost', ...describeSession(sessionPath, now) };
 }

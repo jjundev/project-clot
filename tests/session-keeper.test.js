@@ -61,6 +61,49 @@ describe('keepSessionAlive', () => {
   });
 });
 
+describe('keepSessionAlive bridge backoff', () => {
+  const T0 = new Date('2026-09-26T03:00:00Z');
+  const plus = (min) => new Date(T0.getTime() + min * 60_000);
+  const bridgeSpy = (value) => {
+    const fn = async () => { fn.calls++; return typeof value === 'function' ? value() : value; };
+    fn.calls = 0;
+    return fn;
+  };
+
+  test('after a failed bridge attempt, ticks within 2 h stay lost without opening Chrome', async () => {
+    const bridge = bridgeSpy(null);
+    assert.equal((await keepSessionAlive({ bridgeUsable: true, path: tmpPath, verify: okVerify, fetchFromBridge: bridge, now: T0 })).status, 'lost');
+    assert.equal((await keepSessionAlive({ bridgeUsable: true, path: tmpPath, verify: okVerify, fetchFromBridge: bridge, now: plus(30) })).status, 'lost');
+    assert.equal((await keepSessionAlive({ bridgeUsable: true, path: tmpPath, verify: okVerify, fetchFromBridge: bridge, now: plus(119) })).status, 'lost');
+    assert.equal(bridge.calls, 1);
+  });
+
+  test('the bridge is retried once the 2 h backoff has passed', async () => {
+    const bridge = bridgeSpy(null);
+    await keepSessionAlive({ bridgeUsable: true, path: tmpPath, verify: okVerify, fetchFromBridge: bridge, now: T0 });
+    await keepSessionAlive({ bridgeUsable: true, path: tmpPath, verify: okVerify, fetchFromBridge: bridge, now: plus(120) });
+    assert.equal(bridge.calls, 2);
+  });
+
+  test('a successful renewal clears the backoff so the next death retries immediately', async () => {
+    let result = null;
+    const bridge = bridgeSpy(() => result);
+    await keepSessionAlive({ bridgeUsable: true, path: tmpPath, verify: okVerify, fetchFromBridge: bridge, now: T0 });
+    result = COOKIE;
+    assert.equal((await keepSessionAlive({ bridgeUsable: true, path: tmpPath, verify: okVerify, fetchFromBridge: bridge, now: plus(150) })).status, 'renewed');
+    result = null;
+    assert.equal((await keepSessionAlive({ bridgeUsable: true, path: tmpPath, verify: deadVerify, fetchFromBridge: bridge, now: plus(160) })).status, 'lost');
+    assert.equal(bridge.calls, 3);
+  });
+
+  test('collection runs (getSessionCookie) ignore the keeper backoff', async () => {
+    const bridge = bridgeSpy(null);
+    await keepSessionAlive({ bridgeUsable: true, path: tmpPath, verify: okVerify, fetchFromBridge: bridge, now: T0 });
+    await getSessionCookie({ path: tmpPath, verify: okVerify, fetchFromBridge: bridge });
+    assert.equal(bridge.calls, 2);
+  });
+});
+
 describe('sessionKeeperSuffix', () => {
   const awake = { bridgeUsable: true };
 
