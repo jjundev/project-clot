@@ -356,6 +356,48 @@ async function runExpiryProbe(sessionPath, cached, initial, probe, trigger) {
   }
 }
 
+const fmtAuth = (list) => (list?.length ? list.map((c) => `${c.name}${c.deleted ? '✗' : '✓'}`).join('+') : 'no-auth-cookie');
+
+function fmtStep(s) {
+  if (s.error) return `${s.target} ${s.error}`;
+  const loc = s.location ? `→${s.location}` : '';
+  const flag = s.target === 'product' ? ` loggedIn=${s.pageLoggedIn}` : s.target === 'login-status' ? ` loggedIn=${s.loggedIn}` : '';
+  return `${s.target} ${s.status}${loc} ${fmtAuth(s.authSetCookies)}${flag}`;
+}
+
+function fmtBrowser(b) {
+  if (!b) return 'browser: not run';
+  const requests = b.requests || [];
+  const shown = requests.slice(0, 5).map((r) => `${r.method} ${r.host}${r.path} ${r.status}`).join(', ');
+  const err = b.captureError ? ` captureError=${b.captureError}` : '';
+  return `browser: chrome=${b.chromeLoggedIn ? 'LOGGED_IN' : 'LOGGED_OUT'} atkChanged=${b.atkChanged} rtkChanged=${b.rtkChanged} authReqs=${requests.length}${shown ? ` [${shown}]` : ''}${err}`;
+}
+
+/** Log-safe one-liner for an expiryProbes entry (it holds no values to begin with). */
+export function formatExpiryProbeSummary(e) {
+  const age = e.ageHours === null ? 'age ?' : `age≈${e.ageHours}h(${e.ageBasis})`;
+  const last = e.sinceLastVerifiedHours === null ? '' : `, last ok ${e.sinceLastVerifiedHours}h ago`;
+  const iv = e.initialVerify || {};
+  const https = e.httpsProbe?.renewed ? `RENEWED${e.httpsProbe.tokensChanged ? '' : '(same tokens)'}` : 'not renewed';
+  const steps = (e.httpsProbe?.steps || []).map(fmtStep).join(', ');
+  return `[${e.trigger}] ${age}${last} — first login-status ${iv.status ?? '?'} ${fmtAuth(iv.authSetCookies)}; https ${https}: ${steps}; ${fmtBrowser(e.browser)}`;
+}
+
+/** Prints the 🧪 line and notifies once the probe entry is complete. Never throws. */
+async function finishExpiryProbe(sessionPath, probeAt, notify) {
+  if (!probeAt) return;
+  try {
+    const list = readSessionMeta(sessionPath).expiryProbes;
+    const entry = Array.isArray(list) ? list.find((e) => e.at === probeAt) : null;
+    if (!entry) return;
+    const line = formatExpiryProbeSummary(entry);
+    console.log(`🧪 [Session Probe] ${line}`);
+    if (notify) await notify(line);
+  } catch (err) {
+    console.warn(`[Session Probe Notice] ${err.message}`);
+  }
+}
+
 // Runs in the Chrome page: `opencli browser eval` awaits the Promise (verified 2026-09-26).
 // Contains no single quotes — it is embedded in a single-quoted shell argument.
 const BRIDGE_LOGIN_CHECK_JS =
@@ -441,8 +483,9 @@ export async function getSessionCookie({
 } = {}) {
   const v = await verifyCached(sessionPath, verify, probe, 'collect');
   // null = login-status unknown: keep using the cache rather than dropping a possibly-good session.
-  if (v.loggedIn !== false) return v.cookie;
-  return renewFromBridge(sessionPath, allowBridge, fetchFromBridge);
+  const cookie = v.loggedIn !== false ? v.cookie : await renewFromBridge(sessionPath, allowBridge, fetchFromBridge);
+  await finishExpiryProbe(sessionPath, v.probeAt, probe?.notify);
+  return cookie;
 }
 
 /**
@@ -459,8 +502,10 @@ export async function refreshSessionCookie({
   probe = null,
 } = {}) {
   const v = await verifyCached(sessionPath, verify, probe, 'refresh');
-  if (v.loggedIn === true && v.cookie !== failedCookie) return v.cookie;
-  return renewFromBridge(sessionPath, allowBridge, fetchFromBridge);
+  const cookie =
+    v.loggedIn === true && v.cookie !== failedCookie ? v.cookie : await renewFromBridge(sessionPath, allowBridge, fetchFromBridge);
+  await finishExpiryProbe(sessionPath, v.probeAt, probe?.notify);
+  return cookie;
 }
 
 /** Builds the `sessionProvider` consumed by collectPricesForActiveItems. */
@@ -504,13 +549,15 @@ export async function keepSessionAlive({
 } = {}) {
   if (!bridgeUsable) return { status: 'skipped' };
   const v = await verifyCached(sessionPath, verify, probe, 'keeper');
-  if (v.loggedIn !== false) return { status: v.renewedByProbe ? 'renewed' : 'ok', ...describeSession(sessionPath, now) };
+  const done = async (status) => {
+    await finishExpiryProbe(sessionPath, v.probeAt, probe?.notify);
+    return { status, ...describeSession(sessionPath, now) };
+  };
+  if (v.loggedIn !== false) return done(v.renewedByProbe ? 'renewed' : 'ok');
   // Chrome logged out: don't flash a tab on every 30-minute tick; retry at most every 2 h.
   const lastFail = Date.parse(readSessionMeta(sessionPath).lastBridgeFailedAt);
-  if (Number.isFinite(lastFail) && now - lastFail < KEEPER_BRIDGE_BACKOFF_MS) {
-    return { status: 'lost', ...describeSession(sessionPath, now) };
-  }
+  if (Number.isFinite(lastFail) && now - lastFail < KEEPER_BRIDGE_BACKOFF_MS) return done('lost');
   const fresh = await renewFromBridge(sessionPath, true, fetchFromBridge);
   updateSessionMeta({ lastBridgeFailedAt: fresh ? null : now.toISOString() }, sessionPath);
-  return { status: fresh ? 'renewed' : 'lost', ...describeSession(sessionPath, now) };
+  return done(fresh ? 'renewed' : 'lost');
 }

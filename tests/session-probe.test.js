@@ -304,3 +304,101 @@ describe('expiry probe recording', () => {
     assert.equal(probes().length, 1);
   });
 });
+
+function captureConsole() {
+  const lines = [];
+  const orig = { log: console.log, warn: console.warn, error: console.error };
+  for (const k of Object.keys(orig)) console[k] = (...a) => lines.push(a.join(' '));
+  return { lines, restore: () => Object.assign(console, orig) };
+}
+
+describe('formatExpiryProbeSummary', () => {
+  test('formats every part of an entry', () => {
+    const entry = {
+      at: '2026-09-27T01:30:00.000Z', trigger: 'keeper', ageHours: 10.2, ageBasis: 'savedAt', sinceLastVerifiedHours: 0.5,
+      initialVerify: { status: 200, authSetCookies: [] },
+      httpsProbe: { renewed: false, tokensChanged: false, steps: [
+        { target: 'main', status: 302, location: '/auth/login', authSetCookies: [] },
+        { target: 'product', status: 200, location: null, authSetCookies: [{ name: 'app_atk', hasValue: false, deleted: true, attrs: {} }], pageLoggedIn: false },
+        { target: 'login-status', status: null, error: 'timeout' },
+      ] },
+      browser: { ran: true, chromeLoggedIn: true, atkChanged: true, rtkChanged: false, captureError: null,
+        requests: [{ method: 'POST', host: 'my.musinsa.com', path: '/api/auth/reissue', status: 200 }] },
+    };
+    assert.equal(
+      session.formatExpiryProbeSummary(entry),
+      '[keeper] age≈10.2h(savedAt), last ok 0.5h ago — first login-status 200 no-auth-cookie; ' +
+        'https not renewed: main 302→/auth/login no-auth-cookie, product 200 app_atk✗ loggedIn=false, login-status timeout; ' +
+        'browser: chrome=LOGGED_IN atkChanged=true rtkChanged=false authReqs=1 [POST my.musinsa.com/api/auth/reissue 200]',
+    );
+  });
+
+  test('unknown age, same-token renewal, no browser run', () => {
+    const line = session.formatExpiryProbeSummary({
+      trigger: 'collect', ageHours: null, ageBasis: null, sinceLastVerifiedHours: null,
+      initialVerify: { status: null, authSetCookies: [] },
+      httpsProbe: { renewed: true, tokensChanged: false, steps: [] },
+      browser: null,
+    });
+    assert.equal(line, '[collect] age ? — first login-status ? no-auth-cookie; https RENEWED(same tokens): ; browser: not run');
+  });
+});
+
+describe('probe log line and notification', () => {
+  test('keeper prints one 🧪 line and notifies once with the same summary', async () => {
+    session.writeSessionCookie(COOKIE, tmpPath);
+    const { fetchFn } = probeRoutes();
+    const notified = [];
+    const con = captureConsole();
+    try {
+      await session.keepSessionAlive({
+        bridgeUsable: true, path: tmpPath, verify: deadVerify, fetchFromBridge: async () => FRESH,
+        probe: { fetchFn, delayMs: 0, notify: async (l) => notified.push(l) },
+      });
+    } finally {
+      con.restore();
+    }
+    const probeLines = con.lines.filter((l) => l.startsWith('🧪 [Session Probe] '));
+    assert.equal(probeLines.length, 1);
+    assert.deepEqual(notified, [probeLines[0].slice('🧪 [Session Probe] '.length)]);
+  });
+
+  test('collect without bridge still logs and notifies (browser: not run)', async () => {
+    session.writeSessionCookie(COOKIE, tmpPath);
+    const { fetchFn } = probeRoutes();
+    const notified = [];
+    await session.getSessionCookie({
+      path: tmpPath, allowBridge: false, verify: deadVerify, probe: { fetchFn, delayMs: 0, notify: async (l) => notified.push(l) },
+    });
+    assert.equal(notified.length, 1);
+    assert.match(notified[0], /browser: not run$/);
+  });
+
+  test('a failing notifier is only a warning', async () => {
+    session.writeSessionCookie(COOKIE, tmpPath);
+    const { fetchFn } = probeRoutes();
+    const con = captureConsole();
+    let r;
+    try {
+      r = await session.keepSessionAlive({
+        bridgeUsable: true, path: tmpPath, verify: deadVerify, fetchFromBridge: async () => FRESH,
+        probe: { fetchFn, delayMs: 0, notify: async () => { throw new Error('telegram down'); } },
+      });
+    } finally {
+      con.restore();
+    }
+    assert.equal(r.status, 'renewed');
+    assert.equal(con.lines.some((l) => l.includes('[Session Probe Notice] telegram down')), true);
+  });
+
+  test('no probe: no 🧪 line', async () => {
+    session.writeSessionCookie(COOKIE, tmpPath);
+    const con = captureConsole();
+    try {
+      await session.keepSessionAlive({ bridgeUsable: true, path: tmpPath, verify: deadVerify, fetchFromBridge: async () => FRESH });
+    } finally {
+      con.restore();
+    }
+    assert.equal(con.lines.some((l) => l.includes('🧪')), false);
+  });
+});
