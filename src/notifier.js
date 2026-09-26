@@ -168,9 +168,11 @@ export function formatHotDealsSummary(discoveryItems = []) {
     const goodsNo = item.goodsNo || item.goods_no;
     const url = item.url || `https://www.musinsa.com/products/${goodsNo}`;
     const priceStr = item.targetPrice ? `${item.targetPrice.toLocaleString()}원` : '-';
+    const myPrice = item.myPrice ?? item.my_price ?? null;
+    const realStr = myPrice ? ` · 나의 할인가 <b>${myPrice.toLocaleString()}원</b>` : '';
 
     lines.push(
-      `${rank}. <b>[${brand}]</b> ${name} - 정가 대비 <b>${item.discountRate}%</b> 할인 (추정회원가: <b>${priceStr}</b>)\n` +
+      `${rank}. <b>[${brand}]</b> ${name} - 정가 대비 <b>${item.discountRate}%</b> 할인 (추정회원가: <b>${priceStr}</b>)${realStr}\n` +
         `   • <a href="${url}">상품 바로가기</a>`
     );
   });

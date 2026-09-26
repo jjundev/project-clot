@@ -13,6 +13,7 @@ import {
 } from '../src/discovery.js';
 import { pickDisplayPrices, exportDataForGit, handleDiscover } from '../src/cli.js';
 import { SessionExpiredError } from '../src/myprice.js';
+import { formatHotDealsSummary } from '../src/notifier.js';
 
 function tempDb(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-disc-myprice-'));
@@ -301,4 +302,18 @@ test('discover: counts a real drop only against a previous real price', async (t
   assert.ok(lines.some((l) => l.includes('myPrice drops vs last myPrice: 1')));
   assert.ok(lines.some((l) => l.includes('myPrice vs estimate: n=1')));
   assert.ok(!lines.some((l) => l.includes('app_atk')));
+});
+
+test('hot deals: ranks by estimate and shows the real price when present', () => {
+  const msg = formatHotDealsSummary([
+    { goodsNo: 1, goodsName: 'Cheap by estimate', brandName: 'B', normalPrice: 20000, estimatedMyPrice: 10000, myPrice: 9500 },
+    { goodsNo: 2, goodsName: 'Only real is cheap', brandName: 'B', normalPrice: 20000, estimatedMyPrice: 15000, myPrice: 5000 },
+    { goodsNo: 3, goodsName: 'No real price', brandName: 'B', normalPrice: 20000, estimatedMyPrice: 12000, myPrice: null },
+  ]);
+  const lines = msg.split('\n').filter((l) => /^\d\./.test(l));
+  assert.match(lines[0], /Cheap by estimate/);
+  assert.match(lines[0], /나의 할인가 <b>9,500원<\/b>/);
+  assert.match(lines[1], /No real price/);
+  assert.doesNotMatch(lines[1], /나의 할인가/);
+  assert.match(lines[2], /Only real is cheap/);
 });
