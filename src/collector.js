@@ -249,6 +249,8 @@ export async function collectPricesForActiveItems({
   sessionProvider = null,
   authFetchFn = fetchAuthenticatedPriceInfo,
   authDelayMs = 700,
+  // Deferred runs only: the liked list was synced this run, so an all-HTTPS price run needs no awake upgrade.
+  likesSynced = false,
 } = {}) {
   let activeItems;
   if (items) {
@@ -299,8 +301,8 @@ export async function collectPricesForActiveItems({
   const remainingVipGoodsNos = vipGoodsNos.filter((g) => !authPriceMap.has(g));
 
   if (skipOpenCli && vipGoodsNos.length > 0) {
-    // Stays 'deferred' even when HTTPS priced every item: the awake upgrade run is what syncs liked items.
-    results.mode = 'deferred';
+    // 'full' (no awake upgrade) only when this run also synced the liked list and HTTPS priced every VIP item.
+    results.mode = likesSynced && remainingVipGoodsNos.length === 0 ? 'full' : 'deferred';
     if (remainingVipGoodsNos.length > 0) {
       console.warn(
         `⏸ [OpenCLI Deferred] Browser bridge unavailable (Mac asleep/DarkWake). Skipping OpenCLI for ${remainingVipGoodsNos.length} VIP items; using fast direct parser.`

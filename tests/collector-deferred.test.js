@@ -112,4 +112,33 @@ describe('Deferred (sleep-aware) collection mode', () => {
     assert.equal(results.priceDropped[0].prevPrice, 14000);
     assert.equal(results.priceDropped[0].currentPrice, 12000);
   });
+
+  test('deferred run is recorded as full only when likes synced and HTTPS priced every VIP item', async () => {
+    const authInfo = (goodsNo) => ({
+      goodsNo, goodsName: `Name ${goodsNo}`, brandName: 'Brand', normalPrice: 20000, salePrice: 15000,
+      couponPrice: 14000, myPrice: 13000, estimatedMyPrice: 12500, couponName: 'c', couponDiscount: 1000,
+      isSoldOut: false, discontinued: false, priceSource: 'https-auth',
+    });
+    const run = async ({ likesSynced, pricedByHttps }) => {
+      const { db, recorded } = makeDb();
+      const res = await collectPricesForActiveItems({
+        dbInstance: db,
+        execFn: () => { throw new Error('should not be called'); },
+        fetchFn: directFetch,
+        skipOpenCli: true,
+        delayMs: 0,
+        sessionProvider: async () => 'app_atk=a; app_rtk=r',
+        authDelayMs: 0,
+        authFetchFn: async (g) => {
+          if (!pricedByHttps.includes(g)) throw new Error('boom');
+          return authInfo(g);
+        },
+        likesSynced,
+      });
+      return [res.mode, recorded.runs[0].mode];
+    };
+    assert.deepEqual(await run({ likesSynced: true, pricedByHttps: [1, 2] }), ['full', 'full']);
+    assert.deepEqual(await run({ likesSynced: false, pricedByHttps: [1, 2] }), ['deferred', 'deferred']);
+    assert.deepEqual(await run({ likesSynced: true, pricedByHttps: [1] }), ['deferred', 'deferred']);
+  });
 });
