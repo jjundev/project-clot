@@ -19,6 +19,8 @@ const HOUR_MS = 3_600_000;
 const KEEPER_BRIDGE_BACKOFF_MS = 2 * HOUR_MS;
 const PROBE_DELAY_MS = 700;
 const MAX_EXPIRY_PROBES = 3;
+const AUTH_URL_RE = /auth|token|refresh|reissue|login|member/i;
+const MAX_CAPTURED_REQUESTS = 20;
 
 // RFC 6265 cookie-octet. Anything else (CR/LF, spaces, quotes) would break or smuggle into the
 // Cookie header — and Node's header-validation error would print the whole value to the log.
@@ -329,6 +331,12 @@ function appendExpiryProbe(entry, sessionPath) {
   updateSessionMeta({ expiryProbes: [...list, entry].slice(-MAX_EXPIRY_PROBES) }, sessionPath);
 }
 
+function patchExpiryProbe(at, patch, sessionPath) {
+  const list = readSessionMeta(sessionPath).expiryProbes;
+  if (!Array.isArray(list)) return;
+  updateSessionMeta({ expiryProbes: list.map((e) => (e.at === at ? { ...e, ...patch } : e)) }, sessionPath);
+}
+
 /** First sight of a dead cookie: record how the server reacts to it. Never throws. */
 async function runExpiryProbe(sessionPath, cached, initial, probe, trigger) {
   try {
@@ -406,15 +414,73 @@ const BRIDGE_LOGIN_CHECK_JS =
   '.catch(()=>"LOGGED_OUT")';
 
 /**
+ * `opencli browser <s> network --all` envelope -> auth-looking requests as { method, host, path, status }.
+ * Bodies, shapes and query strings are never kept. Throws on non-JSON (SyntaxError) or an error envelope.
+ */
+export function parseNetworkCapture(raw) {
+  const parsed = JSON.parse(String(raw || '').trim());
+  if (parsed?.error) {
+    const err = new Error('network capture failed');
+    err.captureCode = String(parsed.error.code || 'unknown');
+    throw err;
+  }
+  const out = [];
+  for (const e of Array.isArray(parsed?.entries) ? parsed.entries : []) {
+    let u;
+    try {
+      u = new URL(e.url);
+    } catch {
+      continue;
+    }
+    if (!AUTH_URL_RE.test(u.hostname + u.pathname)) continue;
+    out.push({
+      method: String(e.method || 'GET').toUpperCase(),
+      host: u.hostname,
+      path: u.pathname,
+      status: Number.isFinite(e.status) ? e.status : null,
+    });
+    if (out.length >= MAX_CAPTURED_REQUESTS) break;
+  }
+  return out;
+}
+
+function captureAuthRequests(execFn, session, opts) {
+  // OpenCLI caches captured response bodies on disk, and the page's own login-status response carries
+  // the tokens: keep that copy in a throwaway dir instead of ~/.opencli/cache.
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-netcap-'));
+  try {
+    const raw = execFn(`opencli browser ${session} network --all`, {
+      ...opts,
+      maxBuffer: 32 * 1024 * 1024,
+      env: { ...opts.env, OPENCLI_CACHE_DIR: cacheDir },
+    });
+    return { requests: parseNetworkCapture(raw), captureError: null };
+  } catch (err) {
+    const captureError = err instanceof SyntaxError ? 'parse' : err.captureCode ? `opencli:${err.captureCode}` : 'exec';
+    return { requests: [], captureError };
+  } finally {
+    fs.rmSync(cacheDir, { recursive: true, force: true });
+  }
+}
+
+/**
  * Reads the auth cookies from the logged-in Chrome through the OpenCLI browser bridge.
+ * onCapture (expiry probe only): also captures the page load's auth-looking requests right after
+ * `open` and reports them once, with booleans comparing Chrome's tokens to expiredCookie.
  * @returns {string|null} null when the bridge is unavailable or Chrome is logged out
  */
-export function fetchSessionCookieFromBridge({ execFn = execSync, session = 'clot-auth' } = {}) {
+export function fetchSessionCookieFromBridge({ execFn = execSync, session = 'clot-auth', onCapture = null, expiredCookie = null } = {}) {
   const opts = getExecOptions({ encoding: 'utf8', timeout: 60000, stdio: ['ignore', 'pipe', 'ignore'] });
+  const capture = onCapture
+    ? { ran: false, chromeLoggedIn: null, atkChanged: null, rtkChanged: null, requests: [], captureError: null }
+    : null;
   try {
     execFn(`opencli browser ${session} open https://www.musinsa.com/`, opts);
+    // `open` starts network capture before navigating, so this sees the page load (not our eval below).
+    if (capture) Object.assign(capture, { ran: true }, captureAuthRequests(execFn, session, opts));
     // Confirm the page's session is live (this also lets the page refresh its tokens) before reading cookies.
     const status = String(execFn(`opencli browser ${session} eval '${BRIDGE_LOGIN_CHECK_JS}'`, opts) || '');
+    if (capture) capture.chromeLoggedIn = status.includes('LOGGED_IN');
     if (!status.includes('LOGGED_IN')) {
       console.warn('[Session Notice] Chrome is not logged in to Musinsa (bridge login-status check).');
       return null;
@@ -428,11 +494,24 @@ export function fetchSessionCookieFromBridge({ execFn = execSync, session = 'clo
       // plain (unquoted) output
     }
     const jar = parseAuthCookies(value);
+    if (capture) {
+      const old = parseAuthCookies(expiredCookie);
+      const changed = (name) => (jar.get(name) ? jar.get(name) !== old.get(name) : null);
+      capture.atkChanged = changed('app_atk');
+      capture.rtkChanged = changed('app_rtk');
+    }
     return jar.get('app_atk') && jar.get('app_rtk') ? serializeAuthCookies(jar) : null;
   } catch (err) {
     console.warn(`[Session Notice] Could not read Musinsa cookies from browser bridge: ${err.message}`);
     return null;
   } finally {
+    if (capture) {
+      try {
+        onCapture(capture);
+      } catch {
+        // recording must never break renewal
+      }
+    }
     try {
       execFn(`opencli browser ${session} close`, opts);
     } catch {
@@ -466,10 +545,13 @@ async function verifyCached(sessionPath, verify, probe = null, trigger = 'collec
   return { cookie: cached, loggedIn: false, probeAt, expiredCookie: cached };
 }
 
-async function renewFromBridge(sessionPath, allowBridge, fetchFromBridge) {
+async function renewFromBridge(sessionPath, allowBridge, fetchFromBridge, expiry = null) {
   clearSessionCookie(sessionPath);
   if (!allowBridge) return null;
-  const fresh = await fetchFromBridge();
+  const captureOpts = expiry?.probeAt
+    ? { onCapture: (browser) => patchExpiryProbe(expiry.probeAt, { browser }, sessionPath), expiredCookie: expiry.expiredCookie }
+    : undefined;
+  const fresh = await fetchFromBridge(captureOpts);
   if (fresh) writeSessionCookie(fresh, sessionPath);
   return fresh || null;
 }
@@ -483,7 +565,7 @@ export async function getSessionCookie({
 } = {}) {
   const v = await verifyCached(sessionPath, verify, probe, 'collect');
   // null = login-status unknown: keep using the cache rather than dropping a possibly-good session.
-  const cookie = v.loggedIn !== false ? v.cookie : await renewFromBridge(sessionPath, allowBridge, fetchFromBridge);
+  const cookie = v.loggedIn !== false ? v.cookie : await renewFromBridge(sessionPath, allowBridge, fetchFromBridge, v);
   await finishExpiryProbe(sessionPath, v.probeAt, probe?.notify);
   return cookie;
 }
@@ -503,7 +585,7 @@ export async function refreshSessionCookie({
 } = {}) {
   const v = await verifyCached(sessionPath, verify, probe, 'refresh');
   const cookie =
-    v.loggedIn === true && v.cookie !== failedCookie ? v.cookie : await renewFromBridge(sessionPath, allowBridge, fetchFromBridge);
+    v.loggedIn === true && v.cookie !== failedCookie ? v.cookie : await renewFromBridge(sessionPath, allowBridge, fetchFromBridge, v);
   await finishExpiryProbe(sessionPath, v.probeAt, probe?.notify);
   return cookie;
 }
@@ -557,7 +639,7 @@ export async function keepSessionAlive({
   // Chrome logged out: don't flash a tab on every 30-minute tick; retry at most every 2 h.
   const lastFail = Date.parse(readSessionMeta(sessionPath).lastBridgeFailedAt);
   if (Number.isFinite(lastFail) && now - lastFail < KEEPER_BRIDGE_BACKOFF_MS) return done('lost');
-  const fresh = await renewFromBridge(sessionPath, true, fetchFromBridge);
+  const fresh = await renewFromBridge(sessionPath, true, fetchFromBridge, v);
   updateSessionMeta({ lastBridgeFailedAt: fresh ? null : now.toISOString() }, sessionPath);
   return done(fresh ? 'renewed' : 'lost');
 }

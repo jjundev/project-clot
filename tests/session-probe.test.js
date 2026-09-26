@@ -402,3 +402,129 @@ describe('probe log line and notification', () => {
     assert.equal(con.lines.some((l) => l.includes('🧪')), false);
   });
 });
+
+const netEnvelope = (entries) => JSON.stringify({ session: 'clot-auth', captured_at: 'x', count: entries.length, filtered_out: 0, entries });
+
+describe('parseNetworkCapture', () => {
+  test('keeps auth-looking requests as method/host/path/status, query dropped', () => {
+    const out = session.parseNetworkCapture(netEnvelope([
+      { key: 'a', method: 'GET', status: 200, url: 'https://my.musinsa.com/api/member/v1/login-status', ct: 'application/json', shape: {} },
+      { key: 'b', method: 'post', status: 200, url: `https://www.musinsa.com/api/auth/reissue?rt=${SECRET_RTK}`, ct: 'application/json' },
+      { key: 'c', method: 'GET', status: 200, url: 'https://www.musinsa.com/api/goods/list', ct: 'application/json' },
+      { key: 'd', method: 'GET', status: 200, url: 'not a url' },
+    ]));
+    assert.deepEqual(out, [
+      { method: 'GET', host: 'my.musinsa.com', path: '/api/member/v1/login-status', status: 200 },
+      { method: 'POST', host: 'www.musinsa.com', path: '/api/auth/reissue', status: 200 },
+    ]);
+  });
+
+  test('caps the list at 20', () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({ method: 'GET', status: 200, url: `https://x.musinsa.com/token/${i}` }));
+    assert.equal(session.parseNetworkCapture(netEnvelope(many)).length, 20);
+  });
+
+  test('error envelope throws with captureCode; non-JSON throws SyntaxError', () => {
+    assert.throws(() => session.parseNetworkCapture(JSON.stringify({ error: { code: 'capture_failed', message: 'x' } })),
+      (err) => err.captureCode === 'capture_failed');
+    assert.throws(() => session.parseNetworkCapture('garbage'), SyntaxError);
+  });
+});
+
+describe('bridge capture', () => {
+  const EXPIRED = 'app_atk=OLDATK; app_rtk=SAMERTK';
+  const makeExec = ({ network = netEnvelope([]), login = 'LOGGED_IN', cookie = JSON.stringify('app_atk=CHROMEATK; app_rtk=SAMERTK') } = {}) => {
+    const cmds = [];
+    const envs = [];
+    const execFn = (cmd, opts) => {
+      cmds.push(cmd);
+      if (cmd.includes(' network')) {
+        envs.push(opts?.env?.OPENCLI_CACHE_DIR);
+        if (network instanceof Error) throw network;
+        return network;
+      }
+      if (cmd.includes('login-status')) return login;
+      if (cmd.includes('document.cookie')) return cookie;
+      return '';
+    };
+    return { execFn, cmds, envs };
+  };
+
+  test('captures right after open, before the login eval, and compares tokens as booleans', () => {
+    const { execFn, cmds } = makeExec({ network: netEnvelope([{ method: 'POST', status: 200, url: 'https://my.musinsa.com/auth/token' }]) });
+    const captured = [];
+    const c = session.fetchSessionCookieFromBridge({ execFn, onCapture: (x) => captured.push(x), expiredCookie: EXPIRED });
+    assert.equal(c, 'app_atk=CHROMEATK; app_rtk=SAMERTK');
+    assert.match(cmds[0], / open https:\/\/www\.musinsa\.com\/$/);
+    assert.match(cmds[1], /^opencli browser clot-auth network --all$/);
+    assert.match(cmds[2], /login-status/);
+    assert.deepEqual(captured, [{
+      ran: true, chromeLoggedIn: true, atkChanged: true, rtkChanged: false, captureError: null,
+      requests: [{ method: 'POST', host: 'my.musinsa.com', path: '/auth/token', status: 200 }],
+    }]);
+  });
+
+  test('network capture uses a throwaway cache dir that is gone afterwards, even on failure', () => {
+    for (const network of [netEnvelope([]), new Error('exit 1')]) {
+      const { execFn, envs } = makeExec({ network });
+      session.fetchSessionCookieFromBridge({ execFn, onCapture: () => {}, expiredCookie: EXPIRED });
+      assert.equal(envs.length, 1);
+      assert.equal(envs[0].startsWith(os.tmpdir()), true);
+      assert.equal(fs.existsSync(envs[0]), false);
+    }
+  });
+
+  test('capture failure does not block the cookie; onCapture is called once with captureError', () => {
+    for (const [network, code] of [[new Error('exit 1'), 'exec'], ['garbage', 'parse'],
+      [JSON.stringify({ error: { code: 'capture_failed', message: 'x' } }), 'opencli:capture_failed']]) {
+      const { execFn } = makeExec({ network });
+      const captured = [];
+      const c = session.fetchSessionCookieFromBridge({ execFn, onCapture: (x) => captured.push(x), expiredCookie: EXPIRED });
+      assert.equal(c, 'app_atk=CHROMEATK; app_rtk=SAMERTK');
+      assert.equal(captured.length, 1);
+      assert.equal(captured[0].captureError, code);
+      assert.deepEqual(captured[0].requests, []);
+    }
+  });
+
+  test('Chrome logged out: capture reports chromeLoggedIn false, token comparison null', () => {
+    const { execFn } = makeExec({ login: 'LOGGED_OUT' });
+    const captured = [];
+    assert.equal(session.fetchSessionCookieFromBridge({ execFn, onCapture: (x) => captured.push(x), expiredCookie: EXPIRED }), null);
+    assert.equal(captured[0].chromeLoggedIn, false);
+    assert.equal(captured[0].atkChanged, null);
+  });
+
+  test('without onCapture there is no network command', () => {
+    const { execFn, cmds } = makeExec();
+    session.fetchSessionCookieFromBridge({ execFn });
+    assert.equal(cmds.some((c) => c.includes(' network')), false);
+  });
+
+  test('keeper stores the bridge capture on the probe entry', async () => {
+    session.writeSessionCookie(COOKIE, tmpPath);
+    const { fetchFn } = probeRoutes();
+    const seen = [];
+    const fetchFromBridge = async (o) => {
+      seen.push(o?.expiredCookie === COOKIE);
+      o.onCapture({ ran: true, chromeLoggedIn: true, atkChanged: true, rtkChanged: true, requests: [], captureError: null });
+      return FRESH;
+    };
+    const notified = [];
+    await session.keepSessionAlive({
+      bridgeUsable: true, path: tmpPath, verify: deadVerify, fetchFromBridge,
+      probe: { fetchFn, delayMs: 0, notify: async (l) => notified.push(l) },
+    });
+    assert.deepEqual(seen, [true]);
+    assert.equal(probes()[0].browser.rtkChanged, true);
+    assert.match(notified[0], /browser: chrome=LOGGED_IN atkChanged=true rtkChanged=true authReqs=0/);
+    assert.equal(session.readSessionCookie(tmpPath), FRESH);
+  });
+
+  test('no probe: fetchFromBridge is called without capture options (unchanged behavior)', async () => {
+    session.writeSessionCookie(COOKIE, tmpPath);
+    const args = [];
+    await session.getSessionCookie({ path: tmpPath, verify: deadVerify, fetchFromBridge: async (o) => { args.push(o); return FRESH; } });
+    assert.deepEqual(args, [undefined]);
+  });
+});
