@@ -112,6 +112,12 @@ export async function fetchLikedGoodsViaHttps(
     url = checkedNext(body.link?.next, seen);
   }
 
+  // Re-read the total: a like and an unlike during paging can shift the cursor window yet keep the count equal.
+  await sleep(delayMs);
+  const after = (await getLikeJson(LIKES_TAB_URL, headers, reqOpts))?.data?.goods;
+  if (after !== expected) {
+    throw new LikesIncompleteError(`liked goods total changed during paging (${expected} -> ${after ?? 'missing'})`);
+  }
   if (byGoodsNo.size !== expected) {
     throw new LikesIncompleteError(`received ${byGoodsNo.size} of ${expected} liked goods`);
   }

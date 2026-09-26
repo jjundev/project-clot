@@ -57,7 +57,7 @@ describe('fetchLikedGoodsViaHttps', () => {
       { goodsNo: 2, goodsName: 'Goods 2', brandName: 'Brand 2', url: 'https://www.musinsa.com/products/2', status: '품절' },
       { goodsNo: 3, goodsName: 'Goods 3', brandName: 'Brand 3', url: 'https://www.musinsa.com/products/3', status: '판매중' },
     ]);
-    assert.deepEqual(fetchFn.calls.map((c) => c.url), [LIKES_TAB_URL, FIRST, PAGE2]);
+    assert.deepEqual(fetchFn.calls.map((c) => c.url), [LIKES_TAB_URL, FIRST, PAGE2, LIKES_TAB_URL]);
     for (const c of fetchFn.calls) {
       assert.equal(c.headers.Cookie, COOKIE);
       assert.equal(c.headers.Accept, 'application/json');
@@ -77,6 +77,20 @@ describe('fetchLikedGoodsViaHttps', () => {
   test('empty account: total 0 and an empty page -> []', async () => {
     const fetchFn = fakeFetch(routes(0, { [FIRST]: page([]) }));
     assert.deepEqual(await fetchLikedGoodsViaHttps(COOKIE, opts(fetchFn)), []);
+  });
+
+  test('total re-read after the last page must match (offsetting like+unlike during paging)', async () => {
+    let tabHits = 0;
+    const fetchFn = fakeFetch((url) => {
+      if (url === LIKES_TAB_URL) return tab(++tabHits === 1 ? 2 : 3);
+      return page([goods(1), goods(2)]);
+    });
+    await assert.rejects(fetchLikedGoodsViaHttps(COOKIE, opts(fetchFn)), (err) => {
+      assert.ok(err instanceof LikesIncompleteError);
+      assert.match(err.message, /changed during paging/);
+      return true;
+    });
+    assert.deepEqual(fetchFn.calls.map((c) => c.url), [LIKES_TAB_URL, FIRST, LIKES_TAB_URL]);
   });
 
   test('count mismatch -> LikesIncompleteError', async () => {
@@ -122,7 +136,7 @@ describe('fetchLikedGoodsViaHttps', () => {
       return ++firstHits === 1 ? { status: 429 } : page([goods(1)]);
     });
     assert.equal((await fetchLikedGoodsViaHttps(COOKIE, opts(once))).length, 1);
-    assert.deepEqual(once.calls.map((c) => c.url), [LIKES_TAB_URL, FIRST, FIRST]);
+    assert.deepEqual(once.calls.map((c) => c.url), [LIKES_TAB_URL, FIRST, FIRST, LIKES_TAB_URL]);
 
     const twice = fakeFetch((url) => (url === LIKES_TAB_URL ? tab(1) : { status: 429 }));
     await assert.rejects(fetchLikedGoodsViaHttps(COOKIE, opts(twice)), /HTTP 429/);
@@ -155,7 +169,7 @@ describe('fetchLikedGoodsViaHttps', () => {
     const seen = [];
     const fetchFn = fakeFetch((url) => (url === LIKES_TAB_URL ? { ...tab(1), setCookie: ['__cf_bm=x; Path=/'] } : page([goods(1)])));
     await fetchLikedGoodsViaHttps(COOKIE, opts(fetchFn, { onSetCookie: (h) => seen.push(h) }));
-    assert.deepEqual(seen, [['__cf_bm=x; Path=/']]);
+    assert.deepEqual(seen, [['__cf_bm=x; Path=/'], ['__cf_bm=x; Path=/']]); // tab read before and after paging
   });
 
   test('waits delayMs before every goods page (sequential)', async () => {

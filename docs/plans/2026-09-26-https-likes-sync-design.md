@@ -36,7 +36,7 @@ Classification: bounded — 기존 sync 흐름에 데이터 소스를 추가하�
 | # | Decision | Answer |
 |---|---|---|
 | 1 | 데이터 소스 | `like.musinsa.com` `tab/goods`, `link.next` 커서 |
-| 2 | 완전성 | `tab.data.goods` == GOODS 고유 수, 다르면 폐기 |
+| 2 | 완전성 | 페이징 전·후 `tab.data.goods`가 같고 GOODS 고유 수와도 같아야 함, 다르면 폐기 (후 재확인은 최종 리뷰 후 추가) |
 | 3 | 로그아웃 판별 | 401 또는 `LIKE-000-0001` → `SessionExpiredError` |
 | 4 | 만료 처리 | refresh 1회 후 1페이지부터 재시작, 또 실패하면 폴백 |
 | 5 | 모듈 경계 | 가져오기 `src/likes-https.js`, 조율 `src/sync.js` |
