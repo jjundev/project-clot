@@ -14,11 +14,10 @@ const DETAIL = {
   },
 };
 
-function pageHtml({ goodsNo = GOODS, loggedIn = true, detail = DETAIL } = {}) {
-  const nextData = { props: { pageProps: { dehydratedState: { queries: [
-    { queryKey: ['Detail', goodsNo], state: { data: { data: detail } } },
-    { queryKey: ['Detail', 'LoginStatus'], state: { data: { data: { loggedIn } } } },
-  ] } } } };
+function pageHtml({ goodsNo = GOODS, loggedIn = true, detail = DETAIL, withLoginStatus = true } = {}) {
+  const queries = [{ queryKey: ['Detail', goodsNo], state: { data: { data: detail } } }];
+  if (withLoginStatus) queries.push({ queryKey: ['Detail', 'LoginStatus'], state: { data: { data: { loggedIn } } } });
+  const nextData = { props: { pageProps: { dehydratedState: { queries } } } };
   return `<html><script id="__NEXT_DATA__" type="application/json">${JSON.stringify(nextData)}</script></html>`;
 }
 
@@ -60,6 +59,10 @@ describe('extractProductDetail', () => {
     assert.equal(r.loggedIn, false);
     assert.equal(r.detail.brand, 'waar');
   });
+  test('loggedIn is null when the LoginStatus query is absent (unknown, not logged out)', () => {
+    const r = extractProductDetail(pageHtml({ withLoginStatus: false }), GOODS);
+    assert.equal(r.loggedIn, null);
+  });
 });
 
 describe('fetchAuthenticatedPriceInfo', () => {
@@ -88,6 +91,14 @@ describe('fetchAuthenticatedPriceInfo', () => {
     await assert.rejects(
       fetchAuthenticatedPriceInfo(GOODS, { cookie: 'app_atk=x', fetchFn, backoffBaseMs: 0 }),
       (err) => err instanceof SessionExpiredError && err.name === 'SessionExpiredError'
+    );
+  });
+
+  test('a page without LoginStatus rejects with a generic error, not SessionExpiredError (keeps the cached cookie)', async () => {
+    const fetchFn = makeFetch({ pages: [pageHtml({ withLoginStatus: false })] });
+    await assert.rejects(
+      fetchAuthenticatedPriceInfo(GOODS, { cookie: 'app_atk=x', fetchFn, backoffBaseMs: 0 }),
+      (err) => err.name !== 'SessionExpiredError' && /login status unknown/.test(err.message)
     );
   });
 

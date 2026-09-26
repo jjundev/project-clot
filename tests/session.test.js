@@ -45,6 +45,12 @@ describe('session cache', () => {
     assert.equal(readSessionCookie(tmpPath), null);
   });
 
+  test('a cached cookie is re-filtered so only the three auth cookies are sent', () => {
+    fs.mkdirSync(path.dirname(tmpPath), { recursive: true });
+    fs.writeFileSync(tmpPath, JSON.stringify({ cookie: '_ga=1; app_atk=AAA; evil=x; app_rtk=BBB; mss_mac=CCC' }));
+    assert.equal(readSessionCookie(tmpPath), COOKIE);
+  });
+
   test('clearSessionCookie removes the file and tolerates absence', () => {
     writeSessionCookie(COOKIE, tmpPath);
     clearSessionCookie(tmpPath);

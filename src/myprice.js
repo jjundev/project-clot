@@ -54,7 +54,7 @@ export class SessionExpiredError extends Error {
 }
 
 /**
- * @returns {{ detail: object|null, loggedIn: boolean } | null} null when __NEXT_DATA__ is absent
+ * @returns {{ detail: object|null, loggedIn: boolean|null } | null} null when __NEXT_DATA__ is absent
  */
 export function extractProductDetail(html, goodsNo) {
   const m = String(html || '').match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
@@ -63,9 +63,10 @@ export function extractProductDetail(html, goodsNo) {
   const detail =
     queries.find((q) => q.queryKey?.[0] === 'Detail' && Number(q.queryKey?.[1]) === Number(goodsNo))?.state?.data
       ?.data ?? null;
-  const loggedIn = Boolean(
-    queries.find((q) => q.queryKey?.[0] === 'Detail' && q.queryKey?.[1] === 'LoginStatus')?.state?.data?.data?.loggedIn
-  );
+  // null = page carried no LoginStatus (unknown); only an explicit false means the session expired.
+  const loginStatus = queries.find((q) => q.queryKey?.[0] === 'Detail' && q.queryKey?.[1] === 'LoginStatus')?.state?.data
+    ?.data;
+  const loggedIn = typeof loginStatus?.loggedIn === 'boolean' ? loginStatus.loggedIn : null;
   return { detail, loggedIn };
 }
 
@@ -104,7 +105,8 @@ export async function fetchAuthenticatedPriceInfo(
 
   const page = await fetchProductPage(goodsNo, headers, fetchFn, retries, backoffBaseMs);
   if (page.discontinued) return { status: 404, discontinued: true };
-  if (!page.loggedIn) throw new SessionExpiredError();
+  if (page.loggedIn === false) throw new SessionExpiredError();
+  if (page.loggedIn !== true) throw new Error(`Goods ${goodsNo}: login status unknown (no LoginStatus on page)`);
   const det = page.detail;
   if (!det) throw new Error(`No Detail query for goods ${goodsNo}`);
 

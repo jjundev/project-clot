@@ -22,7 +22,8 @@ export function pickAuthCookies(documentCookie) {
 export function readSessionCookie(sessionPath = DEFAULT_SESSION_PATH) {
   try {
     const { cookie } = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
-    return typeof cookie === 'string' && cookie.includes('app_atk=') ? cookie : null;
+    const filtered = typeof cookie === 'string' ? pickAuthCookies(cookie) : '';
+    return filtered.includes('app_atk=') ? filtered : null;
   } catch {
     return null;
   }
