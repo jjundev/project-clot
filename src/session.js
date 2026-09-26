@@ -213,10 +213,13 @@ async function probeStep(target, url, jar, fetchFn, goodsNo = null) {
  */
 export async function probeExpiredSession(cookie, { fetchFn = fetch, goodsNo = null, delayMs = PROBE_DELAY_MS } = {}) {
   const jar = { cookie };
+  // The caller may have just hit www (a failing product page); keep the 700 ms spacing on both sides.
+  await sleep(delayMs);
   const steps = [await probeStep('main', 'https://www.musinsa.com/', jar, fetchFn)];
   if (goodsNo) {
     await sleep(delayMs);
     steps.push(await probeStep('product', `https://www.musinsa.com/products/${goodsNo}`, jar, fetchFn, goodsNo));
+    await sleep(delayMs); // a collect run fires its next www product request right after this probe
   }
   const final = await verifySession(jar.cookie, { fetchFn, diagnostics: true });
   steps.push({ target: 'login-status', status: final.status, authSetCookies: final.authSetCookies, loggedIn: final.loggedIn });
@@ -357,7 +360,9 @@ async function runExpiryProbe(sessionPath, cached, initial, probe, trigger) {
       browser: null,
     };
     appendExpiryProbe(entry, sessionPath);
-    return { probeAt: entry.at, renewedCookie: https.renewedCookie };
+    // Same tokens accepted again = login-status flapped, not a refresh: recorded, but not adopted, so the
+    // caller clears the cookie and this dead token cannot trigger a probe (and a message) on every tick.
+    return { probeAt: entry.at, renewedCookie: https.tokensChanged ? https.renewedCookie : null };
   } catch (err) {
     console.warn(`[Session Probe Notice] ${err.message}`);
     return { probeAt: null, renewedCookie: null };
@@ -447,7 +452,12 @@ export function parseNetworkCapture(raw) {
 function captureAuthRequests(execFn, session, opts) {
   // OpenCLI caches captured response bodies on disk, and the page's own login-status response carries
   // the tokens: keep that copy in a throwaway dir instead of ~/.opencli/cache.
-  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-netcap-'));
+  let cacheDir;
+  try {
+    cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-netcap-'));
+  } catch {
+    return { requests: [], captureError: 'tmpdir' }; // skip the capture rather than risk a token copy in ~/.opencli
+  }
   try {
     const raw = execFn(`opencli browser ${session} network --all`, {
       ...opts,
@@ -459,7 +469,11 @@ function captureAuthRequests(execFn, session, opts) {
     const captureError = err instanceof SyntaxError ? 'parse' : err.captureCode ? `opencli:${err.captureCode}` : 'exec';
     return { requests: [], captureError };
   } finally {
-    fs.rmSync(cacheDir, { recursive: true, force: true });
+    try {
+      fs.rmSync(cacheDir, { recursive: true, force: true });
+    } catch {
+      // instrumentation cleanup must not fail the renewal
+    }
   }
 }
 

@@ -577,3 +577,54 @@ describe('probe wiring', () => {
     assert.equal(notified.length, 1);
   });
 });
+
+describe('final review fixes', () => {
+  test('same-token acceptance is recorded but not adopted: the bridge still renews', async () => {
+    session.writeSessionCookie(COOKIE, tmpPath);
+    const { fetchFn } = router([
+      [MAIN, () => res(200)],
+      [LOGIN, () => res(200, { body: loginBody(true) })],
+    ]);
+    let bridgeCalls = 0;
+    const r = await session.keepSessionAlive({
+      bridgeUsable: true, path: tmpPath, verify: deadVerify,
+      fetchFromBridge: async () => { bridgeCalls++; return FRESH; },
+      probe: { fetchFn, delayMs: 0 },
+    });
+    assert.equal(bridgeCalls, 1);
+    assert.equal(r.status, 'renewed');
+    assert.equal(session.readSessionCookie(tmpPath), FRESH);
+    assert.equal(probes()[0].httpsProbe.renewed, true);
+    assert.equal(probes()[0].httpsProbe.tokensChanged, false);
+  });
+
+  test('www requests keep 700 ms-style spacing before main and after the product page', async () => {
+    const { fetchFn, calls } = router([
+      [MAIN, () => res(200)],
+      [PRODUCT, () => res(200, { body: productHtml(false) })],
+      [LOGIN, () => res(200, { body: loginBody(false) })],
+    ]);
+    const t0 = Date.now();
+    await session.probeExpiredSession(COOKIE, { fetchFn, goodsNo: 1, delayMs: 60 });
+    const end = Date.now();
+    assert.ok(calls[0].at - t0 >= 55, 'wait before main');
+    assert.ok(end - calls[1].at >= 55, 'wait after the product page');
+  });
+
+  test('a capture temp dir that cannot be created does not fail the renewal', () => {
+    const orig = process.env.TMPDIR;
+    process.env.TMPDIR = path.join(tmpPath, 'no', 'such', 'dir');
+    const captured = [];
+    const execFn = (cmd) => (cmd.includes(' network') ? netEnvelope([])
+      : cmd.includes('login-status') ? 'LOGGED_IN'
+      : cmd.includes('document.cookie') ? JSON.stringify('app_atk=A; app_rtk=R') : '');
+    let c;
+    try {
+      c = session.fetchSessionCookieFromBridge({ execFn, onCapture: (x) => captured.push(x), expiredCookie: COOKIE });
+    } finally {
+      if (orig === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = orig;
+    }
+    assert.equal(c, 'app_atk=A; app_rtk=R');
+    assert.equal(captured[0].captureError, 'tmpdir');
+  });
+});
