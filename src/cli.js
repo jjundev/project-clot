@@ -9,7 +9,7 @@ import { db } from './db.js';
 import { syncLikedItemsFromMusinsa } from './sync.js';
 import { collectPricesForActiveItems, fetchProductPriceInfo, prewarmMusinsaSession } from './collector.js';
 import { makeSessionProvider, keepSessionAlive, readSessionMeta, updateSessionMeta, DEFAULT_SESSION_PATH } from './session.js';
-import { notifyPriceDropsAndRestocks, sendMacNotification, formatHotDealsSummary, sendTelegramMessage, notifySessionWarning, notifySessionLost } from './notifier.js';
+import { notifyPriceDropsAndRestocks, sendMacNotification, formatHotDealsSummary, sendTelegramMessage, notifySessionWarning, notifySessionLost, notifyExpiryProbe } from './notifier.js';
 import { discoverCategoryGoods } from './discovery.js';
 import { setupEnvironment, getExtendedPath } from './env.js';
 import { generateDashboardHtml } from './visualizer.js';
@@ -311,6 +311,17 @@ function formatPowerState(power) {
   return `lid=${lid} wake=${wake} display=${display}`;
 }
 
+/** Real runs probe an expired Musinsa cookie once (see session.js runExpiryProbe). Never throws. */
+export function sessionProbeOptions({ getVipItems = () => db.getActiveVipItems(), notify = notifyExpiryProbe } = {}) {
+  let goodsNo = null;
+  try {
+    goodsNo = getVipItems()[0]?.goods_no ?? null;
+  } catch {
+    goodsNo = null; // the probe then just skips its product-page step
+  }
+  return { goodsNo, notify };
+}
+
 /**
  * Session keeper for the 30-minute "already collected" ticks. Never throws: a keeper
  * problem must not turn a quiet skip tick into a failed LaunchAgent run.
@@ -321,10 +332,11 @@ export async function sessionKeeperSuffix({
   keep = keepSessionAlive,
   notify = notifySessionLost,
   sessionPath = DEFAULT_SESSION_PATH,
+  probe = null,
 } = {}) {
   if (!power?.bridgeUsable) return '';
   try {
-    const result = await keep({ bridgeUsable: true, path: sessionPath });
+    const result = await keep({ bridgeUsable: true, path: sessionPath, probe });
     if (result.status === 'lost' && readSessionMeta(sessionPath).lastWarnedOn !== today) {
       updateSessionMeta({ lastWarnedOn: today }, sessionPath);
       try {
@@ -359,7 +371,7 @@ async function handleDailyRun(flags) {
 
   if (decision.action === 'skip') {
     // Catch-up ticks fire every 30 minutes; keep this to a single quiet line.
-    const keeper = await sessionKeeperSuffix({ power, today });
+    const keeper = await sessionKeeperSuffix({ power, today, probe: sessionProbeOptions() });
     console.log(`⏭ [Daily Lock] ${today} ${decision.reason}. (${formatPowerState(power)})${keeper}`);
     return;
   }
@@ -405,7 +417,7 @@ async function handleDailyRun(flags) {
     prewarmFn: deferred ? null : prewarmMusinsaSession,
     skipOpenCli: deferred,
     // Cached cookie works while asleep; only fetch a fresh one when the browser bridge is usable.
-    sessionProvider: makeSessionProvider({ allowBridge: !deferred }),
+    sessionProvider: makeSessionProvider({ allowBridge: !deferred, probe: sessionProbeOptions() }),
     enableSelfHealing: !deferred,
     onSessionWarning: notifySessionWarning,
     onProgress: ({ current, total, item, priceInfo }) => {
@@ -804,7 +816,7 @@ async function main() {
       const results = await collectPricesForActiveItems({
         concurrency,
         prewarmFn: prewarmMusinsaSession,
-        sessionProvider: makeSessionProvider({ allowBridge: true }),
+        sessionProvider: makeSessionProvider({ allowBridge: true, probe: sessionProbeOptions() }),
         enableSelfHealing: true,
         onSessionWarning: notifySessionWarning,
         onProgress: ({ current, total, item, priceInfo }) => {

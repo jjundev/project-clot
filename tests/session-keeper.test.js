@@ -141,6 +141,14 @@ describe('sessionKeeperSuffix', () => {
     const keep = async () => { throw new Error('EACCES: permission denied'); };
     assert.equal(await sessionKeeperSuffix({ power: awake, today: '2026-09-26', keep, sessionPath: tmpPath }), ' session=error');
   });
+
+  test('forwards the probe options to the keeper', async () => {
+    const probe = { goodsNo: 1, notify: async () => {} };
+    let seen;
+    const keep = async (o) => { seen = o.probe; return { status: 'ok', ageHours: 1 }; };
+    await sessionKeeperSuffix({ power: awake, today: '2026-09-26', keep, sessionPath: tmpPath, probe });
+    assert.equal(seen, probe);
+  });
 });
 
 describe('no token leaks to console', () => {

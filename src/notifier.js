@@ -199,3 +199,18 @@ export async function notifySessionLost() {
   ];
   return await sendTelegramMessage(lines.join('\n'));
 }
+
+const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+export function formatExpiryProbeMessage(summaryLine) {
+  return [
+    '<b>🧪 [Project-Clot] 무신사 토큰 만료 계측</b>\n',
+    escapeHtml(summaryLine),
+    '\n• 전체 기록: ~/.clot/musinsa-session.json 의 expiryProbes[] (값 없음)',
+  ].join('\n');
+}
+
+/** One message per expiry probe — the summary line is already value-free. */
+export async function notifyExpiryProbe(summaryLine) {
+  return await sendTelegramMessage(formatExpiryProbeMessage(summaryLine));
+}

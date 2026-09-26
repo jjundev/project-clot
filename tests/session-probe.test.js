@@ -5,6 +5,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as session from '../src/session.js';
+import { formatExpiryProbeMessage } from '../src/notifier.js';
+import { sessionProbeOptions } from '../src/cli.js';
 
 const SECRET_ATK = 'SECRETATKVALUE123';
 const SECRET_RTK = 'SECRETRTKVALUE456';
@@ -526,5 +528,52 @@ describe('bridge capture', () => {
     const args = [];
     await session.getSessionCookie({ path: tmpPath, verify: deadVerify, fetchFromBridge: async (o) => { args.push(o); return FRESH; } });
     assert.deepEqual(args, [undefined]);
+  });
+});
+
+describe('probe wiring', () => {
+  test('formatExpiryProbeMessage escapes HTML and names where the data lives', () => {
+    const msg = formatExpiryProbeMessage('main 302→/a<b>&c');
+    assert.match(msg, /^<b>🧪 \[Project-Clot\] 무신사 토큰 만료 계측<\/b>/);
+    assert.equal(msg.includes('main 302→/a&lt;b&gt;&amp;c'), true);
+    assert.equal(msg.includes('expiryProbes'), true);
+  });
+
+  test('sessionProbeOptions picks the first VIP item and survives a DB error', () => {
+    const notify = async () => {};
+    assert.deepEqual(sessionProbeOptions({ getVipItems: () => [{ goods_no: 42 }, { goods_no: 7 }], notify }), { goodsNo: 42, notify });
+    assert.deepEqual(sessionProbeOptions({ getVipItems: () => [], notify }), { goodsNo: null, notify });
+    assert.deepEqual(sessionProbeOptions({ getVipItems: () => { throw new Error('locked'); }, notify }), { goodsNo: null, notify });
+  });
+
+  test('the probe flow never leaks token values to console, notification or meta', async () => {
+    session.writeSessionCookie(COOKIE, tmpPath);
+    const { fetchFn } = router([
+      [MAIN, () => res(302, { location: `/auth/login?t=${SECRET_ATK}`, setCookies: [`app_atk=${NEW_ATK}; Path=/`, `app_rtk=${SECRET_RTK}; Max-Age=0`] })],
+      [PRODUCT, () => res(200, { body: productHtml(false) })],
+      [LOGIN, () => res(200, { body: loginBody(false) })],
+    ]);
+    const network = netEnvelope([{ method: 'POST', status: 200, url: `https://my.musinsa.com/api/auth/reissue?rt=${SECRET_RTK}`, shape: { accessToken: SECRET_ATK } }]);
+    const execFn = (cmd) => (cmd.includes(' network') ? network
+      : cmd.includes('login-status') ? 'LOGGED_IN'
+      : cmd.includes('document.cookie') ? JSON.stringify(`app_atk=${NEW_ATK}; app_rtk=${SECRET_RTK}`) : '');
+    const notified = [];
+    const con = captureConsole();
+    try {
+      await session.keepSessionAlive({
+        bridgeUsable: true, path: tmpPath,
+        verify: async (c) => ({ loggedIn: false, cookie: c, rotated: false, status: 200, authSetCookies: [] }),
+        fetchFromBridge: (o) => session.fetchSessionCookieFromBridge({ execFn, ...o }),
+        probe: { fetchFn, goodsNo: 1, delayMs: 0, notify: async (l) => notified.push(formatExpiryProbeMessage(l)) },
+      });
+    } finally {
+      con.restore();
+    }
+    const meta = JSON.stringify(session.readSessionMeta(tmpPath).expiryProbes);
+    for (const blob of [con.lines.join('\n'), notified.join('\n'), meta]) {
+      for (const secret of [SECRET_ATK, SECRET_RTK, NEW_ATK]) assert.equal(blob.includes(secret), false);
+    }
+    assert.equal(session.readSessionMeta(tmpPath).expiryProbes[0].browser.requests[0].path, '/api/auth/reissue');
+    assert.equal(notified.length, 1);
   });
 });
