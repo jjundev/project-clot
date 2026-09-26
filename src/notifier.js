@@ -35,7 +35,10 @@ export function sendMacNotification(title, message) {
   );
 }
 
-export async function sendTelegramMessage(text) {
+const TELEGRAM_TIMEOUT_MS = 10_000;
+
+// Awaited by daily ticks and collection runs: a stalled API must not hold them for fetch's ~300 s default.
+export async function sendTelegramMessage(text, { fetchFn = fetch, timeoutMs = TELEGRAM_TIMEOUT_MS } = {}) {
   const { TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID } = getEnvConfig();
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
     return false;
@@ -43,8 +46,9 @@ export async function sendTelegramMessage(text) {
 
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
   try {
-    const res = await fetch(url, {
+    const res = await fetchFn(url, {
       method: 'POST',
+      signal: AbortSignal.timeout(timeoutMs),
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: TELEGRAM_CHAT_ID,

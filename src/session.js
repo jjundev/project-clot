@@ -196,11 +196,19 @@ async function probeStep(target, url, jar, fetchFn, goodsNo = null) {
     location: locationPath(res, url),
     authSetCookies: summarizeAuthSetCookies(setCookies),
   };
-  if (goodsNo !== null) {
+  if (goodsNo !== null && res.ok) {
     try {
-      step.pageLoggedIn = res.ok ? extractProductDetail(await res.text(), goodsNo)?.loggedIn ?? null : null;
+      step.pageLoggedIn = extractProductDetail(await res.text(), goodsNo)?.loggedIn ?? null;
     } catch {
       step.pageLoggedIn = null;
+    }
+  } else {
+    if (goodsNo !== null) step.pageLoggedIn = null;
+    // Unread bodies otherwise hold the connection until GC.
+    try {
+      Promise.resolve(res.body?.cancel?.()).catch(() => {});
+    } catch {
+      // already consumed or locked
     }
   }
   return step;

@@ -628,3 +628,44 @@ describe('final review fixes', () => {
     assert.equal(captured[0].captureError, 'tmpdir');
   });
 });
+
+describe('deferred-minor fixes', () => {
+  test('probe cancels response bodies it does not read', async () => {
+    const cancelled = [];
+    const withBody = (target, r) => Object.assign(r, { body: { cancel: async () => { cancelled.push(target); } } });
+    const { fetchFn } = router([
+      [MAIN, () => withBody('main', res(302, { location: '/x' }))],
+      [PRODUCT, () => withBody('product', res(200, { body: productHtml(false) }))],
+      [LOGIN, () => res(200, { body: loginBody(false) })],
+    ]);
+    await session.probeExpiredSession(COOKIE, { fetchFn, goodsNo: 1, delayMs: 0 });
+    assert.deepEqual(cancelled, ['main']);
+  });
+
+  test('sendTelegramMessage gives up after its timeout instead of stalling the run', async () => {
+    const { sendTelegramMessage } = await import('../src/notifier.js');
+    const saved = { t: process.env.TELEGRAM_BOT_TOKEN, c: process.env.TELEGRAM_CHAT_ID };
+    process.env.TELEGRAM_BOT_TOKEN = 'TESTBOT';
+    process.env.TELEGRAM_CHAT_ID = '1';
+    // Never settles unless aborted through the signal — a stalled Telegram API.
+    const hang = (url, init) => new Promise((_, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal.reason)));
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = hang; // never reach the real API, even if fetchFn were ignored
+    const con = captureConsole();
+    let r;
+    const t0 = Date.now();
+    try {
+      const stalled = new Promise((resolve) => setTimeout(() => resolve('stalled'), 1000).unref());
+      r = await Promise.race([sendTelegramMessage('hi', { fetchFn: hang, timeoutMs: 50 }), stalled]);
+    } finally {
+      globalThis.fetch = origFetch;
+      con.restore();
+      for (const [k, v] of [['TELEGRAM_BOT_TOKEN', saved.t], ['TELEGRAM_CHAT_ID', saved.c]]) {
+        if (v === undefined) delete process.env[k]; else process.env[k] = v;
+      }
+    }
+    assert.equal(r, false);
+    assert.ok(Date.now() - t0 < 2000);
+    assert.equal(con.lines.join('\n').includes('TESTBOT'), false);
+  });
+});
