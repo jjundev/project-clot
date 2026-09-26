@@ -1,3 +1,4 @@
+import './setup-env.js';
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { getMusinsaOptions } from '/Users/hyunjun_macbook_pro/.opencli/clis/musinsa/options.js';

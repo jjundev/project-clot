@@ -15,7 +15,8 @@ const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, '..');
 const DATA_DIR = path.join(ROOT_DIR, 'data');
 const DEFAULT_TEMPLATE = path.join(__dirname, 'dashboard.template.html');
-const DEFAULT_OUTPUT = path.join(DATA_DIR, 'dashboard.html');
+// CLOT_DASHBOARD_PATH keeps test runs from overwriting the real dashboard.
+const DEFAULT_OUTPUT = process.env.CLOT_DASHBOARD_PATH || path.join(DATA_DIR, 'dashboard.html');
 
 /**
  * Extracts raw data from SQLite and builds the dashboard data contract.

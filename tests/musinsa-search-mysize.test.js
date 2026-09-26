@@ -1,3 +1,4 @@
+import './setup-env.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { formatMySizeToFilterString } from '/Users/hyunjun_macbook_pro/.opencli/clis/musinsa/mysize.js';

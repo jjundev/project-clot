@@ -1,3 +1,4 @@
+import './setup-env.js';
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { classifyCategory, CATEGORY_CODES, CATEGORY_NAMES, CATEGORY_ORDER } from '../src/classifier.js';

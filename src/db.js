@@ -12,7 +12,8 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-const DB_PATH = path.join(DATA_DIR, 'prices.db');
+// CLOT_DB_PATH lets tests point the module-level singleton at a throwaway DB.
+const DB_PATH = process.env.CLOT_DB_PATH || path.join(DATA_DIR, 'prices.db');
 
 export class ClotDatabase {
   constructor(dbPath = DB_PATH) {
@@ -22,8 +23,8 @@ export class ClotDatabase {
 
   initSchema() {
     this.db.exec(`
-      PRAGMA journal_mode = WAL;
       PRAGMA busy_timeout = 5000;
+      PRAGMA journal_mode = WAL;
 
       CREATE TABLE IF NOT EXISTS items (
         goods_no INTEGER PRIMARY KEY,

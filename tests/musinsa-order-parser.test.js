@@ -1,3 +1,4 @@
+import './setup-env.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseOrderOptionAndSize, extractSizeToken } from '/Users/hyunjun_macbook_pro/.opencli/clis/musinsa/order-parser.js';
