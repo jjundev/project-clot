@@ -273,7 +273,8 @@ export async function handleDiscover(flags = {}, dbInstance = db) {
  * whether the Chrome/OpenCLI browser bridge is currently usable.
  *
  * Modes recorded in daily_runs.mode:
- *   - 'full'     : OpenCLI authenticated prices collected. Done for the day.
+ *   - 'full'     : Authenticated prices collected (HTTPS or OpenCLI). Done for the day. A deferred
+ *                  run is recorded as 'full' when HTTPS synced the likes and priced every VIP item.
  *   - 'deferred' : Mac was asleep/DarkWake, OpenCLI skipped on purpose (cheap run, direct parser).
  *                  Re-run automatically ("upgrade") as soon as the bridge becomes usable.
  *   - 'degraded' : OpenCLI was attempted while awake but failed. Not retried automatically

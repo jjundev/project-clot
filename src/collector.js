@@ -277,8 +277,9 @@ export async function collectPricesForActiveItems({
     items: [],
     sessionWarningTriggered: false,
     authPriced: 0,
-    // 'full' = OpenCLI authenticated prices, 'deferred' = OpenCLI intentionally skipped
-    // (Mac asleep / DarkWake), 'degraded' = OpenCLI attempted but failed -> direct parser.
+    // 'full' = every VIP item has an authenticated price (HTTPS or OpenCLI); a deferred run counts
+    // only if it also synced the liked list. 'deferred' = OpenCLI intentionally skipped (Mac asleep /
+    // DarkWake) and HTTPS did not cover everything. 'degraded' = OpenCLI attempted but failed -> direct parser.
     mode: 'full',
   };
 
