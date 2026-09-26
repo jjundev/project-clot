@@ -11,6 +11,7 @@ import {
   selectDiscoveryAuthTargets,
   summarizeMyPriceGap,
 } from '../src/discovery.js';
+import { pickDisplayPrices, exportDataForGit } from '../src/cli.js';
 
 function tempDb(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-disc-myprice-'));
@@ -108,4 +109,44 @@ test('summarizeMyPriceGap: median of myPrice - estimate and count below estimate
     ]),
     { n: 2, medianDiff: -175, belowEstimate: 2 }
   );
+});
+
+test('pickDisplayPrices: real latest pairs with real lowest', () => {
+  assert.deepEqual(
+    pickDisplayPrices({ my_price: 9000, estimated_my_price: 9500, sale_price: 10000 }, { lowest_my_price: 8500, lowest_estimated_price: 9000 }),
+    { current: 9000, lowest: 8500 }
+  );
+  assert.deepEqual(pickDisplayPrices({ my_price: 9000 }, {}), { current: 9000, lowest: 9000 });
+});
+
+test('pickDisplayPrices: estimate-only latest does not pair with a real lowest', () => {
+  assert.deepEqual(
+    pickDisplayPrices({ my_price: null, estimated_my_price: 9500, sale_price: 10000 }, { lowest_my_price: 8500, lowest_estimated_price: 9200 }),
+    { current: 9500, lowest: 9200 }
+  );
+  assert.deepEqual(
+    pickDisplayPrices({ my_price: null, estimated_my_price: 9500 }, { lowest_my_price: 8500 }),
+    { current: 9500, lowest: null }
+  );
+});
+
+test('pickDisplayPrices: sale-only and missing latest', () => {
+  assert.deepEqual(pickDisplayPrices({ sale_price: 10000 }, { lowest_sale_price: 9000 }), { current: 10000, lowest: 9000 });
+  assert.deepEqual(pickDisplayPrices(undefined, {}), { current: null, lowest: null });
+  // No price log yet: keep the old fallback chain (existing export test relies on it)
+  assert.deepEqual(pickDisplayPrices(undefined, { lowest_my_price: 45000, lowest_sale_price: 48000 }), { current: null, lowest: 45000 });
+  assert.deepEqual(pickDisplayPrices(undefined, { lowest_estimated_price: 72000 }), { current: null, lowest: 72000 });
+});
+
+test('exportDataForGit uses paired display prices', (t) => {
+  const { db, dir } = tempDb(t);
+  db.upsertItem(itemRow(20));
+  db.recordPriceLog({ goods_no: 20, date: '2026-09-26', my_price: null, estimated_my_price: 9500, sale_price: 10000 });
+  db.updateLowestPrice(20, 8500, null, '2026-09-20');
+  db.updateLowestEstimatedPrice(20, 9200, '2026-09-26');
+
+  const jsonPath = exportDataForGit({ dbInstance: db, dataDir: dir });
+  const row = JSON.parse(fs.readFileSync(jsonPath, 'utf-8')).items.find((it) => it.goods_no === 20);
+  assert.equal(row.current_price, 9500);
+  assert.equal(row.lowest_price, 9200);
 });

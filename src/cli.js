@@ -69,6 +69,18 @@ export function parseConcurrency(val, defaultVal = 3) {
   return Math.max(1, Math.min(Math.floor(parsed), 5));
 }
 
+/**
+ * Current and lowest price of the same kind: real with real, estimate with estimate,
+ * so a real lowest is never shown next to an estimated current price.
+ */
+export function pickDisplayPrices(latest, item = {}) {
+  if (latest?.my_price) return { current: latest.my_price, lowest: item.lowest_my_price ?? latest.my_price };
+  if (latest?.estimated_my_price) return { current: latest.estimated_my_price, lowest: item.lowest_estimated_price ?? null };
+  if (latest?.sale_price) return { current: latest.sale_price, lowest: item.lowest_sale_price || null };
+  // No price log yet: nothing to pair with, keep the old fallback chain.
+  return { current: null, lowest: item.lowest_my_price || item.lowest_estimated_price || item.lowest_sale_price || null };
+}
+
 export function exportDataForGit({ dbInstance = db, dataDir = DATA_DIR } = {}) {
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
@@ -83,6 +95,7 @@ export function exportDataForGit({ dbInstance = db, dataDir = DATA_DIR } = {}) {
     unliked_items: items.filter((it) => it.status === 'UNLIKED').length,
     items: items.map((it) => {
       const latest = dbInstance.getLatestPrice(it.goods_no);
+      const { current, lowest } = pickDisplayPrices(latest, it);
       const tag = it.source === 'discovery' ? '[탐색]' : '[VIP]';
       const cleanName = (it.goods_name || '').replace(/^\[(VIP|탐색)\]\s*/, '');
       return {
@@ -92,8 +105,8 @@ export function exportDataForGit({ dbInstance = db, dataDir = DATA_DIR } = {}) {
         source: it.source,
         status: it.status,
         url: it.url,
-        current_price: latest?.my_price || latest?.estimated_my_price || latest?.sale_price || null,
-        lowest_price: it.lowest_my_price || it.lowest_estimated_price || it.lowest_sale_price || null,
+        current_price: current,
+        lowest_price: lowest,
         lowest_price_date: it.lowest_price_date || null,
         is_sold_out: Boolean(latest?.is_sold_out),
         last_checked: it.last_checked_at,
@@ -545,8 +558,7 @@ function handleList(flags) {
 
   items.forEach((it, i) => {
     const latest = db.getLatestPrice(it.goods_no);
-    const activePrice = latest?.my_price || latest?.estimated_my_price || latest?.sale_price;
-    const lowestPrice = it.lowest_my_price || it.lowest_estimated_price || it.lowest_sale_price;
+    const { current: activePrice, lowest: lowestPrice } = pickDisplayPrices(latest, it);
     const currStr = activePrice ? activePrice.toLocaleString() + '원' : it.status === 'SOLDOUT' ? '품절' : '-';
     const lowStr = lowestPrice ? lowestPrice.toLocaleString() + '원' : '-';
     const tag = it.source === 'discovery' ? '[탐색]' : '[VIP]';
