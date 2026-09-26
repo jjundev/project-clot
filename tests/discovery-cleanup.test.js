@@ -7,6 +7,12 @@ import {
   isDefaultDiscoveryScan,
   isCompleteDiscoveryScan,
 } from '../src/discovery.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { ClotDatabase } from '../src/db.js';
+import { buildClotDataPayload } from '../src/visualizer.js';
 
 const okStats = (counts) => counts.map((count, i) => ({ cat: `c${i}`, ok: true, count }));
 
@@ -40,4 +46,122 @@ test('isCompleteDiscoveryScan: default flags, all ok, each category >= 50% of li
   );
   assert.equal(isCompleteDiscoveryScan({ category: '001' }, okStats([100]), 100), false);
   assert.equal(isCompleteDiscoveryScan({}, [], 100), false); // nothing scanned is never complete
+});
+
+function tempDb(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-disc-cleanup-'));
+  const db = new ClotDatabase(path.join(dir, 'test.db'));
+  t.after(() => {
+    try { db.close(); } catch {}
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  return { db, dir };
+}
+
+// upsertItem binds `url` without a default, so every fixture needs one.
+const row = (goodsNo, extra = {}) => ({
+  goods_no: goodsNo,
+  goods_name: `G${goodsNo}`,
+  brand_name: 'B',
+  url: `https://www.musinsa.com/products/${goodsNo}`,
+  source: 'discovery',
+  ...extra,
+});
+
+test('db: an old items table gains discovery_misses = 0 for existing rows', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-disc-migrate-'));
+  const dbPath = path.join(dir, 'old.db');
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const raw = new DatabaseSync(dbPath);
+  raw.exec(`CREATE TABLE items (
+    goods_no INTEGER PRIMARY KEY, goods_name TEXT NOT NULL, brand_name TEXT, url TEXT NOT NULL,
+    image_url TEXT, source TEXT DEFAULT 'like', status TEXT DEFAULT 'ACTIVE',
+    first_seen_at TEXT NOT NULL, last_checked_at TEXT,
+    lowest_my_price INTEGER, lowest_sale_price INTEGER, lowest_price_date TEXT
+  );
+  INSERT INTO items (goods_no, goods_name, url, source, first_seen_at)
+  VALUES (1, 'old', 'https://www.musinsa.com/products/1', 'discovery', '2026-09-05T00:00:00Z');`);
+  raw.close();
+
+  const db = new ClotDatabase(dbPath);
+  t.after(() => { try { db.close(); } catch {} });
+  assert.equal(db.getItem(1).discovery_misses, 0);
+});
+
+test('db: markDiscoveryUnseen counts misses and drops at the threshold', (t) => {
+  const { db } = tempDb(t);
+  db.upsertItem(row(1));
+  db.upsertItem(row(2));
+  db.upsertItem(row(3, { status: 'SOLDOUT' }));
+
+  assert.deepEqual(db.markDiscoveryUnseen([2], 2), { dropped: 0 });
+  assert.equal(db.getItem(1).discovery_misses, 1);
+  assert.equal(db.getItem(1).status, 'ACTIVE');
+  assert.equal(db.getItem(2).discovery_misses, 0);
+
+  assert.deepEqual(db.markDiscoveryUnseen([2], 2), { dropped: 2 });
+  assert.equal(db.getItem(1).status, 'DROPPED');
+  assert.equal(db.getItem(3).status, 'DROPPED'); // SOLDOUT goods drop too
+  assert.equal(db.getItem(2).status, 'ACTIVE');
+
+  // Already DROPPED rows are left alone: no further counting, not re-reported.
+  assert.deepEqual(db.markDiscoveryUnseen([2], 2), { dropped: 0 });
+  assert.equal(db.getItem(1).discovery_misses, 2);
+});
+
+test('db: markDiscoveryUnseen never touches VIP or UNLIKED rows', (t) => {
+  const { db } = tempDb(t);
+  db.upsertItem(row(10, { source: 'like' }));
+  db.upsertItem(row(11, { source: 'like', status: 'UNLIKED' }));
+  db.markDiscoveryUnseen([], 1);
+  db.markDiscoveryUnseen([], 1);
+  assert.equal(db.getItem(10).status, 'ACTIVE');
+  assert.equal(db.getItem(10).discovery_misses, 0);
+  assert.equal(db.getItem(11).status, 'UNLIKED');
+});
+
+test('db: markDiscoverySeen resets the counter', (t) => {
+  const { db } = tempDb(t);
+  db.upsertItem(row(1));
+  db.markDiscoveryUnseen([], 2);
+  assert.equal(db.getItem(1).discovery_misses, 1);
+  db.markDiscoverySeen([1]);
+  assert.equal(db.getItem(1).discovery_misses, 0);
+  db.markDiscoverySeen([]); // no-op, no throw
+});
+
+test('db: promoting a DROPPED goods revives it as a tracked VIP', (t) => {
+  const { db } = tempDb(t);
+  db.upsertItem(row(1));
+  db.markDiscoveryUnseen([], 1);
+  assert.equal(db.getItem(1).status, 'DROPPED');
+
+  db.promoteItemToLike(1);
+  const it = db.getItem(1);
+  assert.equal(it.source, 'like');
+  assert.equal(it.status, 'ACTIVE');
+  assert.equal(it.discovery_misses, 0);
+  assert.ok(db.getActiveVipItems().some((r) => r.goods_no === 1));
+});
+
+test('db: promoting keeps a non-DROPPED status as is', (t) => {
+  const { db } = tempDb(t);
+  db.upsertItem(row(2, { status: 'SOLDOUT' }));
+  db.promoteItemToLike(2);
+  assert.equal(db.getItem(2).status, 'SOLDOUT');
+  assert.equal(db.getItem(2).source, 'like');
+});
+
+test('db: DROPPED goods leave every tracking query and the dashboard', (t) => {
+  const { db } = tempDb(t);
+  db.upsertItem(row(1));
+  db.upsertItem(row(2));
+  db.recordPriceLog({ goods_no: 1, date: '2026-09-05', sale_price: 10000, estimated_my_price: 9000 });
+  db.markDiscoveryUnseen([2], 1);
+
+  assert.equal(db.getItem(1).status, 'DROPPED');
+  assert.equal(db.getPriceLogs(1).length, 1); // history kept
+  assert.deepEqual(db.getActiveItems().map((r) => r.goods_no), [2]);
+  assert.deepEqual(db.getDiscoveredActiveItems().map((r) => r.goods_no), [2]);
+  assert.deepEqual(buildClotDataPayload(db.db).items.map((it) => it.n), [2]);
 });

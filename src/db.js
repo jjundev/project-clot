@@ -40,7 +40,8 @@ export class ClotDatabase {
         lowest_my_price INTEGER,
         lowest_sale_price INTEGER,
         lowest_estimated_price INTEGER,
-        lowest_price_date TEXT
+        lowest_price_date TEXT,
+        discovery_misses INTEGER DEFAULT 0
       );
 
       CREATE TABLE IF NOT EXISTS price_logs (
@@ -107,6 +108,14 @@ export class ClotDatabase {
         if (!e.message.includes('duplicate column name')) throw e;
       }
     }
+    // Consecutive complete discovery scans that did not list this goods; drives DROPPED.
+    if (!itemsCols.includes('discovery_misses')) {
+      try {
+        this.db.exec("ALTER TABLE items ADD COLUMN discovery_misses INTEGER DEFAULT 0;");
+      } catch (e) {
+        if (!e.message.includes('duplicate column name')) throw e;
+      }
+    }
 
     // daily_runs.mode: 'full' (OpenCLI authenticated prices), 'deferred' (Mac asleep/DarkWake,
     // OpenCLI skipped on purpose), 'degraded' (OpenCLI attempted but failed -> direct parser).
@@ -151,8 +160,47 @@ export class ClotDatabase {
   }
 
   promoteItemToLike(goodsNo) {
-    const stmt = this.db.prepare("UPDATE items SET source = 'like' WHERE goods_no = ?");
+    // A liked goods must be tracked again even if discovery had dropped it.
+    const stmt = this.db.prepare(`
+      UPDATE items SET
+        source = 'like',
+        status = CASE WHEN status = 'DROPPED' THEN 'ACTIVE' ELSE status END,
+        discovery_misses = 0
+      WHERE goods_no = ?
+    `);
     stmt.run(Number(goodsNo));
+  }
+
+  markDiscoverySeen(goodsNos = []) {
+    if (goodsNos.length === 0) return;
+    this.db
+      .prepare('UPDATE items SET discovery_misses = 0 WHERE goods_no IN (SELECT value FROM json_each(?))')
+      .run(JSON.stringify(goodsNos.map(Number)));
+  }
+
+  /** Counts a miss for every tracked discovery goods not in the list, then drops those at the threshold. */
+  markDiscoveryUnseen(seenGoodsNos = [], threshold) {
+    this.db.exec('BEGIN');
+    try {
+      this.db
+        .prepare(`
+          UPDATE items SET discovery_misses = COALESCE(discovery_misses, 0) + 1
+          WHERE source = 'discovery' AND status IN ('ACTIVE', 'SOLDOUT')
+            AND goods_no NOT IN (SELECT value FROM json_each(?))
+        `)
+        .run(JSON.stringify(seenGoodsNos.map(Number)));
+      const res = this.db
+        .prepare(`
+          UPDATE items SET status = 'DROPPED'
+          WHERE source = 'discovery' AND status IN ('ACTIVE', 'SOLDOUT') AND discovery_misses >= ?
+        `)
+        .run(threshold);
+      this.db.exec('COMMIT');
+      return { dropped: Number(res.changes) };
+    } catch (e) {
+      this.db.exec('ROLLBACK');
+      throw e;
+    }
   }
 
   upsertItem({
