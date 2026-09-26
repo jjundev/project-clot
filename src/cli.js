@@ -15,11 +15,14 @@ import { setupEnvironment, getExtendedPath } from './env.js';
 import { generateDashboardHtml } from './visualizer.js';
 import { classifyCategory } from './classifier.js';
 import { probeBrowserBridge, getMacPowerState } from './power.js';
+import { runAudit, formatAuditTerminal } from './audit.js';
+import { skipDailyRun, formatSkipTerminal } from './skip.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, '..');
 const DATA_DIR = path.join(ROOT_DIR, 'data');
+const LOG_DIR = path.join(ROOT_DIR, 'logs');
 const PLIST_NAME = 'com.musinsa.price-tracker.plist';
 const LAUNCH_AGENTS_DIR = path.join(os.homedir(), 'Library/LaunchAgents');
 const PLIST_TARGET = path.join(LAUNCH_AGENTS_DIR, PLIST_NAME);
@@ -29,7 +32,7 @@ export function parseArgs(rawArgs = process.argv.slice(2)) {
   const command = args[0] || 'help';
   const flags = {};
   const positional = [];
-  const BOOLEAN_FLAGS = new Set(['force', 'with-discovery', 'no-open', 'help', 'skip-opencli', 'assume-awake']);
+  const BOOLEAN_FLAGS = new Set(['force', 'with-discovery', 'no-open', 'help', 'skip-opencli', 'assume-awake', 'json']);
 
   for (let i = 1; i < args.length; i++) {
     const a = args[i];
@@ -834,6 +837,30 @@ async function main() {
       console.log(`   Next daily tick would: ${decision.action}${decision.action === 'run' ? ` (${decision.mode}${decision.upgrade ? ', upgrade' : ''})` : ''} — ${decision.reason}`);
       break;
     }
+    case 'audit': {
+      const targetDate = positional[0] || new Date().toISOString().split('T')[0];
+      const auditResult = runAudit({ dateStr: targetDate, dbInstance: db, dataDir: DATA_DIR });
+      if (flags.json) {
+        console.log(JSON.stringify(auditResult, null, 2));
+      } else {
+        console.log(formatAuditTerminal(auditResult));
+      }
+      if (auditResult.overallVerdict === 'FAIL') {
+        process.exitCode = 1;
+      }
+      break;
+    }
+    case 'skip': {
+      const targetDate = positional[0] || new Date().toISOString().split('T')[0];
+      const result = await skipDailyRun({
+        dateStr: targetDate,
+        dbInstance: db,
+        dataDir: DATA_DIR,
+        logDir: LOG_DIR,
+      });
+      console.log(formatSkipTerminal(result));
+      break;
+    }
     default:
       console.log(`
 Project-Clot: Musinsa Automated Price Tracker & Wishlist Manager
@@ -845,6 +872,8 @@ Commands:
   daily [--force] [--concurrency=1-5] [--with-discovery] [--skip-opencli] [--assume-awake]
                          Run daily sync & price tracking (default concurrency: 3).
                          Defers OpenCLI automatically while the Mac is asleep / lid closed.
+  skip [date]            Skip today's (or specified date's) price collection and stop running tasks
+  audit [date] [--json]  Audit collection integrity, OpenCLI auth rate & health status
   discover [--category <codes>] [--limit <n>] [--min-likes <n>]  Discover popular products matching criteria
   sync                   Sync liked items from Musinsa account
   track [goodsNo] [--concurrency=1-5]  Track active items or promote discovery item to VIP

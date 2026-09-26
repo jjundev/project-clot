@@ -15,6 +15,8 @@
     "list": "node src/cli.js list",
     "report": "node src/cli.js report",
     "visualize": "node src/cli.js visualize",
+    "audit": "node src/cli.js audit",
+    "skip": "node src/cli.js skip",
     "daemon:install": "node src/cli.js daemon-install",
     "daemon:uninstall": "node src/cli.js daemon-uninstall"
   },

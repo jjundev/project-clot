@@ -407,6 +407,104 @@ export class ClotDatabase {
     );
   }
 
+  skipDailyRun(dateStr) {
+    const existing = this.getDailyRun(dateStr);
+    const now = new Date().toISOString();
+    if (existing) {
+      const stmt = this.db.prepare(`
+        UPDATE daily_runs
+        SET mode = 'skipped', completed_at = ?
+        WHERE date = ?
+      `);
+      stmt.run(now, dateStr);
+    } else {
+      const stmt = this.db.prepare(`
+        INSERT INTO daily_runs (
+          date, total_tracked, price_dropped_count, restocked_count, duration_ms, completed_at, mode
+        ) VALUES (?, 0, 0, 0, 0, ?, 'skipped')
+      `);
+      stmt.run(dateStr, now);
+    }
+    return this.getDailyRun(dateStr);
+  }
+
+  getDailyAuditReport(dateStr) {
+    const dailyRun = this.getDailyRun(dateStr);
+    const catalogCountStmt = this.db.prepare(
+      "SELECT count(*) as count FROM items WHERE source != 'discovery' AND status IN ('ACTIVE', 'SOLDOUT')"
+    );
+    const catalogCount = catalogCountStmt.get()?.count || 0;
+
+    const logSummaryStmt = this.db.prepare(`
+      SELECT 
+        count(*) as total_logs,
+        count(DISTINCT goods_no) as distinct_items,
+        count(my_price) as my_price_count,
+        count(sale_price) as sale_price_count,
+        sum(case when is_sold_out = 1 then 1 else 0 end) as sold_out_count
+      FROM price_logs
+      WHERE date = ?
+    `);
+    const logSummary = logSummaryStmt.get(dateStr) || {
+      total_logs: 0,
+      distinct_items: 0,
+      my_price_count: 0,
+      sale_price_count: 0,
+      sold_out_count: 0,
+    };
+
+    const priceDropsStmt = this.db.prepare(`
+      SELECT p1.goods_no, i.brand_name, i.goods_name,
+             CASE 
+               WHEN p1.my_price IS NOT NULL AND p2.my_price IS NOT NULL THEN p1.my_price
+               ELSE p1.sale_price 
+             END as current_price,
+             CASE 
+               WHEN p1.my_price IS NOT NULL AND p2.my_price IS NOT NULL THEN p2.my_price
+               ELSE p2.sale_price 
+             END as prev_price,
+             (
+               CASE 
+                 WHEN p1.my_price IS NOT NULL AND p2.my_price IS NOT NULL THEN (p2.my_price - p1.my_price)
+                 ELSE (p2.sale_price - p1.sale_price)
+               END
+             ) as drop_amount,
+             round(
+               (
+                 CASE 
+                   WHEN p1.my_price IS NOT NULL AND p2.my_price IS NOT NULL THEN (p2.my_price - p1.my_price) * 100.0 / p2.my_price
+                   ELSE (p2.sale_price - p1.sale_price) * 100.0 / p2.sale_price
+                 END
+               )
+             ) as drop_rate,
+             (p1.my_price IS NOT NULL AND p2.my_price IS NOT NULL) as is_authenticated
+      FROM price_logs p1
+      JOIN items i ON p1.goods_no = i.goods_no
+      LEFT JOIN price_logs p2 ON p1.goods_no = p2.goods_no
+        AND p2.date = (SELECT MAX(date) FROM price_logs WHERE goods_no = p1.goods_no AND date < ?)
+      WHERE p1.date = ?
+        AND (
+          (p1.my_price IS NOT NULL AND p2.my_price IS NOT NULL AND p1.my_price < p2.my_price)
+          OR
+          ((p1.my_price IS NULL OR p2.my_price IS NULL) AND p1.sale_price IS NOT NULL AND p2.sale_price IS NOT NULL AND p1.sale_price < p2.sale_price)
+        )
+      ORDER BY drop_amount DESC
+    `);
+    const priceDrops = priceDropsStmt.all(dateStr, dateStr);
+
+    return {
+      date: dateStr,
+      dailyRun,
+      catalogCount,
+      totalLogs: logSummary.total_logs || 0,
+      distinctItems: logSummary.distinct_items || 0,
+      myPriceCount: logSummary.my_price_count || 0,
+      salePriceCount: logSummary.sale_price_count || 0,
+      soldOutCount: logSummary.sold_out_count || 0,
+      priceDrops,
+    };
+  }
+
   close() {
     this.db.close();
   }

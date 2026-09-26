@@ -84,6 +84,11 @@ node src/cli.js watch https://www.musinsa.com/products/3074360
 
 # 수동 관심 상품 추적 해제
 node src/cli.js unwatch 3074360
+
+# 오늘(또는 특정 날짜) 가격 조사 즉시 중단 및 생략 처리 (진행 중인 프로세스 자동 종료)
+node src/cli.js skip
+# 또는
+npm run skip
 ```
 
 ### 3. OpenCLI 무신사 검색, 실측 필터, 옵션 및 구매 내역/마이사이즈
