@@ -1,16 +1,58 @@
 import { execSync } from 'node:child_process';
 import { db } from './db.js';
 import { getExecOptions } from './env.js';
-import { prewarmMusinsaSession } from './collector.js';
+import { fetchLikedGoodsViaHttps } from './likes-https.js';
 
-export async function syncLikedItemsFromMusinsa({
-  limit = 300,
-  dbInstance = db,
-  execFn = execSync,
-  prewarmFn = null,
-} = {}) {
-  console.log('🔄 Syncing Musinsa liked items via OpenCLI...');
-  
+/**
+ * Liked list over authenticated HTTPS. Returns null (caller falls back) on any failure;
+ * a SessionExpiredError refreshes the cookie once and restarts from the first page.
+ */
+async function fetchRemoteLikesViaHttps({ sessionProvider, httpsFetchFn, httpsDelayMs }) {
+  const getCookie = async (opts) => {
+    try {
+      return await sessionProvider(opts);
+    } catch (err) {
+      console.warn(`[Sync HTTPS Notice] Session provider failed: ${err.message}`);
+      return null;
+    }
+  };
+  const onSetCookie = sessionProvider.absorb ? (headers) => sessionProvider.absorb(headers) : null;
+
+  let cookie = await getCookie({ refresh: false });
+  if (!cookie) {
+    console.warn('[Sync HTTPS Notice] No Musinsa session; skipping HTTPS likes.');
+    return null;
+  }
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      return await httpsFetchFn(cookie, { delayMs: httpsDelayMs, onSetCookie });
+    } catch (err) {
+      if (err?.name === 'SessionExpiredError' && attempt === 1) {
+        cookie = await getCookie({ refresh: true, failedCookie: cookie });
+        if (!cookie) {
+          console.warn('[Sync HTTPS Notice] Session expired and could not be refreshed.');
+          return null;
+        }
+        continue;
+      }
+      console.warn(`[Sync HTTPS Notice] Liked list discarded: ${err.message}`);
+      return null;
+    }
+  }
+  return null;
+}
+
+function runOpenCliLikes(execFn, limit) {
+  return execFn(
+    `opencli musinsa likes --limit ${limit} -f json`,
+    getExecOptions({
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+  );
+}
+
+async function fetchRemoteLikesViaOpenCli({ limit, execFn, prewarmFn }) {
   if (prewarmFn) {
     try {
       await prewarmFn({ waitMs: process.env.NODE_ENV === 'test' ? 0 : 3000 });
@@ -19,26 +61,14 @@ export async function syncLikedItemsFromMusinsa({
 
   let rawOutput = '';
   try {
-    rawOutput = execFn(
-      `opencli musinsa likes --limit ${limit} -f json`,
-      getExecOptions({
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-      })
-    );
+    rawOutput = runOpenCliLikes(execFn, limit);
   } catch (err) {
     // If timeout, try one self-healing prewarm retry
     if (prewarmFn && (err.message?.includes('ETIMEDOUT') || String(err.stdout || '').includes('TIMEOUT') || String(err.stderr || '').includes('TIMEOUT'))) {
       console.warn('⚠️ [Sync Notice] First attempt timed out. Attempting self-healing session pre-warm and retry...');
       try {
         await prewarmFn({ execFn, waitMs: 4000 });
-        rawOutput = execFn(
-          `opencli musinsa likes --limit ${limit} -f json`,
-          getExecOptions({
-            encoding: 'utf-8',
-            stdio: ['pipe', 'pipe', 'pipe'],
-          })
-        );
+        rawOutput = runOpenCliLikes(execFn, limit);
       } catch (retryErr) {
         err = retryErr;
       }
@@ -59,17 +89,43 @@ export async function syncLikedItemsFromMusinsa({
     }
   }
 
-
   const jsonStart = rawOutput.indexOf('[');
   if (jsonStart === -1) {
     throw new Error('No JSON array found in opencli output');
   }
+  return JSON.parse(rawOutput.slice(jsonStart));
+}
 
-  const remoteLikes = JSON.parse(rawOutput.slice(jsonStart));
-  console.log(`📦 Retrieved ${remoteLikes.length} liked items from Musinsa.`);
+export async function syncLikedItemsFromMusinsa({
+  limit = 300,
+  dbInstance = db,
+  execFn = execSync,
+  prewarmFn = null,
+  sessionProvider = null,
+  httpsFetchFn = fetchLikedGoodsViaHttps,
+  httpsDelayMs = 700,
+  allowOpenCli = true,
+} = {}) {
+  let remoteLikes = null;
+  let source = null;
+  if (sessionProvider) {
+    console.log('🔄 Syncing Musinsa liked items via HTTPS...');
+    remoteLikes = await fetchRemoteLikesViaHttps({ sessionProvider, httpsFetchFn, httpsDelayMs });
+    if (remoteLikes) source = 'https';
+  }
+  if (!remoteLikes) {
+    if (!allowOpenCli) {
+      throw new Error('Liked items unavailable via HTTPS and OpenCLI is not allowed (browser bridge unavailable)');
+    }
+    console.log('🔄 Syncing Musinsa liked items via OpenCLI...');
+    remoteLikes = await fetchRemoteLikesViaOpenCli({ limit, execFn, prewarmFn });
+    source = 'opencli';
+  }
+  console.log(`📦 Retrieved ${remoteLikes.length} liked items from Musinsa (${source}).`);
 
   const remoteGoodsNoSet = new Set();
   const summary = {
+    source,
     totalRemote: remoteLikes.length,
     newItems: [],
     reactivatedItems: [],
@@ -134,4 +190,3 @@ export async function syncLikedItemsFromMusinsa({
 
   return summary;
 }
-
