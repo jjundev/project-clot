@@ -246,12 +246,30 @@ export class ClotDatabase {
   }
 
   updateLowestEstimatedPrice(goodsNo, price, date) {
+    // The date column is shared: once a real lowest exists, an estimate must not overwrite its date.
     const stmt = this.db.prepare(`
       UPDATE items
-      SET lowest_estimated_price = ?, lowest_price_date = ?
+      SET lowest_estimated_price = ?,
+          lowest_price_date = CASE WHEN lowest_my_price IS NULL THEN ? ELSE lowest_price_date END
       WHERE goods_no = ?
     `);
     stmt.run(price, date, Number(goodsNo));
+  }
+
+  /** Latest date with a real (authenticated) my_price per goods. Goods with none are absent. */
+  getLastMyPriceDates(goodsNos = []) {
+    const map = new Map();
+    if (goodsNos.length === 0) return map;
+    const placeholders = goodsNos.map(() => '?').join(',');
+    const rows = this.db
+      .prepare(
+        `SELECT goods_no, MAX(date) AS last_date FROM price_logs
+         WHERE my_price IS NOT NULL AND goods_no IN (${placeholders})
+         GROUP BY goods_no`
+      )
+      .all(...goodsNos.map(Number));
+    for (const r of rows) map.set(Number(r.goods_no), r.last_date);
+    return map;
   }
 
   recordPriceLog({
