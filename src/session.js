@@ -59,6 +59,31 @@ function isDeletion(attrs, value, now) {
   return false;
 }
 
+const SUMMARY_STRING_ATTRS = ['path', 'domain', 'max-age', 'expires', 'samesite'];
+const SUMMARY_FLAG_ATTRS = ['httponly', 'secure'];
+
+/** Log-safe view of auth Set-Cookie headers: names, attributes and booleans — never values or lengths. */
+export function summarizeAuthSetCookies(setCookieHeaders = [], now = Date.now()) {
+  const out = [];
+  for (const header of setCookieHeaders || []) {
+    const [pair, ...attrs] = String(header).split(';');
+    const eq = pair.indexOf('=');
+    if (eq <= 0) continue;
+    const name = pair.slice(0, eq).trim();
+    if (!AUTH_COOKIE_NAMES.includes(name)) continue;
+    const value = pair.slice(eq + 1).trim();
+    const summary = {};
+    for (const attr of attrs) {
+      const i = attr.indexOf('=');
+      const key = (i < 0 ? attr : attr.slice(0, i)).trim().toLowerCase();
+      if (SUMMARY_STRING_ATTRS.includes(key) && i >= 0) summary[key] = attr.slice(i + 1).trim();
+      else if (SUMMARY_FLAG_ATTRS.includes(key)) summary[key] = true;
+    }
+    out.push({ name, hasValue: Boolean(value), deleted: isDeletion(attrs, value, now), attrs: summary });
+  }
+  return out;
+}
+
 /**
  * Applies Set-Cookie headers to the auth cookie string.
  * revoked = the server deleted app_atk or app_rtk (logged out).
@@ -90,8 +115,14 @@ export function mergeAuthSetCookies(cookie, setCookieHeaders = [], now = Date.no
  * One login-status call. loggedIn: true/false, or null when the answer is unknown
  * (network error, non-2xx, non-JSON, missing flag) — callers then keep the cache.
  * Picks up new tokens from Set-Cookie and from data.authTokenInfo (raw cookie values).
+ * diagnostics: true also returns the HTTP status and a value-free auth Set-Cookie summary.
  */
-export async function verifySession(cookie, { fetchFn = fetch } = {}) {
+export async function verifySession(cookie, { fetchFn = fetch, diagnostics = false } = {}) {
+  const { result, status, setCookies } = await verifyOnce(cookie, fetchFn);
+  return diagnostics ? { ...result, status, authSetCookies: summarizeAuthSetCookies(setCookies) } : result;
+}
+
+async function verifyOnce(cookie, fetchFn) {
   let res;
   try {
     res = await fetchFn(LOGIN_STATUS_URL, {
@@ -100,19 +131,22 @@ export async function verifySession(cookie, { fetchFn = fetch } = {}) {
       signal: AbortSignal.timeout(LOGIN_STATUS_TIMEOUT_MS),
     });
   } catch {
-    return { loggedIn: null, cookie, rotated: false };
+    return { result: { loggedIn: null, cookie, rotated: false }, status: null, setCookies: [] };
   }
-  const merged = mergeAuthSetCookies(cookie, res.headers?.getSetCookie?.() ?? []);
-  if (merged.revoked) return { loggedIn: false, cookie: merged.cookie, rotated: merged.rotated };
-  if (!res.ok) return { loggedIn: null, cookie, rotated: false };
+  const status = typeof res.status === 'number' ? res.status : null;
+  const setCookies = res.headers?.getSetCookie?.() ?? [];
+  const done = (result) => ({ result, status, setCookies });
+  const merged = mergeAuthSetCookies(cookie, setCookies);
+  if (merged.revoked) return done({ loggedIn: false, cookie: merged.cookie, rotated: merged.rotated });
+  if (!res.ok) return done({ loggedIn: null, cookie, rotated: false });
   let body;
   try {
     body = await res.json();
   } catch {
-    return { loggedIn: null, cookie, rotated: false };
+    return done({ loggedIn: null, cookie, rotated: false });
   }
   const loggedIn = typeof body?.data?.loggedIn === 'boolean' ? body.data.loggedIn : null;
-  if (loggedIn !== true) return { loggedIn, cookie: loggedIn === null ? cookie : merged.cookie, rotated: false };
+  if (loggedIn !== true) return done({ loggedIn, cookie: loggedIn === null ? cookie : merged.cookie, rotated: false });
 
   const jar = parseAuthCookies(merged.cookie);
   let rotated = merged.rotated;
@@ -123,7 +157,7 @@ export async function verifySession(cookie, { fetchFn = fetch } = {}) {
       rotated = true;
     }
   }
-  return { loggedIn: true, cookie: serializeAuthCookies(jar), rotated };
+  return done({ loggedIn: true, cookie: serializeAuthCookies(jar), rotated });
 }
 
 function readSessionFile(sessionPath) {
