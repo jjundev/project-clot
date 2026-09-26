@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { db } from './db.js';
 import { syncLikedItemsFromMusinsa } from './sync.js';
 import { collectPricesForActiveItems, fetchProductPriceInfo, prewarmMusinsaSession } from './collector.js';
+import { makeSessionProvider } from './session.js';
 import { notifyPriceDropsAndRestocks, sendMacNotification, formatHotDealsSummary, sendTelegramMessage, notifySessionWarning } from './notifier.js';
 import { discoverCategoryGoods } from './discovery.js';
 import { setupEnvironment, getExtendedPath } from './env.js';
@@ -369,6 +370,8 @@ async function handleDailyRun(flags) {
     concurrency,
     prewarmFn: deferred ? null : prewarmMusinsaSession,
     skipOpenCli: deferred,
+    // Cached cookie works while asleep; only fetch a fresh one when the browser bridge is usable.
+    sessionProvider: makeSessionProvider({ allowBridge: !deferred }),
     enableSelfHealing: !deferred,
     onSessionWarning: notifySessionWarning,
     onProgress: ({ current, total, item, priceInfo }) => {
@@ -383,7 +386,7 @@ async function handleDailyRun(flags) {
   console.log('\n');
 
   console.log(`✅ Collection complete in ${(results.durationMs / 1000).toFixed(1)}s.`);
-  console.log(`  • Mode: ${results.mode}${results.mode !== 'full' ? ' (public/estimated prices)' : ' (authenticated my-prices)'}`);
+  console.log(`  • Mode: ${results.mode}${results.mode !== 'full' ? ' (public/estimated prices)' : ' (authenticated my-prices)'} — HTTPS auth: ${results.authPriced}`);
   console.log(`  • Success: ${results.success} / Failed: ${results.failed}`);
   console.log(`  • Price Drops: ${results.priceDropped.length}`);
   console.log(`  • Restocks: ${results.restocked.length}`);
@@ -767,6 +770,7 @@ async function main() {
       const results = await collectPricesForActiveItems({
         concurrency,
         prewarmFn: prewarmMusinsaSession,
+        sessionProvider: makeSessionProvider({ allowBridge: true }),
         enableSelfHealing: true,
         onSessionWarning: notifySessionWarning,
         onProgress: ({ current, total, item, priceInfo }) => {
