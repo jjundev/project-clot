@@ -13,6 +13,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { ClotDatabase } from '../src/db.js';
 import { buildClotDataPayload } from '../src/visualizer.js';
+import { handleDiscover, exportDataForGit } from '../src/cli.js';
 
 const okStats = (counts) => counts.map((count, i) => ({ cat: `c${i}`, ok: true, count }));
 
@@ -164,4 +165,158 @@ test('db: DROPPED goods leave every tracking query and the dashboard', (t) => {
   assert.deepEqual(db.getActiveItems().map((r) => r.goods_no), [2]);
   assert.deepEqual(db.getDiscoveredActiveItems().map((r) => r.goods_no), [2]);
   assert.deepEqual(buildClotDataPayload(db.db).items.map((it) => it.n), [2]);
+});
+
+const CATEGORIES = ['001', '002', '003', '103', '004'];
+
+const listing = (goodsNo, extra = {}) => ({
+  goodsNo, goodsName: `G${goodsNo}`, brandName: 'B', url: `https://www.musinsa.com/products/${goodsNo}`,
+  imageUrl: '', normalPrice: 20000, salePrice: 12000, couponPrice: 10000, estimatedMyPrice: 9200,
+  likeCount: 5000, isSoldOut: false, source: 'discovery', ...extra,
+});
+
+// Each default category returns `counts[cat] ?? 60` filler goods (>= 50% of limit 100) plus `extra[cat]`.
+function fullScan(extra = {}, { counts = {}, fail = [] } = {}) {
+  return async ({ categoryCode }) => {
+    if (fail.includes(categoryCode)) throw new Error(`HTTP 500 for ${categoryCode}`);
+    const base = 100000 + CATEGORIES.indexOf(categoryCode) * 1000;
+    const fillers = Array.from({ length: counts[categoryCode] ?? 60 }, (_, i) => listing(base + i));
+    return [...fillers, ...(extra[categoryCode] || [])];
+  };
+}
+
+/** Silences discover output and returns the captured console.log lines. Call once per test. */
+function quiet(t) {
+  const logs = [];
+  t.mock.method(console, 'log', (...a) => logs.push(a.join(' ')));
+  t.mock.method(console, 'warn', () => {});
+  t.mock.method(console, 'error', () => {});
+  return logs;
+}
+
+const discover = (db, dir, discoverFn, flags = {}) =>
+  handleDiscover(flags, db, { discoverFn, authLimit: 0, dataDir: dir, today: '2026-09-26' });
+
+const seed = (db, dir, goods) => discover(db, dir, fullScan({ '001': goods }));
+
+test('discover: two consecutive complete misses drop a goods, one miss keeps it', async (t) => {
+  const { db, dir } = tempDb(t);
+  const logs = quiet(t);
+  await seed(db, dir, [listing(1), listing(2)]);
+
+  await discover(db, dir, fullScan({ '001': [listing(2)] }));
+  assert.equal(db.getItem(1).status, 'ACTIVE');
+  assert.equal(db.getItem(1).discovery_misses, 1);
+
+  await discover(db, dir, fullScan({ '001': [listing(2)] }));
+  assert.equal(db.getItem(1).status, 'DROPPED');
+  assert.equal(db.getItem(2).status, 'ACTIVE');
+  assert.equal(db.getItem(2).discovery_misses, 0);
+  assert.equal(db.getPriceLogs(1).length, 1);
+  assert.ok(logs.includes('🧹 [Discovery] 2회 연속 미노출 1개 → DROPPED, 재등장 0개 복귀'));
+});
+
+const PARTIAL_SCANS = [
+  ['--category 001', { category: '001' }, fullScan({ '001': [listing(2)] })],
+  ['--limit 50', { limit: '50' }, fullScan({ '001': [listing(2)] })],
+  ['a failing category', {}, fullScan({ '001': [listing(2)] }, { fail: ['003'] })],
+  ['a category under 50% of limit', {}, fullScan({ '001': [listing(2)] }, { counts: { '004': 49 } })],
+];
+
+for (const [label, flags, discoverFn] of PARTIAL_SCANS) {
+  test(`discover: partial scan (${label}) changes no miss counts or statuses`, async (t) => {
+    const { db, dir } = tempDb(t);
+    const logs = quiet(t);
+    await seed(db, dir, [listing(1), listing(2)]);
+
+    await discover(db, dir, discoverFn, flags);
+    await discover(db, dir, discoverFn, flags);
+    assert.equal(db.getItem(1).status, 'ACTIVE');
+    assert.equal(db.getItem(1).discovery_misses, 0);
+    assert.ok(logs.includes('🧹 [Discovery] 부분 스캔이라 정리를 건너뜀'));
+  });
+}
+
+async function dropGoods1(db, dir) {
+  await seed(db, dir, [listing(1), listing(2)]);
+  await discover(db, dir, fullScan({ '001': [listing(2)] }));
+  await discover(db, dir, fullScan({ '001': [listing(2)] }));
+  assert.equal(db.getItem(1).status, 'DROPPED');
+}
+
+test('discover: a DROPPED goods listed again comes back with the listing status', async (t) => {
+  const { db, dir } = tempDb(t);
+  const logs = quiet(t);
+  await dropGoods1(db, dir);
+
+  await discover(db, dir, fullScan({ '001': [listing(1, { isSoldOut: true }), listing(2)] }));
+  assert.equal(db.getItem(1).status, 'SOLDOUT');
+  assert.equal(db.getItem(1).discovery_misses, 0);
+  assert.ok(logs.includes('🧹 [Discovery] 2회 연속 미노출 0개 → DROPPED, 재등장 1개 복귀'));
+});
+
+test('discover: a partial scan also revives a DROPPED goods', async (t) => {
+  const { db, dir } = tempDb(t);
+  const logs = quiet(t);
+  await dropGoods1(db, dir);
+
+  await discover(db, dir, fullScan({ '001': [listing(1)] }), { category: '001' });
+  assert.equal(db.getItem(1).status, 'ACTIVE');
+  assert.equal(db.getItem(1).discovery_misses, 0);
+  assert.ok(logs.includes('🧹 [Discovery] 부분 스캔이라 정리를 건너뜀 (재등장 1개 복귀)'));
+});
+
+test('discover: a partial-scan sighting restarts the miss count', async (t) => {
+  const { db, dir } = tempDb(t);
+  quiet(t);
+  await seed(db, dir, [listing(1), listing(2)]);
+  await discover(db, dir, fullScan({ '001': [listing(2)] })); // miss 1
+  await discover(db, dir, fullScan({ '001': [listing(1)] }), { category: '001' }); // seen, partial
+  await discover(db, dir, fullScan({ '001': [listing(2)] })); // miss 1 again, not 2
+  assert.equal(db.getItem(1).status, 'ACTIVE');
+  assert.equal(db.getItem(1).discovery_misses, 1);
+});
+
+test('discover: a goods listed in two categories is seen once, never missed', async (t) => {
+  const { db, dir } = tempDb(t);
+  quiet(t);
+  const both = fullScan({ '001': [listing(1)], '002': [listing(1)] });
+  await discover(db, dir, both);
+  await discover(db, dir, both);
+  assert.equal(db.getItem(1).status, 'ACTIVE');
+  assert.equal(db.getItem(1).discovery_misses, 0);
+});
+
+test('discover: VIP goods absent from complete scans are untouched', async (t) => {
+  const { db, dir } = tempDb(t);
+  quiet(t);
+  db.upsertItem({ goods_no: 50, goods_name: 'VIP', url: 'https://www.musinsa.com/products/50', source: 'like' });
+  await discover(db, dir, fullScan());
+  await discover(db, dir, fullScan());
+  assert.equal(db.getItem(50).status, 'ACTIVE');
+  assert.equal(db.getItem(50).source, 'like');
+  assert.equal(db.getItem(50).discovery_misses, 0);
+});
+
+test('discover: a known discovery goods follows the listing sold-out state', async (t) => {
+  const { db, dir } = tempDb(t);
+  quiet(t);
+  await seed(db, dir, [listing(1)]);
+  assert.equal(db.getItem(1).status, 'ACTIVE');
+
+  await discover(db, dir, fullScan({ '001': [listing(1, { isSoldOut: true })] }));
+  assert.equal(db.getItem(1).status, 'SOLDOUT');
+
+  await discover(db, dir, fullScan({ '001': [listing(1)] }));
+  assert.equal(db.getItem(1).status, 'ACTIVE');
+});
+
+test('export: DROPPED goods stay in latest_prices.json with their status and a count', async (t) => {
+  const { db, dir } = tempDb(t);
+  quiet(t);
+  await dropGoods1(db, dir);
+
+  const summary = JSON.parse(fs.readFileSync(exportDataForGit({ dbInstance: db, dataDir: dir }), 'utf-8'));
+  assert.equal(summary.dropped_items, 1);
+  assert.equal(summary.items.find((it) => it.goods_no === 1).status, 'DROPPED');
 });

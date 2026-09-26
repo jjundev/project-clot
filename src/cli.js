@@ -11,7 +11,14 @@ import { collectPricesForActiveItems, collectAuthenticatedPrices, fetchProductPr
 import { fetchAuthenticatedPriceInfo } from './myprice.js';
 import { makeSessionProvider, keepSessionAlive, readSessionMeta, updateSessionMeta, DEFAULT_SESSION_PATH } from './session.js';
 import { notifyPriceDropsAndRestocks, sendMacNotification, formatHotDealsSummary, sendTelegramMessage, notifySessionWarning, notifySessionLost, notifyExpiryProbe } from './notifier.js';
-import { discoverCategoryGoods, parseAuthLimit, selectDiscoveryAuthTargets, summarizeMyPriceGap } from './discovery.js';
+import {
+  discoverCategoryGoods,
+  parseAuthLimit,
+  selectDiscoveryAuthTargets,
+  summarizeMyPriceGap,
+  isCompleteDiscoveryScan,
+  DISCOVERY_DROP_AFTER_MISSES,
+} from './discovery.js';
 import { setupEnvironment, getExtendedPath } from './env.js';
 import { generateDashboardHtml } from './visualizer.js';
 import { classifyCategory } from './classifier.js';
@@ -107,6 +114,7 @@ export function exportDataForGit({ dbInstance = db, dataDir = DATA_DIR } = {}) {
     active_items: items.filter((it) => it.status === 'ACTIVE').length,
     soldout_items: items.filter((it) => it.status === 'SOLDOUT').length,
     unliked_items: items.filter((it) => it.status === 'UNLIKED').length,
+    dropped_items: items.filter((it) => it.status === 'DROPPED').length,
     items: items.map((it) => {
       const latest = dbInstance.getLatestPrice(it.goods_no);
       const { current, lowest, lowestDate } = pickDisplayPrices(latest, it);
@@ -198,6 +206,7 @@ export async function handleDiscover(
   const allDiscovered = [];
   const toRecord = []; // discovery-owned goods, one entry per goodsNo
   const seen = new Set();
+  const categoryStats = [];
   let newlyIngestedCount = 0;
 
   for (const cat of categories) {
@@ -205,6 +214,7 @@ export async function handleDiscover(
       console.log(`📂 Scanning category [${cat}]...`);
       const items = await discoverFn({ categoryCode: cat, limit, minLikes, years });
       console.log(`   ✓ Found ${items.length} items matching criteria in category [${cat}].`);
+      categoryStats.push({ cat, ok: true, count: items.length });
 
       for (const item of items) {
         allDiscovered.push(item);
@@ -217,6 +227,7 @@ export async function handleDiscover(
         toRecord.push({ item, existing, cat });
       }
     } catch (err) {
+      categoryStats.push({ cat, ok: false, count: 0 });
       console.error(`❌ Failed scanning category ${cat}:`, err.message);
     }
   }
@@ -245,6 +256,7 @@ export async function handleDiscover(
   // 3. Record. Real prices only compare with real prices; the listing estimate keeps its own series.
   const gapPairs = [];
   let myPriceDrops = 0;
+  let revivedCount = 0;
   for (const { item, existing, cat } of toRecord) {
     const myPrice = realPriceOf(item.goodsNo);
     item.myPrice = myPrice;
@@ -259,6 +271,13 @@ export async function handleDiscover(
       status: item.isSoldOut ? 'SOLDOUT' : 'ACTIVE',
       category: classifyCategory(item.goodsName, item.brandName, cat),
     });
+
+    // upsertItem keeps an existing row's status, so align known discovery goods with the listing here.
+    const listedStatus = item.isSoldOut ? 'SOLDOUT' : 'ACTIVE';
+    if (existing && existing.status !== listedStatus && ['ACTIVE', 'SOLDOUT', 'DROPPED'].includes(existing.status)) {
+      dbInstance.updateItemStatus(item.goodsNo, listedStatus);
+      if (existing.status === 'DROPPED') revivedCount++;
+    }
 
     if (myPrice) {
       // Most discovery rows are estimate-only (capped rotation), so skip back to the last real price.
@@ -301,6 +320,17 @@ export async function handleDiscover(
     ) {
       dbInstance.updateLowestEstimatedPrice(item.goodsNo, item.estimatedMyPrice, today);
     }
+  }
+
+  // 4. Cleanup. Seen goods restart their count on any scan; only a complete scan counts misses.
+  const seenGoodsNos = [...seen];
+  dbInstance.markDiscoverySeen(seenGoodsNos);
+  if (isCompleteDiscoveryScan(flags, categoryStats, limit)) {
+    const { dropped } = dbInstance.markDiscoveryUnseen(seenGoodsNos, DISCOVERY_DROP_AFTER_MISSES);
+    console.log(`🧹 [Discovery] ${DISCOVERY_DROP_AFTER_MISSES}회 연속 미노출 ${dropped}개 → DROPPED, 재등장 ${revivedCount}개 복귀`);
+  } else {
+    const revivedNote = revivedCount > 0 ? ` (재등장 ${revivedCount}개 복귀)` : '';
+    console.log(`🧹 [Discovery] 부분 스캔이라 정리를 건너뜀${revivedNote}`);
   }
 
   if (gapPairs.length > 0) {
