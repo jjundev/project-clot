@@ -11,6 +11,7 @@ import { USER_AGENT } from './myprice.js';
  */
 export const DEFAULT_SESSION_PATH = path.join(os.homedir(), '.clot', 'musinsa-session.json');
 export const LOGIN_STATUS_URL = 'https://my.musinsa.com/api/member/v1/login-status';
+const LOGIN_STATUS_TIMEOUT_MS = 10_000;
 
 const AUTH_COOKIE_NAMES = ['app_atk', 'app_rtk', 'mss_mac'];
 const MAX_LIFETIME_SAMPLES = 10;
@@ -87,6 +88,8 @@ export async function verifySession(cookie, { fetchFn = fetch } = {}) {
   try {
     res = await fetchFn(LOGIN_STATUS_URL, {
       headers: { Cookie: cookie, 'User-Agent': USER_AGENT, Accept: 'application/json', Referer: 'https://www.musinsa.com/' },
+      // A stalled connection must not hold up a daily tick for fetch's ~300 s default.
+      signal: AbortSignal.timeout(LOGIN_STATUS_TIMEOUT_MS),
     });
   } catch {
     return { loggedIn: null, cookie, rotated: false };
@@ -124,10 +127,18 @@ function readSessionFile(sessionPath) {
   }
 }
 
+// Temp file + rename: a concurrent reader (skip-tick keeper vs a track/daily run) never sees a
+// truncated file, which it would read as "no cookie" and clear a valid session.
 function writeSessionFile(data, sessionPath) {
   fs.mkdirSync(path.dirname(sessionPath), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(sessionPath, JSON.stringify(data), { mode: 0o600 });
-  fs.chmodSync(sessionPath, 0o600);
+  const tmp = `${sessionPath}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(data), { mode: 0o600 });
+    fs.chmodSync(tmp, 0o600);
+    fs.renameSync(tmp, sessionPath);
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
 }
 
 export function readSessionCookie(sessionPath = DEFAULT_SESSION_PATH) {
@@ -269,15 +280,20 @@ export async function getSessionCookie({
   return renewFromBridge(sessionPath, allowBridge, fetchFromBridge);
 }
 
-/** Called after a product page reported logged-out: only a confirmed HTTPS login avoids the bridge. */
+/**
+ * Called after a product page reported logged-out: only a confirmed HTTPS login avoids the bridge.
+ * failedCookie = the cookie that page rejected; login-status accepting that same cookie is not
+ * enough (it would be retried and fail again forever), so it also goes to the bridge.
+ */
 export async function refreshSessionCookie({
   path: sessionPath = DEFAULT_SESSION_PATH,
   allowBridge = true,
   fetchFromBridge = fetchSessionCookieFromBridge,
   verify = verifySession,
+  failedCookie = null,
 } = {}) {
   const { cookie, loggedIn } = await verifyCached(sessionPath, verify);
-  if (loggedIn === true) return cookie;
+  if (loggedIn === true && cookie !== failedCookie) return cookie;
   return renewFromBridge(sessionPath, allowBridge, fetchFromBridge);
 }
 
@@ -289,7 +305,8 @@ export function makeSessionProvider({ allowBridge = true, path: sessionPath = DE
     ...(fetchFromBridge ? { fetchFromBridge } : {}),
     ...(verify ? { verify } : {}),
   };
-  const provider = async ({ refresh = false } = {}) => (refresh ? refreshSessionCookie(opts) : getSessionCookie(opts));
+  const provider = async ({ refresh = false, failedCookie = null } = {}) =>
+    refresh ? refreshSessionCookie({ ...opts, failedCookie }) : getSessionCookie(opts);
   /** Applies Set-Cookie headers from an authenticated response to the cache. */
   provider.absorb = (setCookieHeaders) => {
     const current = readSessionCookie(sessionPath);

@@ -49,6 +49,18 @@ describe('session cache', () => {
     assert.equal(fs.statSync(tmpPath).mode & 0o777, 0o600);
   });
 
+  test('writes replace the file atomically (new inode, 0600, no temp files left)', () => {
+    writeSessionCookie(COOKIE, tmpPath);
+    fs.chmodSync(tmpPath, 0o644);
+    const before = fs.statSync(tmpPath).ino;
+    updateSessionMeta({ lastWarnedOn: '2026-09-26' }, tmpPath);
+    const after = fs.statSync(tmpPath);
+    assert.notEqual(after.ino, before);
+    assert.equal(after.mode & 0o777, 0o600);
+    assert.deepEqual(fs.readdirSync(path.dirname(tmpPath)), [path.basename(tmpPath)]);
+    assert.equal(readSessionCookie(tmpPath), COOKIE);
+  });
+
   test('missing, corrupt, or cookie-less cache files read as null', () => {
     assert.equal(readSessionCookie(tmpPath), null);
     fs.mkdirSync(path.dirname(tmpPath), { recursive: true });
@@ -133,6 +145,18 @@ describe('verifySession', () => {
     assert.deepEqual(await verifySession(COOKIE, { fetchFn }), { loggedIn: true, cookie: COOKIE, rotated: false });
     assert.equal(calls[0].url, LOGIN_STATUS_URL);
     assert.equal(calls[0].opts.headers.Cookie, COOKIE);
+  });
+
+  test('login-status request is bounded by a timeout signal', async () => {
+    let signal;
+    const fetchFn = async (url, opts) => { signal = opts.signal; return jsonRes(200, { data: { loggedIn: true } }); };
+    await verifySession(COOKIE, { fetchFn });
+    assert.ok(signal instanceof AbortSignal);
+  });
+
+  test('a timed-out login-status is unknown (null), not logged out', async () => {
+    const fetchFn = async () => { throw new DOMException('The operation was aborted due to timeout', 'TimeoutError'); };
+    assert.deepEqual(await verifySession(COOKIE, { fetchFn }), { loggedIn: null, cookie: COOKIE, rotated: false });
   });
 
   test('authTokenInfo with new tokens rotates the cookie', async () => {
@@ -234,6 +258,29 @@ describe('getSessionCookie / refreshSessionCookie / makeSessionProvider', () => 
     assert.equal(await refreshSessionCookie({ path: tmpPath, fetchFromBridge: bridge, verify: okVerify }), COOKIE);
     assert.equal(bridge.calls, 0);
     assert.equal(readSessionCookie(tmpPath), COOKIE);
+  });
+
+  test('refresh: login-status accepting the cookie a product page just rejected -> bridge, not the same cookie', async () => {
+    writeSessionCookie(COOKIE, tmpPath);
+    const fresh = 'app_atk=NEW; app_rtk=R2';
+    assert.equal(await refreshSessionCookie({ path: tmpPath, fetchFromBridge: bridgeSpy(fresh), verify: okVerify, failedCookie: COOKIE }), fresh);
+  });
+
+  test('refresh: same rejected cookie without the bridge -> cleared, null (keeper renews later)', async () => {
+    writeSessionCookie(COOKIE, tmpPath);
+    assert.equal(await refreshSessionCookie({ path: tmpPath, allowBridge: false, verify: okVerify, failedCookie: COOKIE }), null);
+    assert.equal(readSessionCookie(tmpPath), null);
+  });
+
+  test('refresh: a verified cookie that differs from the rejected one is used', async () => {
+    writeSessionCookie(COOKIE, tmpPath);
+    assert.equal(await refreshSessionCookie({ path: tmpPath, verify: okVerify, failedCookie: 'app_atk=OLDER; app_rtk=R' }), COOKIE);
+  });
+
+  test('provider forwards failedCookie on refresh', async () => {
+    writeSessionCookie(COOKIE, tmpPath);
+    const provider = makeSessionProvider({ path: tmpPath, verify: okVerify, fetchFromBridge: async () => 'app_atk=NEW; app_rtk=R2' });
+    assert.equal(await provider({ refresh: true, failedCookie: COOKIE }), 'app_atk=NEW; app_rtk=R2');
   });
 
   test('refresh: unknown status is not trusted (page already said expired) -> bridge', async () => {

@@ -63,6 +63,14 @@ describe('collectAuthenticatedPrices', () => {
     assert.deepEqual([...map.keys()], [1, 2]);
   });
 
+  test('refresh passes the rejected cookie so the provider can tell a stale "valid" session apart', async () => {
+    const refreshArgs = [];
+    const sessionProvider = async (args = {}) => { if (args.refresh) refreshArgs.push(args); return args.refresh ? 'app_atk=new' : 'app_atk=old'; };
+    const authFetchFn = async (g, { cookie }) => { if (cookie === 'app_atk=old') throw new SessionExpiredError(); return authInfo(g, 1); };
+    await collectAuthenticatedPrices({ goodsNos: [1], sessionProvider, authFetchFn, authDelayMs: 0 });
+    assert.deepEqual(refreshArgs, [{ refresh: true, failedCookie: 'app_atk=old' }]);
+  });
+
   test('3 consecutive non-session failures stop the stage (systemic block) and leave the rest for fallback', async () => {
     let fetches = 0;
     const map = await collectAuthenticatedPrices({

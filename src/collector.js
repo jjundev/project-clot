@@ -174,7 +174,7 @@ export async function collectAuthenticatedPrices({
 }) {
   const getCookie = async (refresh) => {
     try {
-      return await sessionProvider({ refresh });
+      return await sessionProvider(refresh ? { refresh: true, failedCookie: cookie } : { refresh: false });
     } catch (err) {
       console.warn(`[HTTPS Auth Notice] Session provider failed: ${err.message}`);
       return null;
