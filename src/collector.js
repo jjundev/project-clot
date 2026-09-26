@@ -3,6 +3,7 @@ import { execSync } from 'node:child_process';
 import { getExecOptions } from './env.js';
 import { mapConcurrent } from './pool.js';
 import { estimateMemberPrice } from './discovery.js';
+import { fetchAuthenticatedPriceInfo } from './myprice.js';
 
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
@@ -156,6 +157,59 @@ export async function fetchProductPriceInfo(goodsNo, cookieHeader = '', retries 
   throw new Error(`Failed to fetch product ${goodsNo} after ${retries} attempts`);
 }
 
+/**
+ * Stage 1 of VIP price collection: exact myPrice over authenticated HTTPS.
+ * Sequential with a delay — concurrent product-page requests get soft rate-limited
+ * (HTTP 200 without __NEXT_DATA__). On SessionExpiredError the cookie is refreshed once.
+ */
+export async function collectAuthenticatedPrices({
+  goodsNos,
+  sessionProvider,
+  authFetchFn = fetchAuthenticatedPriceInfo,
+  authDelayMs = 700,
+  into = new Map(),
+}) {
+  const getCookie = async (refresh) => {
+    try {
+      return await sessionProvider({ refresh });
+    } catch (err) {
+      console.warn(`[HTTPS Auth Notice] Session provider failed: ${err.message}`);
+      return null;
+    }
+  };
+
+  let cookie = await getCookie(false);
+  if (!cookie) return into;
+  let refreshed = false;
+
+  for (let i = 0; i < goodsNos.length; i++) {
+    const goodsNo = goodsNos[i];
+    try {
+      into.set(goodsNo, await authFetchFn(goodsNo, { cookie }));
+    } catch (err) {
+      if (err?.name === 'SessionExpiredError') {
+        if (refreshed) {
+          console.warn('[HTTPS Auth Notice] Session still expired after refresh; falling back for remaining items.');
+          break;
+        }
+        refreshed = true;
+        cookie = await getCookie(true);
+        if (!cookie) {
+          console.warn('[HTTPS Auth Notice] Session expired and could not be refreshed; falling back for remaining items.');
+          break;
+        }
+        i--; // retry the same item with the fresh cookie
+        continue;
+      }
+      console.warn(`[HTTPS Auth Notice] ${goodsNo}: ${err.message}`);
+    }
+    if (authDelayMs > 0 && i < goodsNos.length - 1) {
+      await new Promise((r) => setTimeout(r, authDelayMs));
+    }
+  }
+  return into;
+}
+
 export async function collectPricesForActiveItems({
   concurrency = 3,
   delayMs = 250,
@@ -171,6 +225,9 @@ export async function collectPricesForActiveItems({
   items = null,
   source = null,
   skipOpenCli = false,
+  sessionProvider = null,
+  authFetchFn = fetchAuthenticatedPriceInfo,
+  authDelayMs = 700,
 } = {}) {
   let activeItems;
   if (items) {
@@ -196,6 +253,7 @@ export async function collectPricesForActiveItems({
     discontinued: [],
     items: [],
     sessionWarningTriggered: false,
+    authPriced: 0,
     // 'full' = OpenCLI authenticated prices, 'deferred' = OpenCLI intentionally skipped
     // (Mac asleep / DarkWake), 'degraded' = OpenCLI attempted but failed -> direct parser.
     mode: 'full',
@@ -209,15 +267,25 @@ export async function collectPricesForActiveItems({
   const vipGoodsNos = vipItems.map((it) => it.goods_no);
   let consecutiveOpenCliErrors = 0;
 
-  if (skipOpenCli && vipGoodsNos.length > 0) {
+  // Stage 1: authenticated HTTPS with the cached Musinsa session (no browser needed).
+  const authPriceMap = new Map();
+  if (sessionProvider && vipGoodsNos.length > 0) {
+    await collectAuthenticatedPrices({ goodsNos: vipGoodsNos, sessionProvider, authFetchFn, authDelayMs, into: authPriceMap });
+    results.authPriced = authPriceMap.size;
+    console.log(`🔐 [HTTPS Auth] ${authPriceMap.size}/${vipGoodsNos.length} VIP items priced via authenticated HTTPS.`);
+  }
+  // Stage 2 (OpenCLI) and Stage 3 (direct parser) only handle what Stage 1 left behind.
+  const remainingVipGoodsNos = vipGoodsNos.filter((g) => !authPriceMap.has(g));
+
+  if (skipOpenCli && remainingVipGoodsNos.length > 0) {
     console.warn(
-      `⏸ [OpenCLI Deferred] Browser bridge unavailable (Mac asleep/DarkWake). Skipping OpenCLI for ${vipGoodsNos.length} VIP items; using fast direct parser.`
+      `⏸ [OpenCLI Deferred] Browser bridge unavailable (Mac asleep/DarkWake). Skipping OpenCLI for ${remainingVipGoodsNos.length} VIP items; using fast direct parser.`
     );
     results.mode = 'deferred';
   }
 
   // Pre-warm Chrome Musinsa session in background before batching VIP items
-  if (!skipOpenCli && vipGoodsNos.length > 0 && prewarmFn) {
+  if (!skipOpenCli && remainingVipGoodsNos.length > 0 && prewarmFn) {
     try {
       console.log('🌅 Pre-warming Chrome Musinsa session in background...');
       await prewarmFn({ waitMs: process.env.NODE_ENV === 'test' ? 0 : 3000 });
@@ -226,10 +294,10 @@ export async function collectPricesForActiveItems({
     }
   }
 
-  for (let i = 0; skipOpenCli ? false : i < vipGoodsNos.length; i += openCliChunkSize) {
+  for (let i = 0; skipOpenCli ? false : i < remainingVipGoodsNos.length; i += openCliChunkSize) {
     if (consecutiveOpenCliErrors >= 2) {
       console.warn(
-        `⚡ [OpenCLI CircuitBreaker] 2 consecutive OpenCLI batch failures/timeouts. Skipping remaining ${vipGoodsNos.length - i} items and proceeding to fast direct parser.`
+        `⚡ [OpenCLI CircuitBreaker] 2 consecutive OpenCLI batch failures/timeouts. Skipping remaining ${remainingVipGoodsNos.length - i} items and proceeding to fast direct parser.`
       );
       results.sessionWarningTriggered = true;
       if (onSessionWarning) {
@@ -244,7 +312,7 @@ export async function collectPricesForActiveItems({
       break;
     }
 
-    const chunk = vipGoodsNos.slice(i, i + openCliChunkSize).join(',');
+    const chunk = remainingVipGoodsNos.slice(i, i + openCliChunkSize).join(',');
     try {
       const raw = execFn(
         `opencli musinsa my-prices "${chunk}" -f json`,
@@ -308,7 +376,9 @@ export async function collectPricesForActiveItems({
   }
 
 
-  if (!skipOpenCli && vipGoodsNos.length > 0) {
+  if (vipGoodsNos.length > 0 && remainingVipGoodsNos.length === 0) {
+    results.mode = 'full'; // every VIP item has an authenticated HTTPS price
+  } else if (!skipOpenCli && remainingVipGoodsNos.length > 0) {
     results.mode = results.sessionWarningTriggered || openCliPriceMap.size === 0 ? 'degraded' : 'full';
   }
 
@@ -319,9 +389,12 @@ export async function collectPricesForActiveItems({
   await mapConcurrent(activeItems, concurrency, async (item, itemIndex) => {
     try {
       let priceInfo;
+      const authData = authPriceMap.get(item.goods_no);
       const liveData = openCliPriceMap.get(item.goods_no);
 
-      if (liveData && liveData.myPrice) {
+      if (authData) {
+        priceInfo = authData;
+      } else if (liveData && liveData.myPrice) {
         priceInfo = {
           goodsNo: item.goods_no,
           goodsName: item.goods_name,
