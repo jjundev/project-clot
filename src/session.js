@@ -17,6 +17,11 @@ const AUTH_COOKIE_NAMES = ['app_atk', 'app_rtk', 'mss_mac'];
 const MAX_LIFETIME_SAMPLES = 10;
 const HOUR_MS = 3_600_000;
 
+// RFC 6265 cookie-octet. Anything else (CR/LF, spaces, quotes) would break or smuggle into the
+// Cookie header — and Node's header-validation error would print the whole value to the log.
+const COOKIE_VALUE_RE = /^[\x21\x23-\x2b\x2d-\x3a\x3c-\x5b\x5d-\x7e]+$/;
+const isValidCookieValue = (v) => typeof v === 'string' && COOKIE_VALUE_RE.test(v);
+
 /** 'a=1; b=2' -> Map of only the auth cookies (values kept raw, still URL-encoded). */
 export function parseAuthCookies(cookie) {
   const jar = new Map();
@@ -24,7 +29,8 @@ export function parseAuthCookies(cookie) {
     const eq = part.indexOf('=');
     if (eq <= 0) continue;
     const name = part.slice(0, eq).trim();
-    if (AUTH_COOKIE_NAMES.includes(name)) jar.set(name, part.slice(eq + 1));
+    const value = part.slice(eq + 1);
+    if (AUTH_COOKIE_NAMES.includes(name) && isValidCookieValue(value)) jar.set(name, value);
   }
   return jar;
 }
@@ -67,6 +73,7 @@ export function mergeAuthSetCookies(cookie, setCookieHeaders = [], now = Date.no
     const name = pair.slice(0, eq).trim();
     if (!AUTH_COOKIE_NAMES.includes(name)) continue;
     const value = pair.slice(eq + 1).trim();
+    if (value && !isValidCookieValue(value)) continue;
     if (isDeletion(attrs, value, now)) {
       jar.delete(name);
       if (name !== 'mss_mac') revoked = true;
@@ -110,7 +117,7 @@ export async function verifySession(cookie, { fetchFn = fetch } = {}) {
   let rotated = merged.rotated;
   const tokens = body.data.authTokenInfo || {};
   for (const [name, value] of [['app_atk', tokens.accessToken], ['app_rtk', tokens.refreshToken]]) {
-    if (typeof value === 'string' && value && jar.get(name) !== value) {
+    if (isValidCookieValue(value) && jar.get(name) !== value) {
       jar.set(name, value);
       rotated = true;
     }

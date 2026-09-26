@@ -166,6 +166,11 @@ describe('verifySession', () => {
     });
   });
 
+  test('authTokenInfo values with control characters are not adopted', async () => {
+    const fetchFn = async () => jsonRes(200, { data: { loggedIn: true, authTokenInfo: { accessToken: 'A2\r\nX: y', refreshToken: 'BBB' } } });
+    assert.deepEqual(await verifySession(COOKIE, { fetchFn }), { loggedIn: true, cookie: COOKIE, rotated: false });
+  });
+
   test('Set-Cookie rotation is applied', async () => {
     const fetchFn = async () => jsonRes(200, { data: { loggedIn: true } }, ['app_atk=A3; Path=/']);
     const r = await verifySession(COOKIE, { fetchFn });
@@ -331,6 +336,16 @@ describe('cookie jar', () => {
     assert.deepEqual([...jar.keys()].sort(), ['app_atk', 'app_rtk', 'mss_mac']);
     assert.equal(serializeAuthCookies(jar), COOKIE);
     assert.equal(serializeAuthCookies(parseAuthCookies(undefined)), '');
+  });
+
+  test('values with control characters or spaces are dropped (they would break the Cookie header)', () => {
+    assert.equal(pickAuthCookies('app_atk=AAA\nX-Evil: 1; app_rtk=BBB; mss_mac=C C'), 'app_rtk=BBB');
+    assert.equal(pickAuthCookies('app_atk=A\u0000B; app_rtk=BBB'), 'app_rtk=BBB');
+    assert.equal(readSessionCookie(tmpPath), null);
+  });
+
+  test('merge ignores a Set-Cookie value with control characters (neither rotation nor revocation)', () => {
+    assert.deepEqual(mergeAuthSetCookies(COOKIE, ['app_atk=A\u0007B; Path=/']), { cookie: COOKIE, rotated: false, revoked: false });
   });
 
   test('values containing "=" survive a round trip', () => {
