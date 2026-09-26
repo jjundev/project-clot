@@ -305,3 +305,20 @@ export function makeSessionProvider({ allowBridge = true, path: sessionPath = DE
   provider.describe = () => describeSession(sessionPath);
   return provider;
 }
+
+/**
+ * Awake daily ticks keep the cache alive so asleep runs (no bridge) inherit a live cookie.
+ * Opens a Chrome tab only when the cached cookie is missing or confirmed dead.
+ */
+export async function keepSessionAlive({
+  bridgeUsable,
+  path: sessionPath = DEFAULT_SESSION_PATH,
+  verify = verifySession,
+  fetchFromBridge = fetchSessionCookieFromBridge,
+} = {}) {
+  if (!bridgeUsable) return { status: 'skipped' };
+  const { loggedIn } = await verifyCached(sessionPath, verify);
+  if (loggedIn !== false) return { status: 'ok', ...describeSession(sessionPath) };
+  const fresh = await renewFromBridge(sessionPath, true, fetchFromBridge);
+  return { status: fresh ? 'renewed' : 'lost', ...describeSession(sessionPath) };
+}

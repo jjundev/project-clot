@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { db } from './db.js';
 import { syncLikedItemsFromMusinsa } from './sync.js';
 import { collectPricesForActiveItems, fetchProductPriceInfo, prewarmMusinsaSession } from './collector.js';
-import { makeSessionProvider } from './session.js';
-import { notifyPriceDropsAndRestocks, sendMacNotification, formatHotDealsSummary, sendTelegramMessage, notifySessionWarning } from './notifier.js';
+import { makeSessionProvider, keepSessionAlive, readSessionMeta, updateSessionMeta, DEFAULT_SESSION_PATH } from './session.js';
+import { notifyPriceDropsAndRestocks, sendMacNotification, formatHotDealsSummary, sendTelegramMessage, notifySessionWarning, notifySessionLost } from './notifier.js';
 import { discoverCategoryGoods } from './discovery.js';
 import { setupEnvironment, getExtendedPath } from './env.js';
 import { generateDashboardHtml } from './visualizer.js';
@@ -311,6 +311,36 @@ function formatPowerState(power) {
   return `lid=${lid} wake=${wake} display=${display}`;
 }
 
+/**
+ * Session keeper for the 30-minute "already collected" ticks. Never throws: a keeper
+ * problem must not turn a quiet skip tick into a failed LaunchAgent run.
+ */
+export async function sessionKeeperSuffix({
+  power,
+  today,
+  keep = keepSessionAlive,
+  notify = notifySessionLost,
+  sessionPath = DEFAULT_SESSION_PATH,
+} = {}) {
+  if (!power?.bridgeUsable) return '';
+  try {
+    const result = await keep({ bridgeUsable: true, path: sessionPath });
+    if (result.status === 'lost' && readSessionMeta(sessionPath).lastWarnedOn !== today) {
+      updateSessionMeta({ lastWarnedOn: today }, sessionPath);
+      try {
+        await notify();
+      } catch (err) {
+        console.warn(`[Session Keeper Notice] Notification failed: ${err.message}`);
+      }
+    }
+    const age = typeof result.ageHours === 'number' ? ` age=${result.ageHours}h` : '';
+    return ` session=${result.status}${age}`;
+  } catch (err) {
+    console.warn(`[Session Keeper Notice] ${err.message}`);
+    return ' session=error';
+  }
+}
+
 async function handleDailyRun(flags) {
   const today = new Date().toISOString().split('T')[0];
   const force = Boolean(flags.force);
@@ -329,7 +359,8 @@ async function handleDailyRun(flags) {
 
   if (decision.action === 'skip') {
     // Catch-up ticks fire every 30 minutes; keep this to a single quiet line.
-    console.log(`⏭ [Daily Lock] ${today} ${decision.reason}. (${formatPowerState(power)})`);
+    const keeper = await sessionKeeperSuffix({ power, today });
+    console.log(`⏭ [Daily Lock] ${today} ${decision.reason}. (${formatPowerState(power)})${keeper}`);
     return;
   }
 

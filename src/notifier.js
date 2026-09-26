@@ -188,3 +188,14 @@ export async function notifySessionWarning({ reason = '브라우저 세션 지�
   ];
   return await sendTelegramMessage(lines.join('\n'));
 }
+
+export async function notifySessionLost() {
+  sendMacNotification('⚠️ 무신사 로그인 필요', 'Chrome에서 무신사 로그인 쿠키를 받지 못했습니다. 다시 로그인해주세요.');
+  const lines = [
+    '<b>⚠️ [Project-Clot] 무신사 세션 만료</b>\n',
+    '• 상태: 저장된 로그인 쿠키가 만료됐고, Chrome에서도 새 쿠키를 받지 못했습니다.',
+    '• 영향: 다시 로그인할 때까지 VIP 실제가 대신 OpenCLI/공개가 폴백으로 수집됩니다.',
+    '• 조치: Chrome에서 <a href="https://www.musinsa.com">musinsa.com</a> 에 로그인해주세요.',
+  ];
+  return await sendTelegramMessage(lines.join('\n'));
+}
