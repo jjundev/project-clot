@@ -36,7 +36,7 @@ Classification: bounded — 기존 sync 흐름에 데이터 소스를 추가하�
 | 11시대 upgrade 실행 | 114 | 113 | 목록을 버리고 OpenCLI 폴백 |
 | 11:3x 직접 조회 | 114 | 114 | 일치 |
 
-규칙(`LIKES_TOTAL_LAG_TOLERANCE = 3`): 모자라면 버린다(대량 UNLIKED 위험). 1~3개 많으면 받아들이고 `[Sync HTTPS Notice] like total lags the list (X listed, total Y); accepting`을 남긴다. 3개를 넘게 많으면 다른 목록이 섞였거나 API가 바뀐 것으로 보고 버린다. 남는 쪽의 최악은 취소한 좋아요가 하루 더 ACTIVE로 추적되는 것이다. 총수를 기다렸다 다시 읽는 방식은 지연 폭을 몰라 택하지 않았다.
+규칙(`LIKES_TOTAL_LAG_TOLERANCE = 3`): 모자라면 버린다(대량 UNLIKED 위험). 1~3개 많으면 받아들이고 `[Sync HTTPS Notice] like total lags the list (X listed, total Y); accepting`을 남긴다. 3개를 넘게 많으면 다른 목록이 섞였거나 API가 바뀐 것으로 보고 버린다. 남는 쪽의 최악은 두 가지다. 취소한 좋아요가 하루 더 ACTIVE로 추적될 수 있다. 또 초과를 받아들이면 총수가 더 이상 목록의 완전성을 보장하지 못한다. 총수가 L만큼 늦고 목록이 s개 많다면, 실제 좋아요 중 최대 L−s개가 목록에서 빠져도 알 수 없고 그 상품은 한 번 UNLIKED 처리된다(예: 실제 115, 총수 112, 목록 114 → 1개). 다음 실행에서 ACTIVE로 돌아오며 요약에 reactivated로 남는다. 엄격한 일치 비교에도 같은 사각지대가 있었고(예: 실제 114, 총수 113, 목록 113), 허용 폭은 그 창을 조금 넓힌다. 총수를 기다렸다 다시 읽는 방식은 지연 폭을 몰라 택하지 않았다.
 
 ## Not in this round
 - OpenCLI 어댑터 수정·제거 (폴백으로 유지, 저장소 밖 파일)

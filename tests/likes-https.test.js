@@ -236,6 +236,7 @@ describe('fetchLikedGoodsViaHttps: listed count vs like total', () => {
     const warns = captureWarn(t);
     const fetchFn = fakeFetch(routes(0, { [FIRST]: page(likes(1, 2)) }));
     assert.equal((await fetchLikedGoodsViaHttps(COOKIE, opts(fetchFn))).length, 2);
+    assert.equal(warns.length, 1);
     assert.deepEqual(warns[0].match(NOTICE).slice(1), ['2', '0']);
   });
 

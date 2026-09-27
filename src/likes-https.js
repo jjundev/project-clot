@@ -6,7 +6,8 @@ const LIKE_HOST = 'like.musinsa.com';
 const LOGGED_OUT_CODE = 'LIKE-000-0001';
 
 // The tab total lags the list right after new likes (observed +1 twice, 2026-09-27).
-// A surplus only keeps an unliked item tracked a day longer; a shortfall would mass-unlike.
+// A shortfall would mass-unlike. Accepting a surplus can keep an unliked item tracked a day longer,
+// and while the total lags it can hide a missing like, unliked for one run until the next reactivates it.
 export const LIKES_TOTAL_LAG_TOLERANCE = 3;
 
 /** The liked list came back incomplete or in an unexpected shape: discard it, never apply it partially. */
