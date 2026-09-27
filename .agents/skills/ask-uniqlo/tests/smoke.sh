@@ -10,7 +10,7 @@ js() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.l
 
 n=$("${UQ[@]}" search 후리스 --limit 5 | js 'o=>o.items.length'); [ "$n" -ge 1 ] && pass "search ($n items)" || fail "search"
 w=$("${UQ[@]}" search 후리스 --gender men --limit 40 | js 'o=>o.items.filter(i=>i.gender==="WOMEN").length'); [ "$w" -eq 0 ] && pass "gender filter" || fail "gender filter: $w WOMEN rows"
-g=$("${UQ[@]}" search 청바지 --limit 40 | js 'o=>o.items.filter(i=>i.brand==="GU").length'); [ "$g" -eq 0 ] && pass "GU excluded" || fail "GU excluded: $g GU rows"
+g=$("${UQ[@]}" search 청바지 --limit 40 | js 'o=>o.items.filter(i=>/^GU/.test(i.name)).length'); [ "$g" -eq 0 ] && pass "GU excluded" || fail "GU excluded: $g GU rows"
 detail=$("${UQ[@]}" detail E450195-000)
 m=$(echo "$detail" | js 'o=>Object.keys(o.sizeChart?.garment??{}).length'); [ "$m" -ge 3 ] && pass "detail size chart ($m sizes)" || fail "detail size chart"
 s=$(echo "$detail" | js 'o=>Object.keys(o.priceGroups[0].stock).length'); [ "$s" -ge 1 ] && pass "detail stock ($s colors)" || fail "detail stock"

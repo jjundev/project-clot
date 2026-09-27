@@ -97,6 +97,7 @@ test('detail returns the merged product for one price group', async () => {
             price: 39900,
             originalPrice: 39900,
             discounted: false,
+            available: true,
             url: 'https://www.uniqlo.com/kr/ko/products/E450195-000/00',
             stock: {
                 '09 BLACK': { inStock: ['S'], lowStock: ['M'], soldOut: ['L'] },
@@ -207,4 +208,14 @@ test('detail raw adds ordered per-variant rows', async () => {
         status: null, quantity: null, price: null,
     });
     assert.equal(variants[4].price, 29900);
+});
+
+test('detail marks a price group with nothing in stock as unavailable', async () => {
+    const soldOut = {
+        ...stockPayload,
+        stocks: Object.fromEntries(stockPayload.l2s.map(row => [row.l2Id, { statusCode: 'STOCK_OUT', quantity: 0 }])),
+    };
+    stubFetch(url => (url.pathname.includes('/price-groups/01/l2s') ? ok(soldOut) : router({ groups: { '00': details, '01': details } })(url)));
+    const out = await getProductDetail('E450195-000');
+    assert.deepEqual(out.priceGroups.map(g => [g.priceGroup, g.available]), [['00', true], ['01', false]]);
 });

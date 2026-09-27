@@ -51,9 +51,10 @@ node <skill-dir>/scripts/uq.mjs detail <productId|상품URL> [--pg 00] [--raw]
 node <skill-dir>/scripts/uq.mjs reviews <productId|상품URL> [--limit 1-50 (기본 10)] [--offset N] [--sort new|rating]
 ```
 
-- `productId`는 `E450195-000`, `450195`, 상품 URL 모두 받습니다.
+- `productId`는 `E450195-000`, `450195`, 상품 URL 모두 받습니다. 단, `/00`처럼 가격 그룹이 붙은 URL을 넘기면 그 그룹만 조회합니다. 사용자가 URL을 붙여넣어도 특정 그룹을 원한 게 아니면 **URL에서 `productId`만 꺼내 넘겨** 가격 인하 그룹을 놓치지 않게 합니다.
 - `--gender men`은 UNISEX 상품도 포함합니다.
 - **priceGroup**: 같은 상품이 `00`(정상가)과 `01` 등(가격 인하) 그룹으로 따로 존재할 수 있습니다. search는 그룹별로 한 줄씩, detail은 존재하는 그룹을 모두 `priceGroups`에 담습니다.
+- **`available`**: detail의 각 가격 그룹에 붙습니다. `false`면 그 그룹은 전 사이즈 품절이라 그 가격에 살 수 없습니다. 보고서의 가격은 **`available: true`인 그룹 중 가장 싼 것**을 쓰고, 재고 칸도 **같은 그룹의 `stock`**에서 가져옵니다. 더 싼 그룹이 전부 품절이면 "₩3,900 그룹은 전 사이즈 품절"처럼 따로 적습니다.
 - `discounted: true`는 실제 할인가가 정가보다 낮거나 가격 그룹이 `00`이 아닌 경우입니다. `originalPrice`가 이미 인하된 값일 수 있으니, 할인 폭은 같은 상품의 `00` 그룹 가격과 비교해 설명합니다.
 - detail의 `stock`은 컬러마다 `inStock`(재고 있음) / `lowStock`(재고 적음) / `soldOut`(품절) 사이즈 목록입니다. 수량이 필요하면 `--raw`.
 - `sizeChart.garment`는 제품 실측, `sizeChart.body`는 권장 신체 치수입니다. 실측이 없는 상품은 `null`.

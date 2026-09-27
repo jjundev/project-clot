@@ -1,7 +1,7 @@
 import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { ok, stubFetch, restoreFetch } from './helpers.mjs';
-import { searchProducts } from '../lib/search.js';
+import { brandOf, searchProducts } from '../lib/search.js';
 
 afterEach(restoreFetch);
 
@@ -103,4 +103,11 @@ test('search validates arguments', async () => {
     await assert.rejects(searchProducts('x', { gender: 'toString' }), { code: 'ARG' });
     await assert.rejects(searchProducts('x', { sort: 'cheap' }), { code: 'ARG' });
     await assert.rejects(searchProducts('x', { limit: '101' }), { code: 'ARG' });
+});
+
+test('brandOf detects GU names with or without a space after GU', () => {
+    assert.equal(brandOf('GU데님와이드카고팬츠'), 'GU');
+    assert.equal(brandOf('GU 3D배럴레그진'), 'GU');
+    assert.equal(brandOf('GUARD후리스재킷'), 'UNIQLO');
+    assert.equal(brandOf('후리스풀집재킷'), 'UNIQLO');
 });

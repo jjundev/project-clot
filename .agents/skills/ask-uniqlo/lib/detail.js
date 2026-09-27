@@ -125,11 +125,14 @@ export async function getProductDetail(ref, { priceGroup, raw = false } = {}) {
             : null,
         priceGroups: groups.map((group, i) => {
             const variants = variantRows(group.details, stockPayloads[i], group.priceGroup);
+            const stock = summarizeStock(variants);
             return {
                 priceGroup: group.priceGroup,
                 ...priceInfo(group.details.prices, group.priceGroup),
+                // A cheaper group whose every size is sold out is not a price anyone can buy at.
+                available: Object.values(stock).some(color => color.inStock.length + color.lowStock.length > 0),
                 url: productUrl(productId, group.priceGroup),
-                stock: summarizeStock(variants),
+                stock,
                 ...(raw ? { variants } : {}),
             };
         }),

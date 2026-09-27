@@ -13,7 +13,7 @@ function pick(table, value, label) {
 }
 
 export function brandOf(name) {
-    return /^GU\s/.test(name ?? '') ? 'GU' : 'UNIQLO';
+    return /^GU(?![A-Za-z])/.test(name ?? '') ? 'GU' : 'UNIQLO';
 }
 
 export function normalizeSearchItem(item) {

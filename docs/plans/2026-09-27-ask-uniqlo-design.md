@@ -31,7 +31,7 @@ C. OpenCLI 어댑터 — OpenCLI 설치 필요, 거부.
   - `sort`: 1 추천, 2 가격↑(낮은순), 3 가격↓, 4 평점순, 5 신상품
   - `path=<genderId>`: WOMEN 57892, MEN 57893, KIDS 57894, BABY 57925 (MEN 결과에 UNISEX 포함)
   - `result.items[]`: `productId, priceGroup, name, genderCategory, prices{base{value},promo{value}|null}, rating{average,count}, colors[{displayCode,name}], sizes[{name}]`; `result.pagination{total,offset,count}`
-  - promo 값이 base와 같은 경우가 있음. 같은 productId가 priceGroup 00(정상)·01(가격 인하)로 따로 나옴 (예: E482279-000 00=49,900, 01=29,900). 이름이 `GU `로 시작하는 GU 상품이 섞임.
+  - promo 값이 base와 같은 경우가 있음. 같은 productId가 priceGroup 00(정상)·01(가격 인하)로 따로 나옴 (예: E482279-000 00=49,900, 01=29,900). 이름이 `GU`로 시작하는 GU 상품이 섞임 (`GU데님…`처럼 공백 없는 경우가 대부분).
 - 상세 `GET /products/{id}/price-groups/{pg}/details` → `name, genderCategory, breadcrumbs{gender,class,category,subcategory}.locale, rating{average,count,fit,rateCount}, prices, colors[], sizes[], plds[], composition, washingInformation, careInstruction, freeInformation, longDescription, countriesOfOrigin[{code}], manufacturingDate{localizedDate}, images.main{<colorCode>:{image}}, representative.color.displayCode`. 텍스트 필드에 `<br>` 포함.
 - `productIds=<id>` 검색은 priceGroup 00만 돌려준다 → 그룹 탐색은 00–03 `details` 병렬 호출.
 - 재고 `GET /products/{id}/price-groups/{pg}/l2s?withPrices=true&withStocks=true` → `l2s[{l2Id,color{displayCode},size{displayCode},pld{displayCode}}]`, `stocks{<l2Id>:{statusCode,quantity}}`, `prices{<l2Id>:{base,promo}}`. `statusCode` 관측값: `IN_STOCK`(재고 있음), `LOW_STOCK`(재고 적음), `STOCK_OUT`(품절).
