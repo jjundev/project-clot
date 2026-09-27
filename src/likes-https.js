@@ -5,6 +5,10 @@ export const LIKED_GOODS_URL = 'https://like.musinsa.com/api2/like/like-page/v1/
 const LIKE_HOST = 'like.musinsa.com';
 const LOGGED_OUT_CODE = 'LIKE-000-0001';
 
+// The tab total lags the list right after new likes (observed +1 twice, 2026-09-27).
+// A surplus only keeps an unliked item tracked a day longer; a shortfall would mass-unlike.
+export const LIKES_TOTAL_LAG_TOLERANCE = 3;
+
 /** The liked list came back incomplete or in an unexpected shape: discard it, never apply it partially. */
 export class LikesIncompleteError extends Error {
   constructor(message) {
@@ -62,7 +66,7 @@ function checkedNext(next, seen) {
 /**
  * Every liked goods item over authenticated HTTPS (like.musinsa.com), sequentially.
  * Throws instead of returning a partial list: the caller would otherwise mark the
- * missing items UNLIKED.
+ * missing items UNLIKED. A small surplus over the total is accepted (the total lags).
  */
 export async function fetchLikedGoodsViaHttps(
   cookie,
@@ -118,8 +122,17 @@ export async function fetchLikedGoodsViaHttps(
   if (after !== expected) {
     throw new LikesIncompleteError(`liked goods total changed during paging (${expected} -> ${after ?? 'missing'})`);
   }
-  if (byGoodsNo.size !== expected) {
-    throw new LikesIncompleteError(`received ${byGoodsNo.size} of ${expected} liked goods`);
+  const received = byGoodsNo.size;
+  if (received < expected) {
+    throw new LikesIncompleteError(`received ${received} of ${expected} liked goods`);
+  }
+  if (received > expected + LIKES_TOTAL_LAG_TOLERANCE) {
+    throw new LikesIncompleteError(
+      `received ${received} liked goods, total ${expected} (more than ${LIKES_TOTAL_LAG_TOLERANCE} over)`
+    );
+  }
+  if (received > expected) {
+    console.warn(`[Sync HTTPS Notice] like total lags the list (${received} listed, total ${expected}); accepting`);
   }
   return [...byGoodsNo.values()];
 }

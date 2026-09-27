@@ -6,6 +6,7 @@ import {
   LikesIncompleteError,
   LIKES_TAB_URL,
   LIKED_GOODS_URL,
+  LIKES_TOTAL_LAG_TOLERANCE,
 } from '../src/likes-https.js';
 import { SessionExpiredError } from '../src/myprice.js';
 
@@ -44,6 +45,12 @@ function fakeFetch(route) {
 /** pages: { [url]: response }, plus the tab count */
 const routes = (count, pages) => (url) => (url === LIKES_TAB_URL ? tab(count) : pages[url] ?? { status: 404, body: null });
 const opts = (fetchFn, extra = {}) => ({ fetchFn, delayMs: 0, retryDelayMs: 0, ...extra });
+const likes = (from, to) => Array.from({ length: to - from + 1 }, (_, i) => goods(from + i));
+function captureWarn(t) {
+  const warns = [];
+  t.mock.method(console, 'warn', (...a) => warns.push(a.join(' ')));
+  return warns;
+}
 
 describe('fetchLikedGoodsViaHttps', () => {
   test('follows link.next, keeps only GOODS, maps to the sync shape', async () => {
@@ -93,7 +100,7 @@ describe('fetchLikedGoodsViaHttps', () => {
     assert.deepEqual(fetchFn.calls.map((c) => c.url), [LIKES_TAB_URL, FIRST, LIKES_TAB_URL]);
   });
 
-  test('count mismatch -> LikesIncompleteError', async () => {
+  test('fewer than the total -> LikesIncompleteError (would mass-unlike)', async () => {
     const fetchFn = fakeFetch(routes(3, { [FIRST]: page([goods(1), goods(2)]) }));
     await assert.rejects(fetchLikedGoodsViaHttps(COOKIE, opts(fetchFn)), (err) => {
       assert.ok(err instanceof LikesIncompleteError);
@@ -177,5 +184,76 @@ describe('fetchLikedGoodsViaHttps', () => {
     const started = Date.now();
     await fetchLikedGoodsViaHttps(COOKIE, opts(fetchFn, { delayMs: 40 }));
     assert.ok(Date.now() - started >= 75, 'two 40ms gaps: tab->page1, page1->page2');
+  });
+});
+
+describe('fetchLikedGoodsViaHttps: listed count vs like total', () => {
+  const NOTICE = /^\[Sync HTTPS Notice\] like total lags the list \((\d+) listed, total (\d+)\); accepting$/;
+
+  test('tolerance is 3', () => {
+    assert.equal(LIKES_TOTAL_LAG_TOLERANCE, 3);
+  });
+
+  test('equal counts -> no notice', async (t) => {
+    const warns = captureWarn(t);
+    const fetchFn = fakeFetch(routes(3, { [FIRST]: page(likes(1, 3)) }));
+    assert.equal((await fetchLikedGoodsViaHttps(COOKIE, opts(fetchFn))).length, 3);
+    assert.deepEqual(warns, []);
+  });
+
+  test('list one over the total (total API lags) -> accepted with a notice', async (t) => {
+    const warns = captureWarn(t);
+    const fetchFn = fakeFetch(routes(2, { [FIRST]: page(likes(1, 2), PAGE2), [PAGE2]: page([goods(3)]) }));
+    const items = await fetchLikedGoodsViaHttps(COOKIE, opts(fetchFn));
+    assert.deepEqual(items.map((i) => i.goodsNo), [1, 2, 3]);
+    assert.equal(warns.length, 1);
+    assert.equal(warns[0], '[Sync HTTPS Notice] like total lags the list (3 listed, total 2); accepting');
+    assert.doesNotMatch(warns[0], /cursor|c2|lastIndex|secret|app_atk|app_rtk/);
+  });
+
+  test('exactly total + tolerance -> accepted with a notice', async (t) => {
+    const warns = captureWarn(t);
+    const n = 1 + LIKES_TOTAL_LAG_TOLERANCE;
+    const fetchFn = fakeFetch(routes(1, { [FIRST]: page(likes(1, n)) }));
+    assert.equal((await fetchLikedGoodsViaHttps(COOKIE, opts(fetchFn))).length, n);
+    assert.equal(warns.length, 1);
+    assert.deepEqual(warns[0].match(NOTICE).slice(1), [String(n), '1']);
+  });
+
+  test('over total + tolerance -> LikesIncompleteError, no notice', async (t) => {
+    const warns = captureWarn(t);
+    const n = 1 + LIKES_TOTAL_LAG_TOLERANCE + 1;
+    const fetchFn = fakeFetch(routes(1, { [FIRST]: page(likes(1, n)) }));
+    await assert.rejects(fetchLikedGoodsViaHttps(COOKIE, opts(fetchFn)), (err) => {
+      assert.ok(err instanceof LikesIncompleteError);
+      assert.equal(err.message, `received ${n} liked goods, total 1 (more than ${LIKES_TOTAL_LAG_TOLERANCE} over)`);
+      return true;
+    });
+    assert.deepEqual(warns, []);
+  });
+
+  test('total 0 with a small list -> accepted with a notice', async (t) => {
+    const warns = captureWarn(t);
+    const fetchFn = fakeFetch(routes(0, { [FIRST]: page(likes(1, 2)) }));
+    assert.equal((await fetchLikedGoodsViaHttps(COOKIE, opts(fetchFn))).length, 2);
+    assert.deepEqual(warns[0].match(NOTICE).slice(1), ['2', '0']);
+  });
+
+  test('duplicates and banners never count as surplus', async (t) => {
+    const warns = captureWarn(t);
+    const fetchFn = fakeFetch(routes(2, {
+      [FIRST]: page([goods(1), { itemType: 'BANNERS' }, goods(2)], PAGE2),
+      [PAGE2]: page([goods(2), { itemType: 'AD_GOODS', content: [goods(99)] }, goods(1)]),
+    }));
+    assert.deepEqual((await fetchLikedGoodsViaHttps(COOKIE, opts(fetchFn))).map((i) => i.goodsNo), [1, 2]);
+    assert.deepEqual(warns, []);
+  });
+
+  test('a total change during paging still wins over the surplus rule', async (t) => {
+    const warns = captureWarn(t);
+    let tabHits = 0;
+    const fetchFn = fakeFetch((url) => (url === LIKES_TAB_URL ? tab(++tabHits === 1 ? 2 : 3) : page(likes(1, 3))));
+    await assert.rejects(fetchLikedGoodsViaHttps(COOKIE, opts(fetchFn)), /changed during paging \(2 -> 3\)/);
+    assert.deepEqual(warns, []);
   });
 });

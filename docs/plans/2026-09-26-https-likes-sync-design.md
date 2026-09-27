@@ -22,9 +22,21 @@ Classification: bounded — 기존 sync 흐름에 데이터 소스를 추가하�
 ## Behavior when done
 - daily(깨어 있음)·`sync`: HTTPS 먼저. 성공하면 OpenCLI·Chrome을 쓰지 않는다. 실패하면 이유를 한 줄 경고하고 기존 OpenCLI 경로(prewarm 포함)로 간다.
 - daily(deferred): HTTPS만. 실패하면 동기화를 건너뛰고 OpenCLI는 부르지 않는다.
-- 고유 상품 수 ≠ 전체 개수, 401 두 번, 스키마 불일치, 페이지 끊김 → 결과 전체를 버린다. 부분 반영 없음.
+- 고유 상품 수 < 전체 개수, 고유 상품 수 > 전체 개수 + 3, 401 두 번, 스키마 불일치, 페이지 끊김 → 결과 전체를 버린다. 부분 반영 없음. 전체 개수보다 1~3개 많은 목록은 받아들이고 알림 한 줄을 남긴다(아래 "개수 API 지연").
 - 요약 객체에 `source: 'https' | 'opencli'`만 추가.
 - deferred 실행에서 좋아요 HTTPS 동기화 성공 + VIP 가격 전부 HTTPS → `'full'` 기록(upgrade 재실행 없음). 하나라도 못 하면 `'deferred'`.
+
+### 개수 API 지연 (2026-09-27 추가)
+
+좋아요를 추가한 직후 `tab.data.goods`가 목록보다 늦게 갱신된다. 페이징 전후 총수는 같았으므로 페이징 중 변동이 아니다.
+
+| 시점 | 목록의 고유 GOODS | `tab.data.goods` | 당시 결과 |
+|---|---|---|---|
+| 아침 deferred 실행 | 113 | 112 | 목록을 버림, 동기화 건너뜀 |
+| 11시대 upgrade 실행 | 114 | 113 | 목록을 버리고 OpenCLI 폴백 |
+| 11:3x 직접 조회 | 114 | 114 | 일치 |
+
+규칙(`LIKES_TOTAL_LAG_TOLERANCE = 3`): 모자라면 버린다(대량 UNLIKED 위험). 1~3개 많으면 받아들이고 `[Sync HTTPS Notice] like total lags the list (X listed, total Y); accepting`을 남긴다. 3개를 넘게 많으면 다른 목록이 섞였거나 API가 바뀐 것으로 보고 버린다. 남는 쪽의 최악은 취소한 좋아요가 하루 더 ACTIVE로 추적되는 것이다. 총수를 기다렸다 다시 읽는 방식은 지연 폭을 몰라 택하지 않았다.
 
 ## Not in this round
 - OpenCLI 어댑터 수정·제거 (폴백으로 유지, 저장소 밖 파일)
