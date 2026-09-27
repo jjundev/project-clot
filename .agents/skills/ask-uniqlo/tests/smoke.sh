@@ -18,6 +18,7 @@ r=$("${UQ[@]}" reviews E450195-000 --limit 5 | js 'o=>o.items.length'); [ "$r" -
 md=$("${UQ[@]}" detail E481004-000 --pg 00 | js 'o=>{const g=o.priceGroups[0];return g.originalPrice>g.price&&g.discounted&&!!g.markdownSince}')
 [ "$md" = true ] && pass "detail markdown original price" || fail "detail markdown original price (E481004-000 may no longer be marked down)"
 sale=$("${UQ[@]}" search 셔츠 --sale --limit 40 | js 'o=>o.items.length>0&&o.items.every(i=>i.discounted)'); [ "$sale" = true ] && pass "search --sale" || fail "search --sale"
+lo=$("${UQ[@]}" search 크루넥T --sale --limit 100 | js 'o=>o.items.filter(i=>i.limitedOffer).every(i=>i.limitedOffer.from&&i.limitedOffer.until)'); [ "$lo" = true ] && pass "search --sale limited-offer periods" || fail "search --sale limited-offer periods"
 set +e; "${UQ[@]}" detail E999999-000 >/dev/null 2>&1; code=$?; set -e
 [ "$code" -eq 4 ] && pass "missing product exits 4" || fail "missing product exit $code"
 set +e; "${UQ[@]}" search 존재하지않는검색어zzqx >/dev/null 2>&1; code=$?; set -e

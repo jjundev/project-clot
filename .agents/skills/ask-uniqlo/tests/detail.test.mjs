@@ -126,6 +126,7 @@ test('detail returns the merged product for one price group', async () => {
             originalPrice: 39900,
             discounted: false,
             markdownSince: null,
+            limitedOffer: null,
             available: true,
             url: 'https://www.uniqlo.com/kr/ko/products/E450195-000/00',
             stock: {

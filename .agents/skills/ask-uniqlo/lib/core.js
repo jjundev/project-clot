@@ -69,6 +69,12 @@ export function markdownSince(priceFlags) {
     return flag.nameWording?.substitutions?.startDate ?? flag.name?.match(/\d{4}\/\d{2}\/\d{2}/)?.[0] ?? null;
 }
 
+// Period of a "기간한정가격" limited-time price, from a product's priceFlags.
+export function limitedOffer(priceFlags) {
+    const words = (priceFlags ?? []).find(f => f.code === 'limitedOffer')?.nameWording?.substitutions;
+    return words ? { from: words.startDate ?? null, until: words.date ?? null } : null;
+}
+
 // `base` is the pre-markdown price only when the request asked for it (l2s with
 // includePreviousPrice); elsewhere a marked-down item reports base === promo.
 export function priceInfo(prices, priceGroup, priceFlags) {
@@ -76,11 +82,13 @@ export function priceInfo(prices, priceGroup, priceFlags) {
     const promo = prices?.promo?.value ?? null;
     const promoLower = promo !== null && originalPrice !== null && promo < originalPrice;
     const since = markdownSince(priceFlags);
+    const offer = limitedOffer(priceFlags);
     return {
         price: promoLower ? promo : originalPrice,
         originalPrice,
-        discounted: promoLower || priceGroup !== '00' || since !== null,
+        discounted: promoLower || priceGroup !== '00' || since !== null || offer !== null,
         markdownSince: since,
+        limitedOffer: offer,
     };
 }
 

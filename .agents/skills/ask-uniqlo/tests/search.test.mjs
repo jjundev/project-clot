@@ -57,6 +57,7 @@ test('search normalizes items and reports meta', async () => {
         originalPrice: 39900,
         discounted: false,
         markdownSince: null,
+        limitedOffer: null,
         rating: { average: 4.7, count: 996 },
         colors: ['09 BLACK', '69 NAVY'],
         sizes: ['S', 'M'],
@@ -86,10 +87,10 @@ test('search sale keeps only discounted rows', async () => {
     assert.deepEqual(out.items.map(i => i.productId), ['E2', 'E3']);
 });
 
-test('search sale asks the API for discount-flagged products only', async () => {
+test('search sale asks the API for markdown and limited-time products', async () => {
     const calls = stubFetch(() => page([item({ priceGroup: '01' })]));
     await searchProducts('셔츠', { sale: true });
-    assert.equal(calls[0].url.searchParams.get('flagCodes'), 'discount');
+    assert.equal(calls[0].url.searchParams.get('flagCodes'), 'discount,limitedOffer');
     await searchProducts('셔츠');
     assert.equal(calls[1].url.searchParams.has('flagCodes'), false);
 });
@@ -105,6 +106,13 @@ test('search marks marked-down rows and hides the unknown original price', async
         [row.price, row.originalPrice, row.discounted, row.markdownSince],
         [29900, null, true, '2026/08/27'],
     );
+});
+
+test('search hides the unknown original price of a limited-time price too', async () => {
+    const flags = { priceFlags: [{ code: 'limitedOffer', nameWording: { substitutions: { startDate: '2026/09/24', date: '2026/10/01' } } }] };
+    stubFetch(() => page([item({ prices: { base: { value: 14900 }, promo: { value: 14900 } }, representative: { flags } })]));
+    const [row] = (await searchProducts('크루넥T')).items;
+    assert.deepEqual([row.originalPrice, row.discounted, row.limitedOffer], [null, true, { from: '2026/09/24', until: '2026/10/01' }]);
 });
 
 test('search with zero API results is EMPTY', async () => {

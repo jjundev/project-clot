@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { ok, httpStatus, stubFetch, restoreFetch } from './helpers.mjs';
 import {
     API_BASE, USER_AGENT, apiUrl, fetchJson, stripHtml, parseProductRef, requirePriceGroup,
-    requireBoundedInteger, markdownSince, priceInfo, colorLabel, productUrl, kstTimestamp,
+    requireBoundedInteger, limitedOffer, markdownSince, priceInfo, colorLabel, productUrl, kstTimestamp,
 } from '../lib/core.js';
 
 afterEach(restoreFetch);
@@ -94,7 +94,7 @@ test('requireBoundedInteger applies default and bounds', () => {
 
 test('priceInfo marks real promos and non-00 price groups as discounted', () => {
     const base = value => ({ base: { value }, promo: null });
-    const info = (price, originalPrice, discounted, markdownSince = null) => ({ price, originalPrice, discounted, markdownSince });
+    const info = (price, originalPrice, discounted, markdownSince = null) => ({ price, originalPrice, discounted, markdownSince, limitedOffer: null });
     assert.deepEqual(priceInfo(base(39900), '00'), info(39900, 39900, false));
     assert.deepEqual(priceInfo({ base: { value: 49900 }, promo: { value: 49900 } }, '00'), info(49900, 49900, false));
     assert.deepEqual(priceInfo({ base: { value: 49900 }, promo: { value: 39900 } }, '00'), info(39900, 49900, true));
@@ -119,11 +119,30 @@ test('priceInfo treats a markdown flag as discounted even when base equals promo
     const flags = [markdownFlag('2026/08/27')];
     assert.deepEqual(
         priceInfo({ base: { value: 29900 }, promo: { value: 29900 }, isDualPrice: false }, '00', flags),
-        { price: 29900, originalPrice: 29900, discounted: true, markdownSince: '2026/08/27' },
+        { price: 29900, originalPrice: 29900, discounted: true, markdownSince: '2026/08/27', limitedOffer: null },
     );
     assert.deepEqual(
         priceInfo({ base: { value: 39900 }, promo: { value: 29900 }, isDualPrice: true }, '00', flags),
-        { price: 29900, originalPrice: 39900, discounted: true, markdownSince: '2026/08/27' },
+        { price: 29900, originalPrice: 39900, discounted: true, markdownSince: '2026/08/27', limitedOffer: null },
+    );
+});
+
+const limitedFlag = {
+    code: 'limitedOffer',
+    name: '',
+    nameWording: { substitutions: { flagName: '기간한정가격', startDate: '2026/09/24', date: '2026/10/01' } },
+};
+
+test('limitedOffer reads the period of a limited-time price flag', () => {
+    assert.deepEqual(limitedOffer([limitedFlag]), { from: '2026/09/24', until: '2026/10/01' });
+    assert.equal(limitedOffer([markdownFlag('2026/08/27')]), null);
+    assert.equal(limitedOffer(undefined), null);
+});
+
+test('priceInfo treats a limited-time price as discounted', () => {
+    assert.deepEqual(
+        priceInfo({ base: { value: 14900 }, promo: { value: 14900 }, isDualPrice: false }, '00', [limitedFlag]),
+        { price: 14900, originalPrice: 14900, discounted: true, markdownSince: null, limitedOffer: { from: '2026/09/24', until: '2026/10/01' } },
     );
 });
 
