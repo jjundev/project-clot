@@ -226,7 +226,7 @@ describe('fetchLikedGoodsViaHttps: listed count vs like total', () => {
     const fetchFn = fakeFetch(routes(1, { [FIRST]: page(likes(1, n)) }));
     await assert.rejects(fetchLikedGoodsViaHttps(COOKIE, opts(fetchFn)), (err) => {
       assert.ok(err instanceof LikesIncompleteError);
-      assert.equal(err.message, `received ${n} liked goods, total 1 (more than ${LIKES_TOTAL_LAG_TOLERANCE} over)`);
+      assert.equal(err.message, `received ${n} of 1 liked goods (more than ${LIKES_TOTAL_LAG_TOLERANCE} over)`);
       return true;
     });
     assert.deepEqual(warns, []);

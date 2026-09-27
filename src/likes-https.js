@@ -129,7 +129,7 @@ export async function fetchLikedGoodsViaHttps(
   }
   if (received > expected + LIKES_TOTAL_LAG_TOLERANCE) {
     throw new LikesIncompleteError(
-      `received ${received} liked goods, total ${expected} (more than ${LIKES_TOTAL_LAG_TOLERANCE} over)`
+      `received ${received} of ${expected} liked goods (more than ${LIKES_TOTAL_LAG_TOLERANCE} over)`
     );
   }
   if (received > expected) {
