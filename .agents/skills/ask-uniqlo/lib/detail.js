@@ -83,9 +83,18 @@ function variantRows(details, stockPayload, priceGroup) {
                 communicationCode: l2.communicationCode ?? null,
                 status: stock?.statusCode ?? null,
                 quantity: stock?.quantity ?? null,
-                price: priceInfo(stockPayload.prices?.[l2.l2Id], priceGroup).price,
+                ...pick(priceInfo(stockPayload.prices?.[l2.l2Id], priceGroup), 'price', 'originalPrice'),
             };
         });
+}
+
+const pick = (object, ...keys) => Object.fromEntries(keys.map(key => [key, object[key]]));
+
+// details only carry the current price; the pre-markdown one comes from a variant sold at it.
+function groupPrice(details, variants, priceGroup) {
+    const info = priceInfo(details.prices, priceGroup, details.representative?.flags?.priceFlags);
+    const previous = variants.find(v => v.price === info.price && v.originalPrice > info.price)?.originalPrice;
+    return previous ? { ...info, originalPrice: previous, discounted: true } : info;
 }
 
 export function summarizeStock(variants) {
@@ -108,6 +117,7 @@ export async function getProductDetail(ref, { priceGroup, raw = false } = {}) {
         Promise.all(groups.map(group => fetchJson(apiUrl(`/products/${productId}/price-groups/${group.priceGroup}/l2s`, {
             withPrices: 'true',
             withStocks: 'true',
+            includePreviousPrice: 'true',
         })))),
         fetchSizeChart(productId),
     ]);
@@ -132,7 +142,7 @@ export async function getProductDetail(ref, { priceGroup, raw = false } = {}) {
             const stock = summarizeStock(variants);
             return {
                 priceGroup: group.priceGroup,
-                ...priceInfo(group.details.prices, group.priceGroup),
+                ...groupPrice(group.details, variants, group.priceGroup),
                 // A cheaper group whose every size is sold out is not a price anyone can buy at.
                 available: Object.values(stock).some(color => color.inStock.length + color.lowStock.length > 0),
                 url: productUrl(productId, group.priceGroup),

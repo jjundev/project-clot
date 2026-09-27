@@ -81,6 +81,33 @@ function router({ groups = { '00': details }, stock = stockPayload, charts = () 
     };
 }
 
+test('detail asks l2s for previous prices', async () => {
+    const calls = stubFetch(router());
+    await getProductDetail('E450195-000', { priceGroup: '00' });
+    const l2sCall = calls.find(c => c.url.pathname.endsWith('/l2s'));
+    assert.equal(l2sCall.url.searchParams.get('includePreviousPrice'), 'true');
+});
+
+test('detail reports the pre-markdown price and start date of a marked-down group', async () => {
+    // Real shape for E481004-000/00: details carry only the current price, l2s carry the previous one.
+    const markedDown = {
+        ...details,
+        prices: { base: { value: 29900 }, promo: { value: 29900 }, isDualPrice: false },
+        representative: {
+            color: { displayCode: '69' },
+            flags: { priceFlags: [{ code: 'discount', name: '2026/08/27부터 가격인하', nameWording: { substitutions: { startDate: '2026/08/27' } } }] },
+        },
+    };
+    const dual = { base: { value: 39900 }, promo: { value: 29900 }, isDualPrice: true };
+    const stock = { ...stockPayload, prices: Object.fromEntries(stockPayload.l2s.map(row => [row.l2Id, dual])) };
+    stubFetch(router({ groups: { '00': markedDown }, stock }));
+    const [group] = (await getProductDetail('E481004-000', { priceGroup: '00' })).priceGroups;
+    assert.deepEqual(
+        [group.price, group.originalPrice, group.discounted, group.markdownSince],
+        [29900, 39900, true, '2026/08/27'],
+    );
+});
+
 const detailCalls = calls => calls.filter(c => c.url.pathname.endsWith('/details')).map(c => c.url.pathname.match(/groups\/(\d\d)/)[1]);
 
 test('detail returns the merged product for one price group', async () => {
@@ -98,6 +125,7 @@ test('detail returns the merged product for one price group', async () => {
             price: 39900,
             originalPrice: 39900,
             discounted: false,
+            markdownSince: null,
             available: true,
             url: 'https://www.uniqlo.com/kr/ko/products/E450195-000/00',
             stock: {
@@ -202,13 +230,13 @@ test('detail raw adds ordered per-variant rows', async () => {
     assert.deepEqual(variants.map(v => v.l2Id), ['a0', 'a1', 'a2', 'a4', 'a3']);
     assert.deepEqual(variants[0], {
         color: '09 BLACK', size: 'S', l2Id: 'a0', communicationCode: '450195-09-003-000',
-        status: 'IN_STOCK', quantity: 11, price: 39900,
+        status: 'IN_STOCK', quantity: 11, price: 39900, originalPrice: 39900,
     });
     assert.deepEqual(variants[3], {
         color: '69 NAVY', size: 'S', l2Id: 'a4', communicationCode: '450195-69-003-000',
-        status: null, quantity: null, price: null,
+        status: null, quantity: null, price: null, originalPrice: null,
     });
-    assert.equal(variants[4].price, 29900);
+    assert.deepEqual([variants[4].price, variants[4].originalPrice], [29900, 39900]);
 });
 
 test('detail marks a price group with nothing in stock as unavailable', async () => {

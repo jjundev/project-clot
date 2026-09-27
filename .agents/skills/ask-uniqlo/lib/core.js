@@ -62,14 +62,25 @@ export function colorLabel(color) {
     return `${color.displayCode} ${color.name}`;
 }
 
-export function priceInfo(prices, priceGroup) {
+// Start date ("2026/08/27") of a "가격인하" markdown, from a product's priceFlags.
+export function markdownSince(priceFlags) {
+    const flag = (priceFlags ?? []).find(f => f.code === 'discount');
+    if (!flag) return null;
+    return flag.nameWording?.substitutions?.startDate ?? flag.name?.match(/\d{4}\/\d{2}\/\d{2}/)?.[0] ?? null;
+}
+
+// `base` is the pre-markdown price only when the request asked for it (l2s with
+// includePreviousPrice); elsewhere a marked-down item reports base === promo.
+export function priceInfo(prices, priceGroup, priceFlags) {
     const originalPrice = prices?.base?.value ?? null;
     const promo = prices?.promo?.value ?? null;
     const promoLower = promo !== null && originalPrice !== null && promo < originalPrice;
+    const since = markdownSince(priceFlags);
     return {
         price: promoLower ? promo : originalPrice,
         originalPrice,
-        discounted: promoLower || priceGroup !== '00',
+        discounted: promoLower || priceGroup !== '00' || since !== null,
+        markdownSince: since,
     };
 }
 

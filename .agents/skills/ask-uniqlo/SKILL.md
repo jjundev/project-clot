@@ -55,7 +55,10 @@ node <skill-dir>/scripts/uq.mjs reviews <productId|상품URL> [--limit 1-25 (기
 - `--gender men`은 UNISEX 상품도 포함합니다.
 - **priceGroup**: 같은 상품이 `00`(정상가)과 `01` 등(가격 인하) 그룹으로 따로 존재할 수 있습니다. search는 그룹별로 한 줄씩, detail은 존재하는 그룹을 모두 `priceGroups`에 담습니다.
 - **`available`**: detail의 각 가격 그룹에 붙습니다. `false`면 그 그룹은 전 사이즈 품절이라 그 가격에 살 수 없습니다. 보고서의 가격은 **`available: true`인 그룹 중 가장 싼 것**을 쓰고, 재고 칸도 **같은 그룹의 `stock`**에서 가져옵니다. 더 싼 그룹이 전부 품절이면 "₩3,900 그룹은 전 사이즈 품절"처럼 따로 적습니다.
-- `discounted: true`는 실제 할인가가 정가보다 낮거나 가격 그룹이 `00`이 아닌 경우입니다. `originalPrice`가 이미 인하된 값일 수 있으니, 할인 폭은 같은 상품의 `00` 그룹 가격과 비교해 설명합니다.
+- **할인**: `discounted: true`는 가격인하 중(`markdownSince`에 "2026/08/27" 같은 시작일)이거나, 판매가가 `originalPrice`보다 낮거나, 가격 그룹이 `00`이 아닌 경우입니다.
+  - detail의 `originalPrice`는 인하 전 가격입니다. 할인 폭은 이 값으로 설명합니다.
+  - search는 인하 전 가격을 모릅니다. 가격인하 상품은 `originalPrice: null`이니, 할인 폭이 필요하면 detail을 조회합니다. search 결과만으로 할인 폭을 단정하지 않습니다.
+  - `--sale`은 서버에서 가격인하 상품만 걸러오므로 `meta.total`이 할인 상품 수입니다. 이 API에는 기획전·이벤트(예: 추석 할인) 정보가 없으니, 할인이 특정 행사 때문인지는 말하지 않습니다.
 - detail의 `stock`은 컬러마다 `inStock`(재고 있음) / `lowStock`(재고 적음) / `soldOut`(품절) 사이즈 목록입니다. 수량이 필요하면 `--raw`.
 - `sizeChart.garment`는 제품 실측, `sizeChart.body`는 권장 신체 치수입니다. 실측이 없는 상품은 `null`.
 
@@ -77,7 +80,7 @@ node <skill-dir>/scripts/uq.mjs reviews <productId|상품URL> [--limit 1-25 (기
 | 상품 | 가격 | 평점 | 재고 있는 사이즈 | 핵심 실측 (M 기준) |
 | :--- | :--- | :--- | :--- | :--- |
 | [후리스풀집재킷](URL) E450195-000 | ₩39,900 | ★4.7 (996) | BLACK: S·M·L / NAVY: L | 총장 67.5 · 가슴너비 56 · 소매 82 |
-| [상품명](URL) | ~~₩49,900~~ **₩29,900** (가격 인하) | ... | ... | ... |
+| [상품명](URL) | ~~₩39,900~~ **₩29,900** (08/27부터 가격인하) | ... | ... | ... |
 
 ### <상품명>
 - 소재: ...

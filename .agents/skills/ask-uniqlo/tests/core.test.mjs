@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { ok, httpStatus, stubFetch, restoreFetch } from './helpers.mjs';
 import {
     API_BASE, USER_AGENT, apiUrl, fetchJson, stripHtml, parseProductRef, requirePriceGroup,
-    requireBoundedInteger, priceInfo, colorLabel, productUrl, kstTimestamp,
+    requireBoundedInteger, markdownSince, priceInfo, colorLabel, productUrl, kstTimestamp,
 } from '../lib/core.js';
 
 afterEach(restoreFetch);
@@ -94,17 +94,37 @@ test('requireBoundedInteger applies default and bounds', () => {
 
 test('priceInfo marks real promos and non-00 price groups as discounted', () => {
     const base = value => ({ base: { value }, promo: null });
-    assert.deepEqual(priceInfo(base(39900), '00'), { price: 39900, originalPrice: 39900, discounted: false });
+    const info = (price, originalPrice, discounted, markdownSince = null) => ({ price, originalPrice, discounted, markdownSince });
+    assert.deepEqual(priceInfo(base(39900), '00'), info(39900, 39900, false));
+    assert.deepEqual(priceInfo({ base: { value: 49900 }, promo: { value: 49900 } }, '00'), info(49900, 49900, false));
+    assert.deepEqual(priceInfo({ base: { value: 49900 }, promo: { value: 39900 } }, '00'), info(39900, 49900, true));
+    assert.deepEqual(priceInfo(base(29900), '01'), info(29900, 29900, true));
+    assert.deepEqual(priceInfo(undefined, '00'), info(null, null, false));
+});
+
+const markdownFlag = startDate => ({
+    code: 'discount',
+    name: `${startDate}부터 가격인하`,
+    nameWording: { substitutions: { flagName: '가격인하', startDate } },
+});
+
+test('markdownSince reads the start date of the discount price flag', () => {
+    assert.equal(markdownSince([{ code: 'colorSizeLimitedPrice' }, markdownFlag('2026/08/27')]), '2026/08/27');
+    assert.equal(markdownSince([{ code: 'discount', name: '2026/09/22부터 가격인하' }]), '2026/09/22');
+    assert.equal(markdownSince([{ code: 'colorSizeLimitedPrice' }]), null);
+    assert.equal(markdownSince(undefined), null);
+});
+
+test('priceInfo treats a markdown flag as discounted even when base equals promo', () => {
+    const flags = [markdownFlag('2026/08/27')];
     assert.deepEqual(
-        priceInfo({ base: { value: 49900 }, promo: { value: 49900 } }, '00'),
-        { price: 49900, originalPrice: 49900, discounted: false },
+        priceInfo({ base: { value: 29900 }, promo: { value: 29900 }, isDualPrice: false }, '00', flags),
+        { price: 29900, originalPrice: 29900, discounted: true, markdownSince: '2026/08/27' },
     );
     assert.deepEqual(
-        priceInfo({ base: { value: 49900 }, promo: { value: 39900 } }, '00'),
-        { price: 39900, originalPrice: 49900, discounted: true },
+        priceInfo({ base: { value: 39900 }, promo: { value: 29900 }, isDualPrice: true }, '00', flags),
+        { price: 29900, originalPrice: 39900, discounted: true, markdownSince: '2026/08/27' },
     );
-    assert.deepEqual(priceInfo(base(29900), '01'), { price: 29900, originalPrice: 29900, discounted: true });
-    assert.deepEqual(priceInfo(undefined, '00'), { price: null, originalPrice: null, discounted: false });
 });
 
 test('colorLabel and productUrl', () => {

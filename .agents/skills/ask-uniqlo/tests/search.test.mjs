@@ -56,6 +56,7 @@ test('search normalizes items and reports meta', async () => {
         price: 39900,
         originalPrice: 39900,
         discounted: false,
+        markdownSince: null,
         rating: { average: 4.7, count: 996 },
         colors: ['09 BLACK', '69 NAVY'],
         sizes: ['S', 'M'],
@@ -83,6 +84,27 @@ test('search sale keeps only discounted rows', async () => {
     stubFetch(() => page(items));
     const out = await searchProducts('진', { sale: true });
     assert.deepEqual(out.items.map(i => i.productId), ['E2', 'E3']);
+});
+
+test('search sale asks the API for discount-flagged products only', async () => {
+    const calls = stubFetch(() => page([item({ priceGroup: '01' })]));
+    await searchProducts('셔츠', { sale: true });
+    assert.equal(calls[0].url.searchParams.get('flagCodes'), 'discount');
+    await searchProducts('셔츠');
+    assert.equal(calls[1].url.searchParams.has('flagCodes'), false);
+});
+
+test('search marks marked-down rows and hides the unknown original price', async () => {
+    const flags = { priceFlags: [{ code: 'discount', name: '2026/08/27부터 가격인하', nameWording: { substitutions: { startDate: '2026/08/27' } } }] };
+    stubFetch(() => page([item({
+        prices: { base: { value: 29900 }, promo: { value: 29900 }, isDualPrice: false },
+        representative: { flags },
+    })]));
+    const [row] = (await searchProducts('니트')).items;
+    assert.deepEqual(
+        [row.price, row.originalPrice, row.discounted, row.markdownSince],
+        [29900, null, true, '2026/08/27'],
+    );
 });
 
 test('search with zero API results is EMPTY', async () => {

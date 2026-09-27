@@ -17,13 +17,16 @@ export function brandOf(name) {
 }
 
 export function normalizeSearchItem(item) {
+    const price = priceInfo(item.prices, item.priceGroup, item.representative?.flags?.priceFlags);
+    // Search never returns the pre-markdown price; don't pass the current one off as it.
+    if (price.markdownSince && !item.prices?.isDualPrice) price.originalPrice = null;
     return {
         productId: item.productId,
         priceGroup: item.priceGroup,
         name: item.name,
         brand: brandOf(item.name),
         gender: item.genderCategory ?? null,
-        ...priceInfo(item.prices, item.priceGroup),
+        ...price,
         rating: item.rating ? { average: item.rating.average, count: item.rating.count } : null,
         colors: (item.colors ?? []).map(colorLabel),
         sizes: (item.sizes ?? []).map(size => size.name),
@@ -39,7 +42,9 @@ export async function searchProducts(query, { limit, offset, gender, sort, sale 
     const path = pick(GENDER_PATHS, gender, 'gender');
     const sortCode = pick(SORT_CODES, sort, 'sort');
 
-    const result = await fetchJson(apiUrl('/products', { q, limit: size, offset: start, sort: sortCode, path }));
+    const result = await fetchJson(apiUrl('/products', {
+        q, limit: size, offset: start, sort: sortCode, path, flagCodes: sale ? 'discount' : undefined,
+    }));
     const all = (result.items ?? []).map(normalizeSearchItem);
     const items = all.filter(item => (includeGu || item.brand !== 'GU') && (!sale || item.discounted));
     const total = result.pagination?.total ?? all.length;
