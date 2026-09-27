@@ -1,6 +1,6 @@
 // `detail` command: product details + per-color/size online stock + size chart.
 import {
-    UqError, apiUrl, colorLabel, fetchJson, parseProductRef, priceInfo, productUrl, requirePriceGroup, stripHtml,
+    UqError, apiUrl, colorLabel, fetchJson, kstTimestamp, parseProductRef, priceInfo, productUrl, requirePriceGroup, stripHtml,
 } from './core.js';
 
 // `productIds=` lookups only return group 00, so other groups are found by probing.
@@ -28,11 +28,14 @@ function measurementText(measurements = []) {
     return measurement ? `${measurement.value}${measurement.unit ?? ''}` : null;
 }
 
+// Labels such as "숄더 스트랩 길이<br>(최대)" carry markup; keep them on one line.
+const label = text => stripHtml(text)?.replace(/\n/g, ' ') ?? String(text ?? '');
+
 function sizeTable(rows) {
     if (!rows?.length) return null;
     return Object.fromEntries(rows.map(row => [
-        row.name,
-        Object.fromEntries((row.sizeParts ?? []).map(part => [part.name, measurementText(part.measurements)])),
+        label(row.name),
+        Object.fromEntries((row.sizeParts ?? []).map(part => [label(part.name), measurementText(part.measurements)])),
     ]));
 }
 
@@ -117,6 +120,7 @@ export async function getProductDetail(ref, { priceGroup, raw = false } = {}) {
 
     return {
         productId,
+        fetchedAt: kstTimestamp(),
         name: base.name,
         gender: base.genderCategory ?? null,
         category: ['gender', 'class', 'category', 'subcategory'].map(key => crumbs[key]?.locale).filter(Boolean).join(' > ') || null,

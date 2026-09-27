@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { ok, httpStatus, stubFetch, restoreFetch } from './helpers.mjs';
 import {
     API_BASE, USER_AGENT, apiUrl, fetchJson, stripHtml, parseProductRef, requirePriceGroup,
-    requireBoundedInteger, priceInfo, colorLabel, productUrl,
+    requireBoundedInteger, priceInfo, colorLabel, productUrl, kstTimestamp,
 } from '../lib/core.js';
 
 afterEach(restoreFetch);
@@ -111,4 +111,9 @@ test('colorLabel and productUrl', () => {
     assert.equal(colorLabel({ displayCode: '09', name: 'BLACK' }), '09 BLACK');
     assert.equal(productUrl('E450195-000', '01'), 'https://www.uniqlo.com/kr/ko/products/E450195-000/01');
     assert.equal(productUrl('E450195-000'), 'https://www.uniqlo.com/kr/ko/products/E450195-000/00');
+});
+
+test('kstTimestamp formats an instant in Korea time', () => {
+    assert.equal(kstTimestamp(new Date('2026-09-28T00:30:05Z')), '2026-09-28T09:30:05+09:00');
+    assert.equal(kstTimestamp(new Date('2026-09-27T15:00:00Z')), '2026-09-28T00:00:00+09:00');
 });

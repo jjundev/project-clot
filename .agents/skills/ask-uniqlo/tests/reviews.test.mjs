@@ -45,7 +45,9 @@ test('reviews maps sort=rating to the API value', async () => {
 test('reviews normalizes rows and meta', async () => {
     stubFetch(() => payload([review]));
     const out = await getReviews('E450195-000');
-    assert.deepEqual(out.meta, {
+    const { fetchedAt, ...meta } = out.meta;
+    assert.match(fetchedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+09:00$/);
+    assert.deepEqual(meta, {
         productId: 'E450195-000',
         total: 996,
         offset: 0,
@@ -76,5 +78,14 @@ test('reviews validates arguments', async () => {
     stubFetch(() => payload([review]));
     await assert.rejects(getReviews('E450195-000', { sort: 'helpful' }), { code: 'ARG' });
     await assert.rejects(getReviews('E450195-000', { limit: '51' }), { code: 'ARG' });
+    // The API answers HTTP 400 above 25 per page.
+    await assert.rejects(getReviews('E450195-000', { limit: '26' }), { code: 'ARG' });
+    assert.equal((await getReviews('E450195-000', { limit: '25' })).items.length, 1);
     await assert.rejects(getReviews('nope'), { code: 'ARG' });
+});
+
+test('reviews treats the unset gender marker as blank', async () => {
+    stubFetch(() => payload([{ ...review, gender: '선택하지않음' }]));
+    const out = await getReviews('E450195-000');
+    assert.equal(out.items[0].gender, null);
 });

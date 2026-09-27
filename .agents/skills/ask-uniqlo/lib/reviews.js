@@ -1,10 +1,12 @@
 // `reviews` command: customer reviews for one product (not tied to a price group).
-import { UqError, apiUrl, fetchJson, parseProductRef, requireBoundedInteger } from './core.js';
+import { UqError, apiUrl, fetchJson, kstTimestamp, parseProductRef, requireBoundedInteger } from './core.js';
 
 // Only the sort values the API was observed to accept; others return status "nok".
 export const REVIEW_SORTS = { new: 'submission_time', rating: 'rating' };
 
-const blank = value => (value === undefined || value === null || String(value).trim() === '' || value === '-' ? null : value);
+// '-' and '선택하지않음' are the API's markers for a field the reviewer left unset.
+const BLANK_MARKERS = new Set(['', '-', '선택하지않음']);
+const blank = value => (value === undefined || value === null || BLANK_MARKERS.has(String(value).trim()) ? null : value);
 
 export function normalizeReview(review) {
     return {
@@ -24,7 +26,7 @@ export function normalizeReview(review) {
 
 export async function getReviews(ref, { limit, offset, sort = 'new' } = {}) {
     const { productId } = parseProductRef(ref);
-    const size = requireBoundedInteger(limit, 10, 1, 50, 'limit');
+    const size = requireBoundedInteger(limit, 10, 1, 25, 'limit');
     const start = requireBoundedInteger(offset, 0, 0, 100000, 'offset');
     if (!Object.hasOwn(REVIEW_SORTS, sort)) {
         throw new UqError('ARG', `sort must be one of: ${Object.keys(REVIEW_SORTS).join(', ')}`);
@@ -38,6 +40,7 @@ export async function getReviews(ref, { limit, offset, sort = 'new' } = {}) {
     return {
         meta: {
             productId,
+            fetchedAt: kstTimestamp(),
             total: result.pagination?.total ?? items.length,
             offset: start,
             count: items.length,

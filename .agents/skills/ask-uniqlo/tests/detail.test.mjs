@@ -85,7 +85,8 @@ const detailCalls = calls => calls.filter(c => c.url.pathname.endsWith('/details
 
 test('detail returns the merged product for one price group', async () => {
     stubFetch(router());
-    const out = await getProductDetail('E450195-000');
+    const { fetchedAt, ...out } = await getProductDetail('E450195-000');
+    assert.match(fetchedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+09:00$/);
     assert.deepEqual(out, {
         productId: 'E450195-000',
         name: '후리스풀집재킷',
@@ -218,4 +219,13 @@ test('detail marks a price group with nothing in stock as unavailable', async ()
     stubFetch(url => (url.pathname.includes('/price-groups/01/l2s') ? ok(soldOut) : router({ groups: { '00': details, '01': details } })(url)));
     const out = await getProductDetail('E450195-000');
     assert.deepEqual(out.priceGroups.map(g => [g.priceGroup, g.available]), [['00', true], ['01', false]]);
+});
+
+test('detail strips <br> from size chart labels', async () => {
+    const bag = [{ sizeChart: [{ name: 'FREE', sizeParts: [
+        { name: '숄더 스트랩 길이<br>(최대)', measurements: [{ value: '120', unit: 'cm' }] },
+    ] }] }];
+    stubFetch(router({ charts: () => ok(bag) }));
+    const out = await getProductDetail('E450195-000', { priceGroup: '00' });
+    assert.deepEqual(out.sizeChart.garment, { FREE: { '숄더 스트랩 길이 (최대)': '120cm' } });
 });

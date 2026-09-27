@@ -44,7 +44,9 @@ test('search omits sort and path by default and uses limit 20', async () => {
 test('search normalizes items and reports meta', async () => {
     stubFetch(() => page([item()], 36));
     const out = await searchProducts('후리스');
-    assert.deepEqual(out.meta, { query: '후리스', total: 36, offset: 0, count: 1, hidden: 0 });
+    const { fetchedAt, ...meta } = out.meta;
+    assert.match(fetchedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+09:00$/);
+    assert.deepEqual(meta, { query: '후리스', total: 36, offset: 0, count: 1, hidden: 0 });
     assert.deepEqual(out.items[0], {
         productId: 'E450195-000',
         priceGroup: '00',

@@ -11,7 +11,7 @@ export const USAGE = `usage:
   uq.mjs search <검색어...> [--limit <1-100>] [--offset <n>] [--gender men|women|kids|baby]
                            [--sort recommended|price-asc|price-desc|rating|new] [--sale] [--include-gu]
   uq.mjs detail <productId|URL> [--pg <00-03>] [--raw]
-  uq.mjs reviews <productId|URL> [--limit <1-50>] [--offset <n>] [--sort new|rating]`;
+  uq.mjs reviews <productId|URL> [--limit <1-25>] [--offset <n>] [--sort new|rating]`;
 
 const COMMANDS = {
     search: {

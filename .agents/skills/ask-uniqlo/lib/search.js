@@ -1,5 +1,5 @@
 // `search` command: keyword search over UNIQLO KR products.
-import { UqError, apiUrl, colorLabel, fetchJson, priceInfo, productUrl, requireBoundedInteger } from './core.js';
+import { UqError, apiUrl, colorLabel, fetchJson, kstTimestamp, priceInfo, productUrl, requireBoundedInteger } from './core.js';
 
 export const GENDER_PATHS = { women: '57892', men: '57893', kids: '57894', baby: '57925' };
 export const SORT_CODES = { recommended: '1', 'price-asc': '2', 'price-desc': '3', rating: '4', new: '5' };
@@ -54,5 +54,5 @@ export async function searchProducts(query, { limit, offset, gender, sort, sale 
         }
         throw new UqError('EMPTY', message);
     }
-    return { meta: { query: q, total, offset: start, count: items.length, hidden: all.length - items.length }, items };
+    return { meta: { query: q, fetchedAt: kstTimestamp(), total, offset: start, count: items.length, hidden: all.length - items.length }, items };
 }

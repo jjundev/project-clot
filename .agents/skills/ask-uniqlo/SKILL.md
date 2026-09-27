@@ -15,7 +15,7 @@ description: >
 ## 원칙
 
 1. **공식 데이터만**: 유니클로 KR API 결과만 사용합니다. 결과에 없는 정보(매장 재고, 다른 쇼핑몰 가격, 추측한 실측)는 만들지 않습니다.
-2. **조회 시점 명시**: 가격·재고는 조회 시점 값입니다. 보고서에 조회 시각을 적습니다.
+2. **조회 시점 명시**: 가격·재고는 조회 시점 값입니다. 보고서 제목의 시각은 JSON의 `fetchedAt`(한국 시간, search·reviews는 `meta.fetchedAt`, detail은 최상위)을 그대로 옮기고, 직접 짐작하지 않습니다.
 3. **온라인 재고만**: 매장 재고는 지원하지 않습니다. 물어보면 온라인 재고만 확인 가능하다고 답합니다.
 4. **GU 제외가 기본**: 사용자가 GU를 원할 때만 `--include-gu`를 붙입니다.
 
@@ -48,7 +48,7 @@ node <skill-dir>/scripts/uq.mjs search <검색어...> [--limit 1-100 (기본 20)
 node <skill-dir>/scripts/uq.mjs detail <productId|상품URL> [--pg 00] [--raw]
 
 # 리뷰
-node <skill-dir>/scripts/uq.mjs reviews <productId|상품URL> [--limit 1-50 (기본 10)] [--offset N] [--sort new|rating]
+node <skill-dir>/scripts/uq.mjs reviews <productId|상품URL> [--limit 1-25 (기본 10)] [--offset N] [--sort new|rating]
 ```
 
 - `productId`는 `E450195-000`, `450195`, 상품 URL 모두 받습니다. 단, `/00`처럼 가격 그룹이 붙은 URL을 넘기면 그 그룹만 조회합니다. 사용자가 URL을 붙여넣어도 특정 그룹을 원한 게 아니면 **URL에서 `productId`만 꺼내 넘겨** 가격 인하 그룹을 놓치지 않게 합니다.
@@ -72,7 +72,7 @@ node <skill-dir>/scripts/uq.mjs reviews <productId|상품URL> [--limit 1-50 (기
 ## 3. 보고서 형식
 
 ```markdown
-## 유니클로 "<검색어>" 조회 결과 (<YYYY-MM-DD HH:mm> 기준)
+## 유니클로 "<검색어>" 조회 결과 (<fetchedAt의 YYYY-MM-DD HH:mm> 기준)
 
 | 상품 | 가격 | 평점 | 재고 있는 사이즈 | 핵심 실측 (M 기준) |
 | :--- | :--- | :--- | :--- | :--- |

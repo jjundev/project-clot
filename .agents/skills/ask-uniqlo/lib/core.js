@@ -49,6 +49,11 @@ export function parseProductRef(input) {
 
 // ---------- formatting ----------
 
+// Lookup time in Korea time, e.g. 2026-09-28T09:30:05+09:00, so reports never guess it.
+export function kstTimestamp(now = new Date()) {
+    return `${new Date(now.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 19)}+09:00`;
+}
+
 export function productUrl(productId, priceGroup = '00') {
     return `${SITE_BASE}/products/${productId}/${priceGroup}`;
 }

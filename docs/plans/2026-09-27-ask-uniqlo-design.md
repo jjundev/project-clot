@@ -36,7 +36,7 @@ C. OpenCLI 어댑터 — OpenCLI 설치 필요, 거부.
 - `productIds=<id>` 검색은 priceGroup 00만 돌려준다 → 그룹 탐색은 00–03 `details` 병렬 호출.
 - 재고 `GET /products/{id}/price-groups/{pg}/l2s?withPrices=true&withStocks=true` → `l2s[{l2Id,color{displayCode},size{displayCode},pld{displayCode}}]`, `stocks{<l2Id>:{statusCode,quantity}}`, `prices{<l2Id>:{base,promo}}`. `statusCode` 관측값: `IN_STOCK`(재고 있음), `LOW_STOCK`(재고 적음), `STOCK_OUT`(품절).
 - 사이즈표 `GET /products/size-charts?productIdsWithColorCode={id}&includeBodyMeasurements=true` → `result[0].sizeChart[]`(제품 실측), `result[0].bodyMeasurements[]`(권장 신체 치수), 각 `{name, sizeParts[{name, measurements[{value,unit}]}]}`. 없는 상품은 `sizeChart` 키가 없음. 잡화는 `unit:""`(예: 용량 22L).
-- 리뷰 `GET /products/{id}/reviews?limit=&offset=&sort=` (priceGroup 경로는 404). 동작하는 sort: `submission_time`, `rating`. `helpful_count` 등은 `nok`.
+- 리뷰 `GET /products/{id}/reviews?limit=&offset=&sort=` (priceGroup 경로는 404). 동작하는 sort: `submission_time`, `rating`. `helpful_count` 등은 `nok`. `limit`은 최대 25 (26 이상은 HTTP 400).
 
 ## 결정사항
 | # | 결정 | 답 |
