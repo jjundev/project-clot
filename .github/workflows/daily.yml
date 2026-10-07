@@ -62,6 +62,18 @@ jobs:
           gh secret delete CLOT_PAT_CHECK --repo "$GITHUB_REPOSITORY"
           echo '✅ CLOT_SECRETS_PAT can write repository secrets.'
 
+      - name: Check Telegram delivery
+        if: env.MODE == 'probe'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          node --input-type=module -e '
+            import { sendTelegramMessage } from "./src/notifier.js";
+            const ok = await sendTelegramMessage("🧪 Clot Actions probe: 러너에서 텔레그램 연결 확인");
+            console.log(ok ? "✅ Telegram message sent." : "::warning::Telegram is not configured or the send failed; daily alerts will not arrive.");
+          '
+
       - name: Daily run
         if: env.MODE == 'daily'
         env:
