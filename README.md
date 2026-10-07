@@ -202,6 +202,27 @@ node src/cli.js power-status
 node src/cli.js daemon-uninstall
 ```
 
+### 5. GitHub Actions에서 실행 (`.github/workflows/daily.yml`)
+Mac 없이 GitHub 러너에서 HTTPS 세션만으로 `daily --skip-opencli`를 돌립니다. Chrome이 없으므로 쿠키는 Secret으로 넣습니다.
+
+| 이름 | 종류 | 내용 |
+|---|---|---|
+| `MUSINSA_COOKIE` | Secret | `app_atk=...; app_rtk=...` (`~/.clot/musinsa-session.json`의 `cookie` 값) |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Secret | 알림용 (선택) |
+| `CLOT_SECRETS_PAT` | Secret | 이 레포의 **Secrets: Read and write** 권한만 준 fine-grained PAT. 실행 중 토큰이 교체되면 `MUSINSA_COOKIE`를 자동 갱신 |
+| `CLOT_ACTIONS_DAILY` | Variable | `true`일 때만 매일 09:30(KST) 스케줄 실행 |
+
+```bash
+# 쿠키를 Secret으로 올리기 (값이 터미널에 출력되지 않음)
+node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(require("os").homedir()+"/.clot/musinsa-session.json")).cookie)' | gh secret set MUSINSA_COOKIE
+
+# 러너(데이터센터 IP)에서 무신사 접속·로그인 확인만 (DB 변경 없음)
+gh workflow run daily.yml -f mode=probe
+```
+
+- 스케줄을 켜기 전에 Mac 데몬을 내리세요 (`daemon-uninstall`). 둘 다 `data/prices.db`를 커밋하면 나중 push가 거절됩니다.
+- 세션이 만료되면 job이 실패합니다(GitHub 알림 메일). Mac에서 로그인한 뒤 위 명령으로 Secret을 다시 올리면 됩니다.
+
 ---
 
 ## 🔔 (선택) 텔레그램 알림 설정

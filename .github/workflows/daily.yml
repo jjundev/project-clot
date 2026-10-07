@@ -1,0 +1,95 @@
+name: Daily price tracker
+
+on:
+  schedule:
+    - cron: '30 0 * * *' # 09:30 KST, same slot as the Mac daemon's first tick
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'probe = reachability check only (no DB writes); daily = full run + commit'
+        type: choice
+        options: [probe, daily]
+        default: probe
+      force:
+        description: 'daily only: re-collect even if today already has a run'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clot-daily
+  cancel-in-progress: false
+
+jobs:
+  run:
+    # Scheduled runs stay off until the Mac daemon is retired: both would commit data/prices.db
+    # and the second push would be rejected. Turn on with repo variable CLOT_ACTIONS_DAILY=true.
+    if: github.event_name != 'schedule' || vars.CLOT_ACTIONS_DAILY == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MODE: ${{ github.event_name == 'schedule' && 'daily' || inputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24 # node:sqlite
+
+      - name: Restore Musinsa session
+        id: restore
+        env:
+          MUSINSA_COOKIE: ${{ secrets.MUSINSA_COOKIE }}
+        run: node scripts/actions-session.js restore
+
+      - name: Probe Musinsa from this runner
+        if: env.MODE == 'probe'
+        run: node scripts/actions-probe.js
+
+      - name: Daily run
+        if: env.MODE == 'daily'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FORCE: ${{ inputs.force && '--force' || '' }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # No Chrome here: --skip-opencli keeps every step on the cached HTTPS session.
+          node src/cli.js daily --skip-opencli $FORCE
+
+      - name: Make sure the data commit reached main
+        if: env.MODE == 'daily'
+        # The CLI's own push is best-effort and silent; fail loudly if it did not land.
+        run: git push origin HEAD:main
+
+      - name: Check for token rotation
+        id: session
+        if: always() && steps.restore.outcome == 'success'
+        env:
+          MUSINSA_COOKIE: ${{ secrets.MUSINSA_COOKIE }}
+          CLOT_ROTATED_COOKIE_FILE: ${{ runner.temp }}/musinsa-cookie
+        run: node scripts/actions-session.js check
+
+      - name: Store rotated tokens in the secret
+        if: always() && steps.session.outputs.status == 'rotated'
+        env:
+          # Fine-grained PAT for this repo with "Secrets: read and write".
+          GH_TOKEN: ${{ secrets.CLOT_SECRETS_PAT }}
+          COOKIE_FILE: ${{ runner.temp }}/musinsa-cookie
+        run: |
+          trap 'rm -f "$COOKIE_FILE"' EXIT
+          if [ -z "$GH_TOKEN" ]; then
+            echo '::error::Tokens rotated but CLOT_SECRETS_PAT is not set; update MUSINSA_COOKIE by hand or the next run uses stale tokens.'
+            exit 1
+          fi
+          gh secret set MUSINSA_COOKIE --repo "$GITHUB_REPOSITORY" < "$COOKIE_FILE"
+          echo 'MUSINSA_COOKIE updated with the rotated tokens.'
+
+      - name: Fail when the session is gone
+        if: always() && steps.session.outputs.status == 'cleared'
+        run: |
+          echo '::error::Musinsa session expired or was revoked. Log in on the Mac, then update the MUSINSA_COOKIE secret.'
+          exit 1
