@@ -223,6 +223,15 @@ gh workflow run daily.yml -f mode=probe
 - 스케줄을 켜기 전에 Mac 데몬을 내리세요 (`daemon-uninstall`). 둘 다 `data/prices.db`를 커밋하면 나중 push가 거절됩니다.
 - 세션이 만료되면 job이 실패합니다(GitHub 알림 메일). Mac에서 로그인한 뒤 위 명령으로 Secret을 다시 올리면 됩니다.
 
+### 6. 대시보드 웹 배포 (GitHub Pages)
+`.github/workflows/pages.yml`이 커밋된 `data/prices.db`로 대시보드를 빌드해 Pages에 올립니다. `data/prices.db` push(Mac 데몬), daily Actions 완료 후, 수동 실행(`gh workflow run pages.yml`)에 갱신됩니다.
+
+👉 **https://jjundev.github.io/project-clot/**
+
+- 최초 1회: 저장소 **Settings → Pages → Source: GitHub Actions** 로 설정해야 합니다.
+- 페이지에는 `noindex`와 `robots.txt`로 검색 색인을 막았습니다. 접근 제한은 아니며, 저장소가 공개이므로 `data/prices.db`와 `data/latest_prices.json`은 누구나 내려받을 수 있습니다.
+- 표시 데이터는 마지막으로 커밋된 DB 기준입니다. 로컬 `visualize`가 더 최신일 수 있습니다.
+
 ---
 
 ## 🔔 (선택) 텔레그램 알림 설정

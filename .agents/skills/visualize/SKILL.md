@@ -33,4 +33,4 @@ Project-Clot의 SQLite 데이터베이스(`prices.db`)에 누적된 상품별 �
 3. **요약 브리핑 및 로컬 링크 제공**:
    - `data/latest_prices.json` 또는 직전 실행 출력을 참조하여 현재 추적 중인 전체 상품 수, 역대 최저가 도달 상품 2~3개의 상품명과 현재 실구매가를 사용자에게 간결히 안내합니다.
    - 응답 마지막에 사용자가 직접 클릭해 열 수 있도록 대시보드 파일의 절대 경로 링크(`[data/dashboard.html](file:///...)`)를 반드시 제공합니다.
-
+   - 배포된 웹 대시보드 링크도 함께 안내합니다: `https://jjundev.github.io/project-clot/` (GitHub Pages, 마지막으로 커밋된 `prices.db` 기준이라 로컬 결과보다 하루 늦을 수 있음).

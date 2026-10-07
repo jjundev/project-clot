@@ -130,5 +130,12 @@ describe('Visualizer HTML Generation', () => {
     assert.equal(res.targetGoodsNo, 777);
     assert.ok(fs.existsSync(tempOutput));
   });
+
+  test('generated dashboard asks search engines not to index it', () => {
+    const tempOutput = path.join(os.tmpdir(), `clot-noindex-${Date.now()}.html`);
+    tempFiles.push(tempOutput);
+    generateDashboardHtml({ db: createTestDb(), outputPath: tempOutput, openBrowser: false });
+    assert.match(fs.readFileSync(tempOutput, 'utf-8'), /<meta name="robots" content="noindex, nofollow">/);
+  });
 });
 

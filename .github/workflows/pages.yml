@@ -1,0 +1,58 @@
+name: Deploy dashboard to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - data/prices.db
+      - src/dashboard.template.html
+      - src/visualizer.js
+      - .github/workflows/pages.yml
+  # Pushes made with GITHUB_TOKEN (the Actions daily run) do not fire `push`, so follow it explicitly.
+  workflow_run:
+    workflows: ['Daily price tracker']
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main # workflow_run would otherwise check out the default-branch SHA that triggered it
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24 # node:sqlite
+
+      - name: Build dashboard from the committed prices.db
+        run: |
+          mkdir _site
+          CLOT_DASHBOARD_PATH=_site/index.html node src/cli.js visualize --no-open
+          printf 'User-agent: *\nDisallow: /\n' > _site/robots.txt
+          test -s _site/index.html
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
