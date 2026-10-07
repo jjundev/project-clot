@@ -1,6 +1,7 @@
 import './setup-env.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
 import { ClotDatabase } from '../src/db.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,6 +24,28 @@ describe('SQLite Database Pragmas', () => {
       if (testDb) {
         try { testDb.close(); } catch {}
       }
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test('checkpoint() folds the WAL into the main file so a copy of prices.db alone has the data', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-test-db-'));
+    const testDbPath = path.join(tmpDir, 'test.db');
+    const copyPath = path.join(tmpDir, 'copy.db');
+    const testDb = new ClotDatabase(testDbPath);
+    try {
+      testDb.db.exec('CREATE TABLE marker (x INTEGER); INSERT INTO marker VALUES (42);');
+      testDb.checkpoint();
+      // What `git add data/prices.db` sees: the main file without its -wal side file.
+      fs.copyFileSync(testDbPath, copyPath);
+      const copy = new DatabaseSync(copyPath, { readOnly: true });
+      try {
+        assert.deepEqual({ ...copy.prepare('SELECT x FROM marker').get() }, { x: 42 });
+      } finally {
+        copy.close();
+      }
+    } finally {
+      testDb.close();
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });

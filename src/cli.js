@@ -148,6 +148,11 @@ function tryGitAutoCommit() {
     if (!isGit) return;
 
     exportDataForGit();
+    try {
+      db.checkpoint(); // otherwise today's rows can sit in the ignored -wal file and miss the commit
+    } catch (err) {
+      console.warn(`⚠️ Warning: WAL checkpoint failed; the committed prices.db may lag (${err.message})`);
+    }
     const today = new Date().toISOString().split('T')[0];
     execSync('git add data/', { cwd: ROOT_DIR, stdio: 'ignore' });
     

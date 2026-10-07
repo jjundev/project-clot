@@ -586,6 +586,11 @@ export class ClotDatabase {
     };
   }
 
+  /** Folds the WAL into prices.db: git commits the main file only (the -wal side file is ignored). */
+  checkpoint() {
+    this.db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+  }
+
   close() {
     this.db.close();
   }
