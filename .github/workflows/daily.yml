@@ -48,6 +48,20 @@ jobs:
         if: env.MODE == 'probe'
         run: node scripts/actions-probe.js
 
+      - name: Check CLOT_SECRETS_PAT can write secrets
+        if: env.MODE == 'probe'
+        env:
+          GH_TOKEN: ${{ secrets.CLOT_SECRETS_PAT }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo '::warning::CLOT_SECRETS_PAT is not set; a token rotation will fail the daily job.'
+            exit 0
+          fi
+          # Same write path the rotation step uses, on a throwaway secret.
+          gh secret set CLOT_PAT_CHECK --repo "$GITHUB_REPOSITORY" --body "$(date -u +%FT%TZ)"
+          gh secret delete CLOT_PAT_CHECK --repo "$GITHUB_REPOSITORY"
+          echo '✅ CLOT_SECRETS_PAT can write repository secrets.'
+
       - name: Daily run
         if: env.MODE == 'daily'
         env:
