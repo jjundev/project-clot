@@ -14,6 +14,10 @@ export const COMPLETE_TOLERANCE = 0.01;
 
 const TOKEN_URL = 'https://api.a-bly.com/api/v2/anonymous/token/';
 const LIST_BASE = 'https://api.a-bly.com/aglo/api/brands';
+const DETAIL_BASE = 'https://api.a-bly.com/api/v2/goods';
+const LIKED_URL = 'https://api.a-bly.com/aglo/api/members/me/liked-goods/';
+const LIKED_PAGE_LIMIT = 100;
+const COUPON_LABEL = '쿠폰적용가';
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_RETRIES = 3;
 
@@ -63,7 +67,7 @@ function httpError(message, status) {
 
 export function createClient({ fetchFn = fetch, delayMs = 300, retryBaseMs = 1000 } = {}) {
   let token = null;
-  let listRequests = 0;
+  let requests = 0;
 
   // Retries network errors, 429 and 5xx like the list call; any other status (a Cloudflare 403) fails at once.
   async function fetchToken() {
@@ -92,22 +96,24 @@ export function createClient({ fetchFn = fetch, delayMs = 300, retryBaseMs = 100
     }
   }
 
-  async function listBrandGoods({ brandSno, minPrice = null, maxPrice = null, lastSno = null, limit = PAGE_LIMIT }) {
-    const url = listUrl({ brandSno, minPrice, maxPrice, lastSno, limit });
+  // One GET with the shared spacing, timeout and retry (network errors, 429, 5xx). Anonymous calls send the
+  // anonymous token and refresh it once on 401; member calls send only `Authorization: JWT` (never the token
+  // value in a message) and fail at once with code MEMBER_AUTH on 401/403.
+  async function getJson(url, { memberToken = null, label }) {
     let refreshed = false;
     let lastStatus;
     let lastMessage = 'unknown error';
 
     for (let attempt = 0; attempt <= MAX_RETRIES; ) {
-      if (listRequests++ > 0) await sleep(delayMs);
-      if (!token) await fetchToken();
+      if (requests++ > 0) await sleep(delayMs);
+      if (!memberToken && !token) await fetchToken();
 
       let res;
       try {
         res = await fetchFn(url, {
           headers: {
             'User-Agent': USER_AGENT,
-            'X-Anonymous-Token': token,
+            ...(memberToken ? { Authorization: `JWT ${memberToken}` } : { 'X-Anonymous-Token': token }),
             Origin: 'https://4910.kr',
             Referer: 'https://4910.kr/',
             Accept: 'application/json',
@@ -122,19 +128,17 @@ export function createClient({ fetchFn = fetch, delayMs = 300, retryBaseMs = 100
         continue;
       }
 
-      if (res.status === 401 && !refreshed) {
+      if (memberToken && (res.status === 401 || res.status === 403)) {
+        const err = httpError(`4910 ${label} failed: member token rejected (HTTP ${res.status})`, res.status);
+        err.code = 'MEMBER_AUTH';
+        throw err;
+      }
+      if (!memberToken && res.status === 401 && !refreshed) {
         refreshed = true;
         token = null;
         continue;
       }
-      if (res.ok) {
-        const body = await res.json();
-        return {
-          totalCount: Number(body.total_count) || 0,
-          entries: Array.isArray(body.goods_list) ? body.goods_list : [],
-          lastSno: body.last_sno ?? null,
-        };
-      }
+      if (res.ok) return res.json();
 
       lastStatus = res.status;
       lastMessage = `HTTP ${res.status}`;
@@ -142,13 +146,50 @@ export function createClient({ fetchFn = fetch, delayMs = 300, retryBaseMs = 100
       await sleep(retryBaseMs * 2 ** attempt++);
     }
 
-    throw httpError(`4910 brand ${brandSno} list failed: ${lastMessage}`, lastStatus);
+    throw httpError(`4910 ${label} failed: ${lastMessage}`, lastStatus);
+  }
+
+  async function listBrandGoods({ brandSno, minPrice = null, maxPrice = null, lastSno = null, limit = PAGE_LIMIT }) {
+    const body = await getJson(listUrl({ brandSno, minPrice, maxPrice, lastSno, limit }), { label: `brand ${brandSno} list` });
+    return {
+      totalCount: Number(body.total_count) || 0,
+      entries: Array.isArray(body.goods_list) ? body.goods_list : [],
+      lastSno: body.last_sno ?? null,
+    };
+  }
+
+  // Goods detail. With a member token the price is the member's price; the coupon price is goods.price only
+  // when Ably labels it 쿠폰적용가.
+  async function getGoodsDetail(sno, { memberToken = null } = {}) {
+    const body = await getJson(`${DETAIL_BASE}/${sno}/`, { memberToken, label: `goods ${sno} detail` });
+    const g = body?.goods ?? {};
+    const price = parsePrice(g.price);
+    return {
+      sno: Number(sno),
+      price,
+      couponPrice: g.price_description?.text === COUPON_LABEL ? price : null,
+      listPrice: parsePrice(g.first_page_rendering?.price),
+      originalPrice: parsePrice(g.linked_option?.original_price),
+      isSoldout: Boolean(g.is_soldout),
+      isOpen: Boolean(g.is_open),
+    };
+  }
+
+  // One page of the member's liked goods, newest first; lastSno is null on the last page.
+  async function listLikedGoods({ memberToken, lastSno = null, limit = LIKED_PAGE_LIMIT }) {
+    let url = `${LIKED_URL}?limit=${limit}`;
+    if (lastSno != null) url += `&last_sno=${lastSno}`;
+    const body = await getJson(url, { memberToken, label: 'liked goods list' });
+    return {
+      entries: Array.isArray(body.goods_list) ? body.goods_list : [],
+      lastSno: body.last_sno ?? null,
+    };
   }
 
   // Returns the cached anonymous token, fetching one first if needed (the runner probe checks this step alone).
   const getToken = async () => token ?? fetchToken();
 
-  return { listBrandGoods, getToken };
+  return { listBrandGoods, getToken, getGoodsDetail, listLikedGoods };
 }
 
 const sliceLabel = (lo, hi) => `${lo}-${hi ?? '∞'}`;

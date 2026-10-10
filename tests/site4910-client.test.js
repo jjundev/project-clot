@@ -137,3 +137,82 @@ test('a 403 on the token request fails at once without retrying', async () => {
   await assert.rejects(client.getToken(), (e) => e.status === 403);
   assert.equal(tokenCalls, 1);
 });
+
+const detailBody = (goodsPatch = {}) => ({
+  goods: {
+    price: 18360,
+    price_description: { text: '쿠폰적용가' },
+    first_page_rendering: { price: 21600 },
+    linked_option: { original_price: 51300 },
+    is_soldout: false,
+    is_open: true,
+    ...goodsPatch,
+  },
+});
+
+test('getGoodsDetail maps the anonymous detail', async () => {
+  const { fn, calls } = fakeFetch({ lists: [json(200, detailBody())] });
+  const client = createClient({ fetchFn: fn, delayMs: 0, retryBaseMs: 0 });
+  assert.deepEqual(await client.getGoodsDetail(71863924), {
+    sno: 71863924, price: 18360, couponPrice: 18360, listPrice: 21600, originalPrice: 51300, isSoldout: false, isOpen: true,
+  });
+  assert.equal(calls.at(-1).url, 'https://api.a-bly.com/api/v2/goods/71863924/');
+  assert.equal(calls.at(-1).headers['X-Anonymous-Token'], 'tok-1');
+  assert.equal(calls.at(-1).headers.Authorization, undefined);
+});
+
+test('getGoodsDetail gives couponPrice null without the 쿠폰적용가 label', async () => {
+  const { fn } = fakeFetch({ lists: [json(200, detailBody({ price_description: null }))] });
+  const client = createClient({ fetchFn: fn, delayMs: 0, retryBaseMs: 0 });
+  const detail = await client.getGoodsDetail(1);
+  assert.equal(detail.couponPrice, null);
+  assert.equal(detail.price, 18360);
+});
+
+test('member calls send only Authorization: JWT and fetch no anonymous token', async () => {
+  const { fn, calls } = fakeFetch({ lists: [json(200, detailBody())] });
+  const client = createClient({ fetchFn: fn, delayMs: 0, retryBaseMs: 0 });
+  await client.getGoodsDetail(1, { memberToken: 'mem-tok' });
+  assert.equal(calls.filter((c) => c.url.includes('/anonymous/token/')).length, 0);
+  assert.equal(calls[0].headers.Authorization, 'JWT mem-tok');
+  assert.equal(calls[0].headers['X-Anonymous-Token'], undefined);
+  assert.equal(calls[0].headers.Origin, 'https://4910.kr');
+  assert.equal(calls[0].headers.Referer, 'https://4910.kr/');
+  assert.equal(calls[0].headers.Accept, 'application/json');
+});
+
+test('a member 401 or 403 rejects with MEMBER_AUTH and no retry', async () => {
+  for (const status of [401, 403]) {
+    const { fn, calls } = fakeFetch({ lists: [json(status, { detail: 'no' })] });
+    const client = createClient({ fetchFn: fn, delayMs: 0, retryBaseMs: 0 });
+    await assert.rejects(client.getGoodsDetail(1, { memberToken: 'secret-tok' }), (e) => {
+      assert.equal(e.code, 'MEMBER_AUTH');
+      assert.equal(e.status, status);
+      assert.ok(!e.message.includes('secret-tok'));
+      return true;
+    });
+    assert.equal(calls.length, 1);
+  }
+});
+
+test('listLikedGoods pages with last_sno', async () => {
+  const { fn, calls } = fakeFetch({
+    lists: [json(200, { total_count: 1, goods_list: [fixtureEntry], last_sno: 5 }), json(200, { total_count: 1, goods_list: [], last_sno: null })],
+  });
+  const client = createClient({ fetchFn: fn, delayMs: 0, retryBaseMs: 0 });
+  const first = await client.listLikedGoods({ memberToken: 'mem-tok' });
+  const second = await client.listLikedGoods({ memberToken: 'mem-tok', lastSno: first.lastSno });
+  assert.equal(calls[0].url, 'https://api.a-bly.com/aglo/api/members/me/liked-goods/?limit=100');
+  assert.equal(calls[1].url, 'https://api.a-bly.com/aglo/api/members/me/liked-goods/?limit=100&last_sno=5');
+  assert.equal(calls[0].headers.Authorization, 'JWT mem-tok');
+  assert.deepEqual(first, { entries: [fixtureEntry], lastSno: 5 });
+  assert.deepEqual(second, { entries: [], lastSno: null });
+});
+
+test('a member 503 is retried like the list call', async () => {
+  const { fn, calls } = fakeFetch({ lists: [json(503, {}), json(200, detailBody())] });
+  const client = createClient({ fetchFn: fn, delayMs: 0, retryBaseMs: 0 });
+  const detail = await client.getGoodsDetail(1, { memberToken: 't' });
+  assert.equal(detail.price, 18360);
+  assert.equal(calls.length, 2);
+});
