@@ -130,7 +130,10 @@ export function createClient({ fetchFn = fetch, delayMs = 300, retryBaseMs = 100
     throw httpError(`4910 brand ${brandSno} list failed: ${lastMessage}`, lastStatus);
   }
 
-  return { listBrandGoods };
+  // Returns the cached anonymous token, fetching one first if needed (the runner probe checks this step alone).
+  const getToken = async () => token ?? fetchToken();
+
+  return { listBrandGoods, getToken };
 }
 
 const sliceLabel = (lo, hi) => `${lo}-${hi ?? '∞'}`;
