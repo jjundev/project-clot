@@ -943,6 +943,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         : '<div class="empty"><b>조건에 맞는 상품이 없습니다</b>검색어를 지우거나 다른 필터를 선택해 보세요.</div>';
     }
     renderMore();
+    if (moreIo) { moreIo.unobserve(moreBtn); moreIo.observe(moreBtn); }
 
     document.querySelectorAll('[data-filter]').forEach(function (b) {
       b.setAttribute('aria-pressed', String(b.dataset.filter === state.filter));
@@ -965,11 +966,14 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     moreBtn.textContent = '더 보기 (남은 ' + left.toLocaleString('ko-KR') + '개)';
   }
   moreBtn.addEventListener('click', renderMore);
-  if (window.IntersectionObserver) {
-    new IntersectionObserver(function (entries) {
-      if (entries[0].isIntersecting && !moreBtn.hidden) renderMore();
-    }, { rootMargin: '600px' }).observe(moreBtn);
-  }
+  // Re-observing after each page forces a fresh callback, so a button still within the margin keeps filling
+  // instead of waiting for a leave/enter transition that never comes.
+  var moreIo = window.IntersectionObserver ? new IntersectionObserver(function (entries) {
+    if (!entries[entries.length - 1].isIntersecting || moreBtn.hidden) return;
+    renderMore();
+    moreIo.unobserve(moreBtn); moreIo.observe(moreBtn);
+  }, { rootMargin: '600px' }) : null;
+  if (moreIo) moreIo.observe(moreBtn);
 
   /* ── 툴바 이벤트 ────────────────────────────────────────── */
   var deb;
