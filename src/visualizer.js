@@ -239,15 +239,23 @@ export function generateDashboardHtml({
 
   const digits = targetGoodsNo != null ? String(targetGoodsNo).replace(/\D/g, '') : '';
   const gNo = digits.length > 0 ? Number(digits) : undefined;
-  let db4910 = null;
   let payload;
   try {
+    // A broken 4910.db (corrupt, locked, schema drift) must never block the Musinsa dashboard.
     if (db4910Path && fs.existsSync(db4910Path)) {
-      db4910 = new DatabaseSync(db4910Path, { readOnly: true });
+      let db4910 = null;
+      try {
+        db4910 = new DatabaseSync(db4910Path, { readOnly: true });
+        payload = buildClotDataPayload(activeDb, { targetGoodsNo: gNo, db4910 });
+      } catch (err) {
+        console.warn(`⚠️ [4910] 대시보드에서 4910 항목 제외: ${err.message}`);
+        payload = undefined;
+      } finally {
+        if (db4910) db4910.close();
+      }
     }
-    payload = buildClotDataPayload(activeDb, { targetGoodsNo: gNo, db4910 });
+    if (!payload) payload = buildClotDataPayload(activeDb, { targetGoodsNo: gNo });
   } finally {
-    if (db4910) db4910.close();
     if (shouldCloseDb) {
       activeDb.close();
     }

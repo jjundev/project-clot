@@ -158,6 +158,28 @@ describe('Visualizer HTML Generation', () => {
     assert.ok(fs.readFileSync(tempOutput, 'utf-8').includes('"src":"musinsa"'));
   });
 
+  test('a corrupt 4910.db still renders the Musinsa dashboard', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-html-corrupt4910-'));
+    tempFiles.push(dir);
+    const db4910Path = path.join(dir, '4910.db');
+    fs.writeFileSync(db4910Path, 'this is definitely not a sqlite database '.repeat(200));
+    const tempOutput = path.join(dir, 'dashboard.html');
+    const warns = [];
+    const origWarn = console.warn;
+    console.warn = (...args) => warns.push(args.join(' '));
+    let res;
+    try {
+      res = generateDashboardHtml({ db: createTestDb(), outputPath: tempOutput, openBrowser: false, db4910Path });
+    } finally {
+      console.warn = origWarn;
+    }
+    assert.equal(res.totalItems, 1);
+    const content = fs.readFileSync(tempOutput, 'utf-8');
+    assert.ok(content.includes('"src":"musinsa"'));
+    assert.ok(!content.includes('"src":"4910"'));
+    assert.equal(warns.length, 1);
+  });
+
   test('template has the source chips and the new-member column', () => {
     const tempOutput = path.join(os.tmpdir(), `clot-src-chips-${Date.now()}.html`);
     tempFiles.push(tempOutput);
