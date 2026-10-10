@@ -539,7 +539,8 @@ export async function run4910Step({
           log(`💜 [4910] 찜 ${liked.liked}개 · 가격 기록 ${liked.logged}개 (${liked.memberStatus})`);
         }
       } catch (err) {
-        liked = null;
+        // Surfaced in the digest too, so a frozen dashboard 4910 section is not silent.
+        liked = { memberStatus: 'error', liked: 0, logged: 0, drops: [] };
         log(`⚠️ [4910] 찜 가격 기록 실패 (${err.message})`);
       }
     }

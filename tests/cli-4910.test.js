@@ -225,8 +225,9 @@ test('a liked sync failure still sends the scan digest', async () => {
     },
   });
   assert.equal(res.ok, true);
-  assert.equal(res.liked, null);
+  assert.equal(res.liked.memberStatus, 'error');
   assert.equal(notify.calls.length, 1);
+  assert.match(notify.calls[0][0], /⚠️ 4910 찜 가격 기록 실패 — Actions 로그 확인/);
   assert.match(log.lines.join('\n'), /⚠️ \[4910\] 찜 가격 기록 실패 \(HTTP 500\)/);
   assert.deepEqual(store.calls, ['checkpoint', 'close']);
 });
@@ -269,8 +270,9 @@ test('a throwing readToken still sends the scan digest', async () => {
     },
   });
   assert.equal(res.ok, true);
-  assert.equal(res.liked, null);
+  assert.equal(res.liked.memberStatus, 'error');
   assert.equal(notify.calls.length, 1);
+  assert.match(notify.calls[0][0], /찜 가격 기록 실패 — Actions 로그 확인/);
   assert.equal(syncLikedFn.calls.length, 0);
   assert.match(log.lines.join('\n'), /찜 가격 기록 실패/);
 });

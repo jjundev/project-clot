@@ -25,7 +25,7 @@ function likedDropLines(drops) {
   );
 }
 
-// `liked` is the liked-items sync result; 'none' (no token) and null add nothing, 'expired' adds a renewal warning.
+// `liked` is the liked-items sync result; 'none' (no token) and null add nothing, 'expired' adds a renewal warning, 'error' a failure warning.
 export function format4910Digest(result, { limit = 10, liked = null } = {}) {
   const head = [`<b>🇯🇵 [Project-Clot] 4910 유니클로·GU 리포트 (${result.date})</b>\n`, scanLine(result.brandCounts)];
   const { diff } = result;
@@ -40,6 +40,8 @@ export function format4910Digest(result, { limit = 10, liked = null } = {}) {
   let likedDrops = [];
   if (liked?.memberStatus === 'expired') {
     head.push('⚠️ 4910 로그인 만료 — ABLY_JWT_TOKEN 갱신 필요');
+  } else if (liked?.memberStatus === 'error') {
+    head.push('⚠️ 4910 찜 가격 기록 실패 — Actions 로그 확인');
   } else if (liked?.memberStatus === 'ok') {
     head.push(`찜 ${fmt(liked.liked)}개 · 가격 기록 ${fmt(liked.logged)}개`);
     likedDrops = likedDropLines(liked.drops.slice(0, limit));

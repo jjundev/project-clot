@@ -112,6 +112,12 @@ test('liked expired adds the expiry warning', () => {
   assert.doesNotMatch(text, /찜 \d+개/);
 });
 
+test('liked error adds the failure line', () => {
+  const text = format4910Digest(result, { liked: { memberStatus: 'error', liked: 0, logged: 0, drops: [] } });
+  assert.match(text, /⚠️ 4910 찜 가격 기록 실패 — Actions 로그 확인/);
+  assert.doesNotMatch(text, /로그인 만료|찜 \d+개/);
+});
+
 test('liked none or null adds nothing', () => {
   const base = format4910Digest(result);
   assert.equal(format4910Digest(result, { liked: null }), base);
