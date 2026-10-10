@@ -75,6 +75,68 @@ function buildLikedItems(db4910) {
   }));
 }
 
+const IMG_BASE_4910 = 'https://d3ha2047wt6x28.cloudfront.net/';
+
+/**
+ * Packs every ACTIVE scanned 4910 listing into the compact `4910-all.js` payload. Liked ACTIVE listings are left
+ * out: the liked items already carry them with member prices under the same `4910:sno` key.
+ * @param {import('node:sqlite').DatabaseSync} db4910
+ * @returns {{ v: 1, lastScan: string|null, imgBase: string, b: string[], m: string[], r: any[][] }}
+ */
+export function buildScan4910Payload(db4910) {
+  const hasLiked = db4910
+    .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = 'liked_goods'")
+    .get();
+  const likedFilter = hasLiked ? "AND sno NOT IN (SELECT sno FROM liked_goods WHERE status = 'ACTIVE')" : '';
+  const goods = db4910
+    .prepare(`SELECT sno, brand, market_name, name, image_url, first_seen_date FROM goods WHERE status = 'ACTIVE' ${likedFilter} ORDER BY sno ASC`)
+    .all();
+  const changes = db4910
+    .prepare(`
+      SELECT sno, date, original_price, sale_price FROM price_changes
+      WHERE sno IN (SELECT sno FROM goods WHERE status = 'ACTIVE' ${likedFilter})
+      ORDER BY date ASC, id ASC
+    `)
+    .all();
+
+  const histBySno = new Map();
+  for (const c of changes) {
+    const h = [c.date, c.original_price ?? null, c.sale_price ?? null];
+    const arr = histBySno.get(c.sno);
+    if (arr) arr.push(h);
+    else histBySno.set(c.sno, [h]);
+  }
+
+  const b = [];
+  const m = [];
+  const bIdx = new Map();
+  const mIdx = new Map();
+  const indexOf = (arr, idx, v) => {
+    if (!idx.has(v)) {
+      idx.set(v, arr.length);
+      arr.push(v);
+    }
+    return idx.get(v);
+  };
+
+  const r = goods.map((g) => {
+    const img = g.image_url || '';
+    return [
+      Number(g.sno),
+      indexOf(b, bIdx, g.brand || g.market_name || '4910'),
+      indexOf(m, mIdx, g.market_name || ''),
+      g.name || '상품',
+      img.startsWith(IMG_BASE_4910) ? img.slice(IMG_BASE_4910.length) : img,
+      g.first_seen_date || '',
+      classifyCategory(g.name, g.brand),
+      histBySno.get(g.sno) || [],
+    ];
+  });
+
+  const lastScan = db4910.prepare('SELECT MAX(date) AS d FROM scan_runs WHERE complete = 1').get()?.d ?? null;
+  return { v: 1, lastScan, imgBase: IMG_BASE_4910, b, m, r };
+}
+
 /**
  * Extracts raw data from SQLite and builds the dashboard data contract.
  * @param {import('node:sqlite').DatabaseSync | { db: import('node:sqlite').DatabaseSync }} dbOrWrapper
