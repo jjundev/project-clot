@@ -43,6 +43,8 @@
    - 4910의 유니클로·GU는 공식몰이 아니라 일본 구매대행 셀러의 판매글이므로, 판매글 번호(`sno`) 단위로 추적합니다. 같은 제품이라도 셀러별로 따로 기록됩니다.
    - 이력은 **바뀔 때만** 남깁니다(신규·가격변동·종료·재등장). 완전한 스캔에서 2회 연속 보이지 않은 판매글은 종료(`DROPPED`)로 처리하고, 다시 보이면 재등장으로 되살립니다.
    - 텔레그램으로 하루 1통, 브랜드별 스캔 수와 직전 기록가 대비 **10% 이상 하락한 상위 10개**를 보냅니다.
+   - **찜한 상품의 회원가**: 4910.kr에서 찜(하트)한 상품을 `ABLY_JWT_TOKEN`으로 불러와 하루 한 번 **내 회원가**를 함께 기록합니다. 대시보드에서는 4910 필터로 찜 상품만 모아 **정가 / 내 회원가 / 쿠폰적용가(신규회원 기준)** 세 가격을 한 카드에서 비교합니다. 회원가는 보통 쿠폰적용가보다 조금 높은데, 쿠폰적용가에는 신규회원 첫 구매 쿠폰이 포함되기 때문입니다.
+   - 로그인 쿠키에는 갱신 수단이 없어서, 만료되면 텔레그램 요약에 `⚠️ 4910 로그인 만료 — ABLY_JWT_TOKEN 갱신 필요`가 붙습니다(4910.kr에서 로그아웃해도 무효화될 수 있음). 이때 Secret을 다시 올리세요. 토큰이 없으면 찜 동기화만 건너뜁니다.
    - 4910 수집이 실패해도 무신사 수집·커밋은 그대로 진행됩니다(`⚠️ [4910] 수집 실패` 로그만 남음).
    - `daily` 안에서 자동으로 돌고(`--skip-4910`으로 제외), 단독 실행은 `track-4910 [--brand uniqlo|gu] [--dry-run]`입니다.
    - ⚠️ **로컬(Mac)에서는 `--dry-run`으로만 실행하세요.** `data/4910.db`는 GitHub Actions가 매일 커밋하는 파일이라, 로컬에서 쓰면 다음 `git pull`이 덮어쓰기를 거부하고 텔레그램 요약도 한 통 더 갑니다. 로컬에 따로 쌓고 싶다면 `CLOT_4910_DB_PATH=/tmp/4910.db node src/cli.js track-4910`처럼 경로를 바꾸세요.
@@ -224,6 +226,7 @@ Mac 없이 GitHub 러너에서 HTTPS 세션만으로 `daily --skip-opencli`를 �
 |---|---|---|
 | `MUSINSA_COOKIE` | Secret | `app_atk=...; app_rtk=...` (`~/.clot/musinsa-session.json`의 `cookie` 값) |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Secret | 알림용 (선택) |
+| `ABLY_JWT_TOKEN` | Secret | 4910.kr 로그인 쿠키 `ably-jwt-token` 값 (찜 상품 회원가, 선택) |
 | `CLOT_SECRETS_PAT` | Secret | 이 레포의 **Secrets: Read and write** 권한만 준 fine-grained PAT. 실행 중 토큰이 교체되면 `MUSINSA_COOKIE`를 자동 갱신 |
 | `CLOT_ACTIONS_DAILY` | Variable | `true`일 때만 매일 09:30(KST) 스케줄 실행 |
 
@@ -231,7 +234,11 @@ Mac 없이 GitHub 러너에서 HTTPS 세션만으로 `daily --skip-opencli`를 �
 # 쿠키를 Secret으로 올리기 (값이 터미널에 출력되지 않음)
 node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(require("os").homedir()+"/.clot/musinsa-session.json")).cookie)' | gh secret set MUSINSA_COOKIE
 
-# 러너(데이터센터 IP)에서 무신사 접속·로그인과 4910 접속 확인만 (DB 변경 없음)
+# 4910 찜 상품 회원가용 토큰 올리기: 4910.kr에 로그인한 브라우저에서 DevTools → Application → Cookies → https://4910.kr 의
+# `ably-jwt-token` 값을 복사한 뒤, 아래 명령이 값을 물어보면 붙여넣기 (입력이 화면에 표시되지 않음)
+gh secret set ABLY_JWT_TOKEN
+
+# 러너(데이터센터 IP)에서 무신사 접속·로그인, 4910 접속과 4910 회원 로그인(`4910 member login`) 확인만 (DB 변경 없음)
 gh workflow run daily.yml -f mode=probe
 ```
 
@@ -239,12 +246,12 @@ gh workflow run daily.yml -f mode=probe
 - 세션이 만료되면 job이 실패합니다(GitHub 알림 메일). Mac에서 로그인한 뒤 위 명령으로 Secret을 다시 올리면 됩니다.
 
 ### 6. 대시보드 웹 배포 (GitHub Pages)
-`.github/workflows/pages.yml`이 커밋된 `data/prices.db`로 대시보드를 빌드해 Pages에 올립니다. `data/prices.db` push(Mac 데몬), daily Actions 완료 후, 수동 실행(`gh workflow run pages.yml`)에 갱신됩니다.
+`.github/workflows/pages.yml`이 커밋된 `data/prices.db`로 대시보드를 빌드해 Pages에 올립니다. `data/prices.db`·`data/4910.db` push(Mac 데몬), daily Actions 완료 후, 수동 실행(`gh workflow run pages.yml`)에 갱신됩니다.
 
 👉 **https://jjundev.github.io/project-clot/**
 
 - 최초 1회: 저장소 **Settings → Pages → Source: GitHub Actions** 로 설정해야 합니다.
-- 페이지에는 `noindex`와 `robots.txt`로 검색 색인을 막았습니다. 접근 제한은 아니며, 저장소가 공개이므로 `data/prices.db`와 `data/latest_prices.json`은 누구나 내려받을 수 있습니다.
+- 페이지에는 `noindex`와 `robots.txt`로 검색 색인을 막았습니다. 접근 제한은 아니며, 저장소가 공개이므로 `data/prices.db`와 `data/latest_prices.json`은 누구나 내려받을 수 있습니다. `data/4910.db`(찜 목록 포함)도 마찬가지로 공개됩니다.
 - 표시 데이터는 마지막으로 커밋된 DB 기준입니다. 로컬 `visualize`가 더 최신일 수 있습니다.
 
 ---

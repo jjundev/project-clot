@@ -96,6 +96,43 @@ test('probe4910 reports a blocked token request without throwing', async () => {
   assert.match(checks[0].detail, /403/);
 });
 
+const SECRET_TOKEN = 'zz-distinctive-member-token-9f3a';
+
+// Anonymous token and brand listing succeed; the liked-goods endpoint answers with `likedStatus`.
+const memberFetch = (likedStatus) => async (url) => {
+  if (url.includes('/anonymous/token/')) return json(200, { token: 'tok' });
+  if (url.includes('liked-goods')) return likedStatus === 200 ? json(200, { goods_list: [], last_sno: null }) : new Response('{}', { status: likedStatus });
+  return json(200, { total_count: 10529, goods_list: [], last_sno: null });
+};
+
+test('probe4910 adds a member login check when a token is given', async () => {
+  const client = createClient({ fetchFn: memberFetch(200), delayMs: 0, retryBaseMs: 0 });
+  const checks = await probe4910({ client, memberToken: SECRET_TOKEN });
+  assert.deepEqual(checks.map((c) => [c.name, c.ok]), [
+    ['4910 anonymous token', true], ['4910 uniqlo listing', true], ['4910 member login', true],
+  ]);
+  assert.equal(checks[2].detail, 'liked page ok, no exp'); // not a JWT with exp
+  assert.doesNotMatch(JSON.stringify(checks), new RegExp(SECRET_TOKEN));
+});
+
+test('probe4910 reports the days left when the member token has an exp', async () => {
+  const exp = Math.floor(Date.now() / 1000) + 10 * 86400 + 3600;
+  const jwt = `h.${Buffer.from(JSON.stringify({ exp })).toString('base64url')}.s`;
+  const client = createClient({ fetchFn: memberFetch(200), delayMs: 0, retryBaseMs: 0 });
+  const checks = await probe4910({ client, memberToken: jwt });
+  assert.equal(checks[2].detail, 'liked page ok, exp in 10d');
+});
+
+test('probe4910 reports an expired member token', async () => {
+  const client = createClient({ fetchFn: memberFetch(401), delayMs: 0, retryBaseMs: 0 });
+  const checks = await probe4910({ client, memberToken: SECRET_TOKEN });
+  assert.deepEqual(checks.map((c) => [c.name, c.ok]), [
+    ['4910 anonymous token', true], ['4910 uniqlo listing', true], ['4910 member login', false],
+  ]);
+  assert.match(checks[2].detail, /401/);
+  assert.doesNotMatch(JSON.stringify(checks), new RegExp(SECRET_TOKEN));
+});
+
 test('budgetMs past means every brand is incomplete and nothing is missed', async () => {
   await track4910({ client: fakeClient(CATALOG), store, date: '2026-10-10', brands: BRANDS, log: quiet });
   const res = await track4910({ client: fakeClient({}), store, date: '2026-10-11', brands: BRANDS, budgetMs: -1, log: quiet });

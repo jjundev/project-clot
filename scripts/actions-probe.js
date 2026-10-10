@@ -8,6 +8,7 @@ import { USER_AGENT, fetchAuthenticatedPriceInfo } from '../src/myprice.js';
 import { LIKES_TAB_URL } from '../src/likes-https.js';
 import { createClient } from '../src/site4910/client.js';
 import { probe4910 } from '../src/site4910/track.js';
+import { readAblyToken } from '../src/site4910/liked.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -82,7 +83,7 @@ record('liked goods total', likes.ok && Number.isInteger(total), `${likes.line},
 await sleep(700);
 
 // 4910.kr (Ably) sits behind Cloudflare too; a 403 here means the runner IP is blocked for the 4910 step.
-for (const c of await probe4910({ client: createClient() })) record(c.name, c.ok, c.detail);
+for (const c of await probe4910({ client: createClient(), memberToken: readAblyToken() })) record(c.name, c.ok, c.detail);
 
 const failed = checks.filter((c) => !c.ok).length;
 console.log(failed ? `\n${failed}/${checks.length} checks failed from this runner.` : `\nAll ${checks.length} checks passed from this runner.`);

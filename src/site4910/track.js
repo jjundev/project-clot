@@ -1,5 +1,6 @@
 // Daily 4910 run: scan every brand, apply one diff to the store, and the GitHub-runner reachability probe.
 import { BRANDS_4910, scanBrand } from './client.js';
+import { tokenExpiry } from './liked.js';
 
 // Keeps a degraded (slow, not dead) API from running the Actions job into its 30-minute timeout before the
 // Musinsa commit; brands not finished by then count as incomplete, so their listings take no misses.
@@ -50,8 +51,23 @@ export async function track4910({ client, store, date, brands = BRANDS_4910, dry
 
 const failDetail = (err) => `${err.status ?? err.name}: ${err.message}`;
 
-/** Read-only: can this machine get an anonymous token and one Uniqlo listing page? Never prints the token. */
-export async function probe4910({ client }) {
+// One liked-list item is enough to prove the member token is accepted; the detail never includes the token.
+async function probeMemberLogin(client, memberToken) {
+  try {
+    await client.listLikedGoods({ memberToken, limit: 1 });
+    const exp = tokenExpiry(memberToken);
+    const detail = exp ? `liked page ok, exp in ${Math.floor((exp.getTime() - Date.now()) / 86_400_000)}d` : 'liked page ok, no exp';
+    return { name: '4910 member login', ok: true, detail };
+  } catch (err) {
+    return { name: '4910 member login', ok: false, detail: failDetail(err) };
+  }
+}
+
+/**
+ * Read-only: can this machine get an anonymous token and one Uniqlo listing page, and (given a member token)
+ * is that token still accepted by the liked list? Never prints either token.
+ */
+export async function probe4910({ client, memberToken = null }) {
   const checks = [];
   let tokenOk = false;
   try {
@@ -63,6 +79,7 @@ export async function probe4910({ client }) {
   }
   if (!tokenOk) {
     checks.push({ name: '4910 uniqlo listing', ok: false, detail: 'skipped (no token)' });
+    if (memberToken) checks.push(await probeMemberLogin(client, memberToken));
     return checks;
   }
   try {
@@ -71,5 +88,6 @@ export async function probe4910({ client }) {
   } catch (err) {
     checks.push({ name: '4910 uniqlo listing', ok: false, detail: failDetail(err) });
   }
+  if (memberToken) checks.push(await probeMemberLogin(client, memberToken));
   return checks;
 }

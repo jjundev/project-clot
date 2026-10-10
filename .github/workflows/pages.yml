@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - data/prices.db
+      - data/4910.db
       - src/dashboard.template.html
       - src/visualizer.js
       - .github/workflows/pages.yml
