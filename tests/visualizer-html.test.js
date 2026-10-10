@@ -217,6 +217,30 @@ describe('Visualizer HTML Generation', () => {
     assert.ok(html.includes('"total4910All":0'));
   });
 
+  test('a broken scan table drops only 4910 전체; liked items stay', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-html-scanfail-'));
+    tempFiles.push(dir);
+    const db4910Path = path.join(dir, '4910.db');
+    const store = new Store4910(db4910Path);
+    store.syncLiked([{ sno: 71863924, brand: '유니클로', name: '플리스', market_name: 'UNIQLO', url: 'https://4910.kr/goods/71863924', image_url: null }], '2026-10-11');
+    store.db.exec('DROP TABLE scan_runs');
+    store.close();
+    const tempOutput = path.join(dir, 'index.html');
+    const origWarn = console.warn;
+    console.warn = () => {};
+    let res;
+    try {
+      res = generateDashboardHtml({ db: createTestDb(), outputPath: tempOutput, openBrowser: false, db4910Path });
+    } finally {
+      console.warn = origWarn;
+    }
+    assert.equal(res.total4910All, 0);
+    assert.equal(fs.existsSync(path.join(dir, '4910-all.js')), false);
+    const html = fs.readFileSync(tempOutput, 'utf-8');
+    assert.ok(html.includes('"k":"4910:71863924"'));
+    assert.ok(html.includes('"has4910All":false'));
+  });
+
   test('a failing 4910 build removes a stale 4910-all.js', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-html-stale4910all-'));
     tempFiles.push(dir);

@@ -133,7 +133,8 @@ export function buildScan4910Payload(db4910) {
     ];
   });
 
-  const lastScan = db4910.prepare('SELECT MAX(date) AS d FROM scan_runs WHERE complete = 1').get()?.d ?? null;
+  // Any run counts, complete or not: a listing unchanged on the latest scan day must not keep yesterday's drop.
+  const lastScan = db4910.prepare('SELECT MAX(date) AS d FROM scan_runs').get()?.d ?? null;
   return { v: 1, lastScan, imgBase: IMG_BASE_4910, b, m, r };
 }
 
@@ -310,7 +311,12 @@ export function generateDashboardHtml({
       try {
         db4910 = new DatabaseSync(db4910Path, { readOnly: true });
         payload = buildClotDataPayload(activeDb, { targetGoodsNo: gNo, db4910 });
-        scan = buildScan4910Payload(db4910);
+        // The scan listings fail on their own: the liked items above stay on the dashboard.
+        try {
+          scan = buildScan4910Payload(db4910);
+        } catch (err) {
+          console.warn(`⚠️ [4910] 대시보드에서 4910 전체 목록 제외: ${err.message}`);
+        }
       } catch (err) {
         console.warn(`⚠️ [4910] 대시보드에서 4910 항목 제외: ${err.message}`);
         payload = undefined;

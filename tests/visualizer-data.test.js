@@ -272,7 +272,7 @@ describe('Visualizer Data Extraction', () => {
       const p = buildScan4910Payload(store.db);
       assert.equal(p.v, 1);
       assert.equal(p.imgBase, 'https://d3ha2047wt6x28.cloudfront.net/');
-      assert.equal(p.lastScan, '2026-10-10');
+      assert.equal(p.lastScan, '2026-10-11');           // an incomplete run still counts
       assert.deepEqual(p.r.map((r) => r[0]), [1]);
       const [, bIdx, mIdx, name, img, fs, cat, H] = p.r[0];
       assert.equal(p.b[bIdx], '유니클로');
@@ -305,7 +305,7 @@ describe('Visualizer Data Extraction', () => {
       store.close();
     });
 
-    test('no complete scan_runs gives lastScan null', () => {
+    test('no scan_runs gives lastScan null', () => {
       const store = new Store4910(':memory:');
       store.applyScan('2026-10-10', [scanRow(1, 50000)], BOTH);
       const p = buildScan4910Payload(store.db);

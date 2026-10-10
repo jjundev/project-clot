@@ -712,6 +712,8 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     it.lowMy = lowMy === Infinity ? null : lowMy;
     it.lowDate = lowDate;
     it.isLow = it.lowMy != null && it.my != null && it.my <= it.lowMy;
+    // A scanned listing whose price never changed has nothing to be lowest against.
+    if (it.src === '4910all' && !it.moved) it.isLow = false;
 
     it.dropAmt = (prev && (!is4910Item || prev[5] === last[5]) && prev[3] != null && it.my != null && it.my < prev[3]) ? prev[3] - it.my : 0;
   }
@@ -771,7 +773,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     });
     return all4910.promise;
   }
-  // Scanned listings carry 표시가 only. A tail row on the latest complete scan keeps an old change from reading
+  // Scanned listings carry 표시가 only. A tail row on the latest scan keeps an old change from reading
   // as today's drop (dropAmt compares the last two rows).
   function expand4910All(P) {
     var start = D.items.length;
@@ -782,7 +784,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       D.items.push({
         n: r[0], k: '4910:' + r[0], src: '4910all', b: P.b[r[1]], m: P.m[r[2]], g: r[3],
         u: 'https://4910.kr/goods/' + r[0], i: !r[4] ? '' : (/^https?:/.test(r[4]) ? r[4] : P.imgBase + r[4]),
-        s: 'ACTIVE', c: r[6], fs: r[5], L: L
+        s: 'ACTIVE', c: r[6], fs: r[5], L: L, moved: r[7].length > 1
       });
     });
     for (var i = start; i < D.items.length; i++) derive(D.items[i], i);
