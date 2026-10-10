@@ -135,8 +135,8 @@ describe('Session Pre-warm & Healing Mechanism', () => {
     assert.ok(warningPayload.reason.includes('서킷 브레이커'));
   });
 
-  test('notifySessionWarning executes without crashing', async () => {
+  test('notifySessionWarning sends nothing under the test sandbox, even with a real .env', async () => {
     const res = await notifySessionWarning({ reason: 'Test warning' });
-    assert.strictEqual(typeof res, 'boolean');
+    assert.strictEqual(res, false);
   });
 });

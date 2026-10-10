@@ -11,3 +11,8 @@ if (!process.env.CLOT_DB_PATH) {
   process.env.CLOT_DASHBOARD_PATH = path.join(tmpDir, 'dashboard.html');
   process.on('exit', () => fs.rmSync(tmpDir, { recursive: true, force: true }));
 }
+
+// Never notify for real: skip the repo's .env (src/notifier.js) and macOS banners, and drop any
+// Telegram/Discord credentials inherited from the shell. Tests that need creds set them explicitly.
+process.env.CLOT_NOTIFY_SANDBOX = '1';
+for (const key of ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'DISCORD_WEBHOOK_URL']) delete process.env[key];

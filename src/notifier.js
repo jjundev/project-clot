@@ -11,7 +11,8 @@ function getEnvConfig() {
     DISCORD_WEBHOOK_URL: process.env.DISCORD_WEBHOOK_URL || '',
   };
 
-  if (fs.existsSync(envPath)) {
+  // Tests set CLOT_NOTIFY_SANDBOX so the developer's real .env never turns a test into a live Telegram message.
+  if (!process.env.CLOT_NOTIFY_SANDBOX && fs.existsSync(envPath)) {
     const lines = fs.readFileSync(envPath, 'utf-8').split('\n');
     for (const l of lines) {
       const match = l.match(/^([A-Z0-9_]+)=(.*)$/);
@@ -25,6 +26,7 @@ function getEnvConfig() {
 }
 
 export function sendMacNotification(title, message) {
+  if (process.env.CLOT_NOTIFY_SANDBOX) return;
   const sanitizedTitle = title.replace(/"/g, '\\"');
   const sanitizedMsg = message.replace(/"/g, '\\"');
   exec(
