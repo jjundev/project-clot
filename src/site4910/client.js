@@ -209,9 +209,11 @@ export function createClient({ fetchFn = fetch, delayMs = 300, retryBaseMs = 100
   }
 
   // A seller's (market's) public profile; satisfaction is a percentage, reviewsCount is null when Ably omits it.
+  // A body without a market object throws: read as all-null it would store the seller as unqualified for a week.
   async function getMarket(sno) {
     const body = await getJson(`${MARKET_BASE}/${sno}/`, { label: `market ${sno}` });
-    const m = body?.market ?? {};
+    const m = body?.market;
+    if (!m || typeof m !== 'object') throw httpError(`4910 market ${sno} failed: no market in response`, undefined);
     return {
       sno: Number(m.sno ?? sno),
       name: m.name ?? null,
@@ -225,7 +227,7 @@ export function createClient({ fetchFn = fetch, delayMs = 300, retryBaseMs = 100
   async function getMyCoupons({ memberToken }) {
     const body = await getJson(MY_COUPONS_URL, { memberToken, aglo: true, label: 'my coupons' });
     return (Array.isArray(body.coupon_apply_list) ? body.coupon_apply_list : []).map((c) => ({
-      couponSno: c.coupon_sno,
+      couponSno: Number(c.coupon_sno),
       name: c.coupon_name ?? null,
       type: c.discount_type === 'PERCENT' ? 'PERCENT' : 'PRICE',
       percent: c.discount_percent ?? null,
@@ -243,20 +245,23 @@ export function createClient({ fetchFn = fetch, delayMs = 300, retryBaseMs = 100
     return { emoney: Number(body.emoney) || 0 };
   }
 
-  // The coupon Ably would apply to one option (quantity 1), or null when none applies.
+  // The coupon Ably would apply to one option (quantity 1), or null when none applies. A coupon without a numeric
+  // coupon_discount throws (callers skip that sample) rather than pricing with NaN. min is null when Ably omits it.
   async function getBestCoupon(optionSno, { memberToken }) {
     const options = encodeURIComponent(JSON.stringify([{ sno: Number(optionSno), ea: 1 }]));
     const body = await getJson(`${BEST_COUPON_URL}?options=${options}`, { memberToken, aglo: true, label: `best coupon ${optionSno}` });
     const c = body?.best_coupon;
     if (!c) return null;
+    const discount = c.coupon_discount == null ? NaN : Number(c.coupon_discount);
+    if (!Number.isFinite(discount)) throw httpError(`4910 best coupon ${optionSno} failed: no numeric coupon_discount`, undefined);
     return {
-      couponSno: c.sno,
+      couponSno: Number(c.sno),
       name: c.name ?? null,
-      discount: c.coupon_discount,
+      discount,
       percent: c.discount_percent ?? null,
       price: c.discount_price ?? null,
       max: c.max_discount_price ?? Infinity,
-      min: c.minimum_price ?? 0,
+      min: c.minimum_price == null ? null : Number(c.minimum_price),
     };
   }
 

@@ -169,10 +169,21 @@ async function probeCheck(name, fn) {
 }
 
 const PROBE_MARKET_SNO = 56293;
+const PROBE_GOODS_SNO = 57821918;
+
+// One listing's best coupon for the member, through the same anonymous detail → optionSno path the daily run uses.
+// The detail says only whether a coupon applies and its amount: no coupon name, never the token.
+async function probeMemberBestCoupon(client, memberToken) {
+  const { optionSno } = await client.getGoodsDetail(PROBE_GOODS_SNO);
+  if (optionSno == null) return { ok: false, detail: `goods ${PROBE_GOODS_SNO}: no option` };
+  const best = await client.getBestCoupon(optionSno, { memberToken });
+  return { ok: true, detail: best ? `coupon applies (discount ${best.discount})` : 'no coupon' };
+}
 
 /**
  * Read-only: can this machine get an anonymous token, one Uniqlo listing page, one brand ranking page and one
- * seller profile, and (given a member token) is that token still accepted by the liked list and the coupon wallet?
+ * seller profile, and (given a member token) is that token still accepted by the liked list, the coupon wallet and
+ * best-coupon?
  * Never prints either token.
  */
 export async function probe4910({ client, memberToken = null }) {
@@ -207,6 +218,7 @@ export async function probe4910({ client, memberToken = null }) {
   if (memberToken) {
     checks.push(await probeMemberLogin(client, memberToken));
     checks.push(await probeMemberCoupons(client, memberToken));
+    checks.push(await probeCheck('4910 member best coupon', () => probeMemberBestCoupon(client, memberToken)));
   }
   return checks;
 }

@@ -304,11 +304,17 @@ test('no brand reachable throws', async () => {
 const json = (status, body) => new Response(JSON.stringify(body), { status });
 const ANON_CHECKS = ['4910 anonymous token', '4910 uniqlo listing', '4910 brand ranking', '4910 seller'];
 
-// Anonymous endpoints answer; `likedStatus` / `couponsStatus` set the member endpoints' answers.
-const probeFetch = ({ likedStatus = 200, couponsStatus = 200 } = {}) => async (url) => {
+// Anonymous endpoints answer; `likedStatus` / `couponsStatus` / `bestStatus` set the member endpoints' answers,
+// `best` the best-coupon body.
+const probeFetch = ({ likedStatus = 200, couponsStatus = 200, bestStatus = 200, best = { best_coupon: null } } = {}) => async (url) => {
   if (url.includes('/anonymous/token/')) return json(200, { token: 'tok' });
   if (url.includes('/brands/ranking/')) return json(200, { brand_list: [{ sno: 2421, name: '유니클로' }], last_sno: 1 });
   if (url.includes('/markets/')) return json(200, { market: { sno: 56293, name: 'seller', purchasing_satisfaction_ratio: 98, reviews_count: 4321 } });
+  if (url.includes('/api/v2/goods/57821918/')) return json(200, { goods: { price: 30000, linked_option: { sno: 4242 } } });
+  if (url.includes('/coupons/best-coupon')) {
+    assert.ok(url.includes('4242'));
+    return bestStatus === 200 ? json(200, best) : new Response('{}', { status: bestStatus });
+  }
   if (url.includes('liked-goods')) return likedStatus === 200 ? json(200, { goods_list: [], last_sno: null }) : new Response('{}', { status: likedStatus });
   if (url.includes('/me/coupons/')) {
     if (couponsStatus !== 200) return new Response('{}', { status: couponsStatus });
@@ -345,13 +351,31 @@ test('probe4910 reports a blocked token request without throwing', async () => {
 
 const SECRET_TOKEN = 'zz-distinctive-member-token-9f3a';
 
-test('probe4910 adds member login and coupon checks when a token is given', async () => {
+const MEMBER_CHECKS = ['4910 member login', '4910 member coupons', '4910 member best coupon'];
+
+test('probe4910 adds member login, coupon and best-coupon checks when a token is given', async () => {
   const checks = await probe4910({ client: probeClient(), memberToken: SECRET_TOKEN });
-  assert.deepEqual(checks.map((c) => [c.name, c.ok]), [...ANON_CHECKS, '4910 member login', '4910 member coupons'].map((n) => [n, true]));
+  assert.deepEqual(checks.map((c) => [c.name, c.ok]), [...ANON_CHECKS, ...MEMBER_CHECKS].map((n) => [n, true]));
   assert.equal(checks[4].detail, 'liked page ok, no exp'); // not a JWT with exp
   assert.equal(checks[5].detail, '3 coupons, 2 usable');
+  assert.equal(checks[6].detail, 'no coupon');
   assert.doesNotMatch(JSON.stringify(checks), new RegExp(SECRET_TOKEN));
   assert.doesNotMatch(JSON.stringify(checks), /secret coupon/);
+});
+
+test('probe4910 best-coupon check reports an applying coupon without its name', async () => {
+  const best = { best_coupon: { sno: 1, name: 'secret coupon 1', coupon_discount: 6000 } };
+  const checks = await probe4910({ client: probeClient({ best }), memberToken: SECRET_TOKEN });
+  const check = checks.find((c) => c.name === '4910 member best coupon');
+  assert.deepEqual(check, { name: '4910 member best coupon', ok: true, detail: 'coupon applies (discount 6000)' });
+  assert.doesNotMatch(JSON.stringify(checks), /secret coupon/);
+});
+
+test('probe4910 reports a failing best-coupon check without throwing or dropping the others', async () => {
+  const checks = await probe4910({ client: probeClient({ bestStatus: 500 }), memberToken: SECRET_TOKEN });
+  assert.deepEqual(checks.map((c) => [c.name, c.ok]), [...ANON_CHECKS, ...MEMBER_CHECKS].map((n) => [n, n !== '4910 member best coupon']));
+  assert.match(checks[6].detail, /500/);
+  assert.doesNotMatch(JSON.stringify(checks), new RegExp(SECRET_TOKEN));
 });
 
 test('probe4910 reports the days left when the member token has an exp', async () => {
@@ -362,9 +386,10 @@ test('probe4910 reports the days left when the member token has an exp', async (
 });
 
 test('probe4910 reports an expired member token', async () => {
-  const checks = await probe4910({ client: probeClient({ likedStatus: 401, couponsStatus: 401 }), memberToken: SECRET_TOKEN });
-  assert.deepEqual(checks.map((c) => [c.name, c.ok]), [...ANON_CHECKS.map((n) => [n, true]), ['4910 member login', false], ['4910 member coupons', false]]);
+  const checks = await probe4910({ client: probeClient({ likedStatus: 401, couponsStatus: 401, bestStatus: 401 }), memberToken: SECRET_TOKEN });
+  assert.deepEqual(checks.map((c) => [c.name, c.ok]), [...ANON_CHECKS.map((n) => [n, true]), ...MEMBER_CHECKS.map((n) => [n, false])]);
   assert.match(checks[4].detail, /401/);
   assert.match(checks[5].detail, /401/);
+  assert.match(checks[6].detail, /401/);
   assert.doesNotMatch(JSON.stringify(checks), new RegExp(SECRET_TOKEN));
 });

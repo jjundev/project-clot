@@ -260,6 +260,14 @@ test('getMarket maps satisfaction and a null reviews_count', async () => {
   assert.equal(calls.at(-1).headers['X-Anonymous-Token'], 'tok-1');
 });
 
+test('getMarket throws when the response has no market object', async () => {
+  for (const body of [{}, { market: null }, { detail: 'not found' }]) {
+    const { fn } = fakeFetch({ lists: [json(200, body)] });
+    const client = createClient({ fetchFn: fn, delayMs: 0, retryBaseMs: 0 });
+    await assert.rejects(client.getMarket(56293), /market 56293 failed: no market in response/);
+  }
+});
+
 const couponItem = (patch = {}) => ({
   coupon_sno: 51346850,
   coupon_name: '[4910] 첫구매 20% 쿠폰',
@@ -352,10 +360,30 @@ test('getBestCoupon encodes options and returns null without a coupon', async ()
   assert.equal(await client.getBestCoupon(430713077, { memberToken: 'SECRET' }), null);
 });
 
-test('getBestCoupon defaults an uncapped coupon to max Infinity and min 0', async () => {
-  const { fn } = fakeFetch({ lists: [json(200, { best_coupon: { sno: 7, name: 'n', discount_price: 2000, coupon_discount: 2000 } })] });
+test('getBestCoupon defaults an uncapped coupon to max Infinity and a missing minimum to null', async () => {
+  const { fn } = fakeFetch({ lists: [json(200, { best_coupon: { sno: '7', name: 'n', discount_price: 2000, coupon_discount: 2000 } })] });
   const client = createClient({ fetchFn: fn, delayMs: 0, retryBaseMs: 0 });
   assert.deepEqual(await client.getBestCoupon(1, { memberToken: 't' }), {
-    couponSno: 7, name: 'n', discount: 2000, percent: null, price: 2000, max: Infinity, min: 0,
+    couponSno: 7, name: 'n', discount: 2000, percent: null, price: 2000, max: Infinity, min: null,
   });
+});
+
+test('getBestCoupon throws when coupon_discount is missing or not a number', async () => {
+  for (const coupon_discount of [undefined, null, 'abc']) {
+    const { fn } = fakeFetch({ lists: [json(200, { best_coupon: { sno: 7, name: 'n', coupon_discount } })] });
+    const client = createClient({ fetchFn: fn, delayMs: 0, retryBaseMs: 0 });
+    await assert.rejects(client.getBestCoupon(1, { memberToken: 'secret-tok' }), (e) => {
+      assert.match(e.message, /best coupon 1 failed: no numeric coupon_discount/);
+      assert.notEqual(e.code, 'MEMBER_AUTH');
+      assert.ok(!e.message.includes('secret-tok'));
+      return true;
+    });
+  }
+});
+
+test('getMyCoupons returns a numeric couponSno', async () => {
+  const { fn } = fakeFetch({ lists: [json(200, { coupon_apply_list: [couponItem({ coupon_sno: '51346850' })] })] });
+  const client = createClient({ fetchFn: fn, delayMs: 0, retryBaseMs: 0 });
+  const [c] = await client.getMyCoupons({ memberToken: 't' });
+  assert.equal(c.couponSno, 51346850);
 });
