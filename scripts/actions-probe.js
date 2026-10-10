@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-// GitHub Actions reachability check: can a runner (datacenter IP) reach Musinsa and stay logged in?
+// GitHub Actions reachability check: can a runner (datacenter IP) reach Musinsa and stay logged in, and reach 4910.kr?
 // Read-only — no DB writes, no commit. Prints statuses and prices only, never a cookie value.
 // Usage: actions-probe.js [goodsNo]   (default: first active VIP item in data/prices.db)
 import { ClotDatabase } from '../src/db.js';
 import { readSessionCookie, verifySession } from '../src/session.js';
 import { USER_AGENT, fetchAuthenticatedPriceInfo } from '../src/myprice.js';
 import { LIKES_TAB_URL } from '../src/likes-https.js';
+import { createClient } from '../src/site4910/client.js';
+import { probe4910 } from '../src/site4910/track.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -77,6 +79,10 @@ if (likes.ok) {
   }
 }
 record('liked goods total', likes.ok && Number.isInteger(total), `${likes.line}, goods=${total}`);
+await sleep(700);
+
+// 4910.kr (Ably) sits behind Cloudflare too; a 403 here means the runner IP is blocked for the 4910 step.
+for (const c of await probe4910({ client: createClient() })) record(c.name, c.ok, c.detail);
 
 const failed = checks.filter((c) => !c.ok).length;
 console.log(failed ? `\n${failed}/${checks.length} checks failed from this runner.` : `\nAll ${checks.length} checks passed from this runner.`);
