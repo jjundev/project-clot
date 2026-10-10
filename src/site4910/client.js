@@ -132,3 +132,67 @@ export function createClient({ fetchFn = fetch, delayMs = 300, retryBaseMs = 100
 
   return { listBrandGoods };
 }
+
+const sliceLabel = (lo, hi) => `${lo}-${hi ?? '∞'}`;
+
+/**
+ * Enumerates every open listing of one brand. A single query's cursor stops near 3,000 listings, so the
+ * price axis is bisected until each slice reports at most sliceMax. The scan is complete only when every
+ * slice succeeded and the slice totals add up to the brand total within COMPLETE_TOLERANCE — the store
+ * counts misses (and later drops listings) only for complete scans.
+ */
+export async function scanBrand(client, brand, { sliceMax = SLICE_MAX } = {}) {
+  const result = { brandSno: brand.sno, brandTotal: null, sliceTotalSum: 0, rows: new Map(), complete: false, problems: [] };
+  try {
+    result.brandTotal = (await client.listBrandGoods({ brandSno: brand.sno, limit: 1 })).totalCount;
+  } catch (err) {
+    result.problems.push(`brand total: ${err.message}`);
+    return result;
+  }
+
+  const maxPages = Math.ceil(sliceMax / PAGE_LIMIT) + 5;
+  const stack = [[0, null]];
+  while (stack.length) {
+    const [lo, hi] = stack.pop();
+    try {
+      const { totalCount } = await client.listBrandGoods({ brandSno: brand.sno, minPrice: lo, maxPrice: hi, limit: 1 });
+      if (totalCount > sliceMax && (hi === null || hi > lo)) {
+        if (hi === null) {
+          const mid = Math.max(lo * 2, 100_000);
+          stack.push([mid, null], [lo, mid - 1]);
+        } else {
+          const mid = Math.floor((lo + hi) / 2);
+          stack.push([mid + 1, hi], [lo, mid]);
+        }
+        continue;
+      }
+      if (totalCount > sliceMax) result.problems.push(`unsplittable ${sliceLabel(lo, hi)}: ${totalCount} listings`);
+      result.sliceTotalSum += totalCount;
+      if (totalCount === 0) continue;
+
+      let lastSno = null;
+      let pages = 0;
+      do {
+        if (pages++ >= maxPages) {
+          result.problems.push(`slice ${sliceLabel(lo, hi)}: page cap ${maxPages} reached`);
+          break;
+        }
+        const page = await client.listBrandGoods({ brandSno: brand.sno, minPrice: lo, maxPrice: hi, lastSno });
+        for (const entry of page.entries) {
+          const row = toRow(entry, brand);
+          if (!row.closed) result.rows.set(row.sno, row);
+        }
+        lastSno = page.entries.length ? page.lastSno : null;
+      } while (lastSno !== null);
+    } catch (err) {
+      result.problems.push(`slice ${sliceLabel(lo, hi)}: ${err.message}`);
+    }
+  }
+
+  const drift = Math.abs(result.sliceTotalSum - result.brandTotal);
+  if (drift > result.brandTotal * COMPLETE_TOLERANCE) {
+    result.problems.push(`slice totals ${result.sliceTotalSum} vs brand total ${result.brandTotal}`);
+  }
+  result.complete = result.problems.length === 0;
+  return result;
+}
