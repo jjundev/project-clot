@@ -158,6 +158,19 @@ describe('Visualizer HTML Generation', () => {
     assert.ok(fs.readFileSync(tempOutput, 'utf-8').includes('"src":"musinsa"'));
   });
 
+  test('template has the source chips and the new-member column', () => {
+    const tempOutput = path.join(os.tmpdir(), `clot-src-chips-${Date.now()}.html`);
+    tempFiles.push(tempOutput);
+    generateDashboardHtml({ db: createTestDb(), outputPath: tempOutput, openBrowser: false });
+    const content = fs.readFileSync(tempOutput, 'utf-8');
+    assert.ok(content.includes('data-src="all"'));
+    assert.ok(content.includes('data-src="musinsa"'));
+    assert.ok(content.includes('data-src="4910"'));
+    assert.ok(content.includes('class="nb-col"'));
+    assert.ok(content.includes('4910에서 보기 ↗'));
+    assert.ok(content.includes('쿠폰적용가(신규회원 기준)'));
+  });
+
   test('generated dashboard asks search engines not to index it', () => {
     const tempOutput = path.join(os.tmpdir(), `clot-noindex-${Date.now()}.html`);
     tempFiles.push(tempOutput);

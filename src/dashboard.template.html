@@ -199,6 +199,7 @@ a{color:inherit}
   padding:2px 6px;border-radius:4px;background:var(--surface);color:var(--muted);
   width:fit-content;margin-bottom:2px;
 }
+.tag-row{display:flex;gap:4px;flex-wrap:wrap}
 
 .sort{margin-left:auto;display:flex;align-items:center;gap:8px}
 .sort label{font-size:12px;color:var(--muted);font-weight:600;letter-spacing:0.02em}
@@ -271,6 +272,7 @@ a{color:inherit}
 .mine{font-size:16px;font-weight:800;letter-spacing:-0.02em}
 .card.out .mine,.card.out .rate{color:var(--muted)}
 .was{font-size:11px;color:var(--muted);text-decoration:line-through;margin-top:2px}
+.was.nb{text-decoration:none}
 .tag{
   display:inline-block;margin-top:7px;font-size:10px;font-weight:700;
   letter-spacing:0.03em;padding:3px 6px;border-radius:4px;
@@ -380,6 +382,9 @@ a{color:inherit}
 .legend .l-normal i{border-top-color:var(--muted);border-top-style:dashed;border-top-width:2px}
 .legend .l-sale i{border-top-color:var(--accent)}
 .legend .l-mine i{border-top-color:var(--down);border-top-width:3px}
+.legend .l-nb{display:none}
+.legend .l-nb i{border-top-color:var(--muted);border-top-width:1.5px}
+.is-4910 .legend .l-nb{display:inline}
 .chart-fallback{
   display:none;padding:40px 20px;text-align:center;color:var(--muted);font-size:13px;
   background:var(--surface);border-radius:var(--r);margin:0 20px;
@@ -402,6 +407,8 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
 .delta-flat{color:var(--muted)}
 .st{font-size:11px;font-weight:700;padding:3px 7px;border-radius:4px;background:var(--surface);color:var(--muted)}
 .st.on{background:var(--down-soft);color:var(--down)}
+.nb-col{display:none}
+.is-4910 .nb-col{display:table-cell}
 
 /* ─── Responsive ─────────────────────────────────────────────────── */
 @media (max-width:1400px){.grid{grid-template-columns:repeat(5,minmax(0,1fr))}}
@@ -530,6 +537,12 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       <kbd>/</kbd>
     </div>
 
+    <div class="chips" role="group" aria-label="출처 필터" data-od-id="source-chips">
+      <button class="chip" type="button" data-src="all" aria-pressed="true" data-od-id="src-all">전체 <span class="c num" id="sAll">—</span></button>
+      <button class="chip" type="button" data-src="musinsa" aria-pressed="false" data-od-id="src-musinsa">무신사 <span class="c num" id="sMusinsa">—</span></button>
+      <button class="chip" type="button" data-src="4910" aria-pressed="false" data-od-id="src-4910">4910 <span class="c num" id="s4910">—</span></button>
+    </div>
+
     <div class="chips" role="group" aria-label="빠른 필터" data-od-id="filter-chips">
       <button class="chip" type="button" data-filter="all" aria-pressed="true" data-od-id="chip-all">전체 <span class="c num" id="cAll">—</span></button>
       <button class="chip" type="button" data-filter="lowest" aria-pressed="false" data-od-id="chip-lowest">최저가 <span class="c num" id="cLowest">—</span></button>
@@ -605,8 +618,9 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         <div class="chart-fallback" id="chartFallback">차트를 불러오지 못했습니다</div>
         <div class="legend">
           <span class="l-normal"><i></i>정상가</span>
-          <span class="l-sale"><i></i>무신사 판매가</span>
+          <span class="l-sale"><i></i>판매가</span>
           <span class="l-mine"><i></i>나의 실구매가</span>
+          <span class="l-nb"><i></i>쿠폰적용가(신규회원 기준)</span>
         </div>
       </div>
       <div class="tbl-wrap">
@@ -614,7 +628,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         <table data-od-id="history-table">
           <thead><tr>
             <th scope="col">일자</th><th scope="col">나의 실구매가</th><th scope="col">전일 대비</th>
-            <th scope="col">무신사 판매가</th><th scope="col">정상가</th><th scope="col">상태</th>
+            <th scope="col">판매가</th><th scope="col" class="nb-col">신규회원가</th><th scope="col">정상가</th><th scope="col">상태</th>
           </tr></thead>
           <tbody id="mRows"></tbody>
         </table>
@@ -660,18 +674,19 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
 
   D.items.forEach(function (it, idx) {
     it._idx = idx;
-    it._hay = ((it.b || '') + ' ' + (it.g || '') + ' ' + it.n).toLowerCase();
+    it._hay = ((it.b || '') + ' ' + (it.m || '') + ' ' + (it.g || '') + ' ' + it.n).toLowerCase();
     it._init = (it.b || it.g || '?').trim().charAt(0).toUpperCase();
 
     var L = it.L;
     it.tracked = L.length > 0;
     if (!it.tracked) {
       it.rate = -1; it.dropAmt = 0; it.isOut = it.s === 'SOLDOUT';
-      it.isLow = false; it.my = null; it.sale = null; it.normal = null;
+      it.isLow = false; it.my = null; it.sale = null; it.normal = null; it.newbie = null;
       return;
     }
     var last = L[L.length - 1], prev = L.length > 1 ? L[L.length - 2] : null;
     it.my = last[3]; it.sale = last[2]; it.normal = last[1];
+    it.newbie = last.length > 7 ? last[7] : null;
     it.isOut = last[4] === 1 || it.s === 'SOLDOUT';
     it.coupon = last[6] > 0 ? last[6] : 0;
     it.couponName = last[5];
@@ -713,13 +728,16 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   var CAT_ORDER = { top: 1, outer: 2, bottom: 3, shoes: 4, bag: 5, etc: 6 };
 
   /* ── 상태 ───────────────────────────────────────────────── */
+  var SRC_KEYS = { all: 1, musinsa: 1, '4910': 1 };
   var state = {
     q: '',
+    src: store('src') || 'all',
     cat: store('cat') || 'all',
     filter: store('filter') || 'all',
     sort: store('sort') || 'rate'
   };
   if (!COUNTS[state.filter]) state.filter = 'all';
+  if (!SRC_KEYS[state.src]) state.src = 'all';
   var view = [];
 
   var grid = document.getElementById('grid');
@@ -728,6 +746,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   sortSel.value = state.sort;
 
   function matches(it) {
+    if (state.src !== 'all' && it.src !== state.src) return false;
     if (state.cat && state.cat !== 'all' && it.c !== state.cat) return false;
     if (state.q && it._hay.indexOf(state.q) === -1) return false;
     switch (state.filter) {
@@ -778,16 +797,19 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         (it.rate > 0 ? '<span class="rate num">' + it.rate + '%</span>' : '') +
         '<span class="mine num">' + won(it.my) + '</span></div>' +
         (it.normal && it.normal !== it.my ? '<div class="was num">' + won(it.normal) + '</div>' : '') +
+        (it.newbie != null && it.newbie !== it.my ? '<div class="was nb num">쿠폰적용가(신규회원 기준) ' + won(it.newbie) + '</div>' : '') +
         (it.coupon > 0 ? '<span class="tag">' + esc(it.couponName || '쿠폰') + ' −' + it.coupon.toLocaleString('ko-KR') + '원</span>' : '');
     }
-    return '<button class="card' + (it.isOut ? ' out' : '') + '" type="button" data-n="' + it.n +
-      '" data-od-id="product-card-' + it.n + '" aria-label="' + esc(it.b + ' ' + it.g) + ' 가격 추이 보기">' +
+    var tags = (it.c ? '<span class="cat-tag">' + esc(CAT_NAMES[it.c] || it.c) + '</span>' : '') +
+      (it.src === '4910' ? '<span class="cat-tag">4910</span>' : '');
+    return '<button class="card' + (it.isOut ? ' out' : '') + '" type="button" data-k="' + esc(it.k) +
+      '" data-od-id="product-card-' + esc(it.k) + '" aria-label="' + esc(it.b + ' ' + it.g) + ' 가격 추이 보기">' +
       '<div class="thumb">' + thumbHtml(it) +
       (pins ? '<div class="pins">' + pins + '</div>' : '') +
       (it.isOut ? '<div class="soldout-veil">품절</div>' : '') +
       '</div>' +
       '<div class="card-body">' +
-      (it.c ? '<span class="cat-tag">' + esc(CAT_NAMES[it.c] || it.c) + '</span>' : '') +
+      (tags ? '<div class="tag-row">' + tags + '</div>' : '') +
       '<div class="brand">' + esc(it.b) + '</div>' +
       '<div class="gname">' + esc(it.g) + '</div>' + body + '</div></button>';
   }
@@ -796,12 +818,13 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     view = D.items.filter(matches).sort(SORTERS[state.sort]);
     document.getElementById('shownN').textContent = view.length;
     var reset = document.getElementById('resetBtn');
-    reset.hidden = (state.filter === 'all' && state.cat === 'all' && !state.q);
+    reset.hidden = (state.filter === 'all' && state.cat === 'all' && state.src === 'all' && !state.q);
 
-    // Dynamic scoped counts for quick filters & KPI cards based on selected category
-    var pool = (state.cat && state.cat !== 'all')
-      ? D.items.filter(function (it) { return it.c === state.cat; })
-      : D.items;
+    function inSrc(it) { return state.src === 'all' || it.src === state.src; }
+    function inCat(it) { return state.cat === 'all' || it.c === state.cat; }
+
+    // Dynamic scoped counts for quick filters & KPI cards based on selected source and category
+    var pool = D.items.filter(function (it) { return inSrc(it) && inCat(it); });
 
     var scopedCounts = {
       all: pool.length,
@@ -821,9 +844,10 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     document.getElementById('kDrop').innerHTML = scopedCounts.drop + '<small>개</small>';
     document.getElementById('kOut').innerHTML = scopedCounts.out + '<small>개</small>';
 
-    // Dynamic category tab counts
-    var catCounts = { all: D.items.length, top: 0, outer: 0, bottom: 0, shoes: 0, bag: 0 };
-    D.items.forEach(function (it) {
+    // Dynamic category tab counts (within the selected source)
+    var srcPool = D.items.filter(inSrc);
+    var catCounts = { all: srcPool.length, top: 0, outer: 0, bottom: 0, shoes: 0, bag: 0 };
+    srcPool.forEach(function (it) {
       if (catCounts[it.c] !== undefined) catCounts[it.c]++;
     });
     document.getElementById('cntAll').textContent = catCounts.all;
@@ -832,6 +856,20 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     document.getElementById('cntBottom').textContent = catCounts.bottom;
     document.getElementById('cntShoes').textContent = catCounts.shoes;
     document.getElementById('cntBag').textContent = catCounts.bag;
+
+    // Source chip counts (within the selected category)
+    var srcCounts = { all: 0, musinsa: 0, '4910': 0 };
+    D.items.forEach(function (it) {
+      if (!inCat(it)) return;
+      srcCounts.all++;
+      if (srcCounts[it.src] !== undefined) srcCounts[it.src]++;
+    });
+    document.getElementById('sAll').textContent = srcCounts.all;
+    document.getElementById('sMusinsa').textContent = srcCounts.musinsa;
+    document.getElementById('s4910').textContent = srcCounts['4910'];
+    document.querySelectorAll('[data-src]').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.dataset.src === state.src));
+    });
 
     document.querySelectorAll('[data-cat]').forEach(function (b) {
       b.setAttribute('aria-pressed', String(b.dataset.cat === state.cat));
@@ -856,6 +894,13 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     clearTimeout(deb);
     deb = setTimeout(function () { state.q = qEl.value.trim().toLowerCase(); render(); }, 180);
   });
+  document.querySelectorAll('[data-src]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      state.src = (state.src === b.dataset.src && b.dataset.src !== 'all') ? 'all' : b.dataset.src;
+      store('src', state.src);
+      render();
+    });
+  });
   document.querySelectorAll('[data-cat]').forEach(function (b) {
     b.addEventListener('click', function () {
       state.cat = (state.cat === b.dataset.cat && b.dataset.cat !== 'all') ? 'all' : b.dataset.cat;
@@ -874,8 +919,8 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     state.sort = sortSel.value; store('sort', state.sort); render();
   });
   document.getElementById('resetBtn').addEventListener('click', function () {
-    state.filter = 'all'; state.cat = 'all'; state.q = ''; qEl.value = '';
-    store('filter', 'all'); store('cat', 'all'); render();
+    state.filter = 'all'; state.cat = 'all'; state.src = 'all'; state.q = ''; qEl.value = '';
+    store('filter', 'all'); store('cat', 'all'); store('src', 'all'); render();
   });
 
   /* ── 테마 ───────────────────────────────────────────────── */
@@ -908,7 +953,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
 
   grid.addEventListener('click', function (e) {
     var c = e.target.closest('.card');
-    if (c) openModal(Number(c.dataset.n));
+    if (c) openModal(c.dataset.k);
   });
 
   function updateStepper(i) {
@@ -917,10 +962,10 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     document.getElementById('mPos').textContent = i >= 0 ? (i + 1) + ' / ' + view.length : '—';
   }
 
-  function openModal(no) {
-    var it = D.items.filter(function (x) { return x.n === no; })[0];
+  function openModal(key) {
+    var it = D.items.filter(function (x) { return x.k === String(key); })[0];
     if (!it) return;
-    if (view.indexOf(it) === -1) { state.filter = 'all'; state.q = ''; qEl.value = ''; render(); }
+    if (view.indexOf(it) === -1) { state.filter = 'all'; state.src = 'all'; state.q = ''; qEl.value = ''; render(); }
     lastFocus = document.activeElement;
     modalItem = it; range = 0;
     fillModal(it);
@@ -928,7 +973,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     document.body.style.overflow = 'hidden';
     document.querySelector('.sheet-body').scrollTop = 0;
     document.getElementById('closeBtn').focus();
-    setUrl('?goods=' + it.n);
+    setUrl('?goods=' + it.k);
   }
   function closeModal() {
     scrim.classList.remove('open');
@@ -946,7 +991,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     modalItem = view[j]; range = 0;
     fillModal(modalItem);
     document.querySelector('.sheet-body').scrollTop = 0;
-    setUrl('?goods=' + modalItem.n);
+    setUrl('?goods=' + modalItem.k);
   }
 
   document.getElementById('closeBtn').addEventListener('click', closeModal);
@@ -991,8 +1036,13 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     document.getElementById('mBrand').textContent = it.b;
     document.getElementById('mName').textContent = it.g;
     document.getElementById('mNo').textContent = '상품번호 ' + it.n;
+    var is4910 = it.src === '4910';
+    var linkTxt = is4910 ? '4910에서 보기 ↗' : '무신사에서 보기 ↗';
+    document.getElementById('sheet').classList.toggle('is-4910', is4910);
     document.getElementById('mLink').href = it.u;
+    document.getElementById('mLink').textContent = linkTxt;
     document.getElementById('mLinkMobile').href = it.u;
+    document.getElementById('mLinkMobile').textContent = linkTxt;
 
     var pr = document.getElementById('mPrice'), fx = document.getElementById('mFacts');
     if (!it.tracked) {
@@ -1005,7 +1055,8 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       var f = [];
       f.push('<span class="fact' + (it.isLow ? ' low' : '') + '">역대 최저가 <b class="num">' + won(it.lowMy) +
         '</b> · ' + md(it.lowDate) + '</span>');
-      f.push('<span class="fact">무신사 판매가 <b class="num">' + won(it.sale) + '</b></span>');
+      f.push('<span class="fact">' + (is4910 ? '4910 표시가' : '무신사 판매가') + ' <b class="num">' + won(it.sale) + '</b></span>');
+      if (it.newbie != null) f.push('<span class="fact">쿠폰적용가(신규회원 기준) <b class="num">' + won(it.newbie) + '</b></span>');
       if (it.coupon > 0) f.push('<span class="fact">' + esc(it.couponName || '쿠폰') + ' <b class="num">−' + won(it.coupon) + '</b></span>');
       if (it.isOut) f.push('<span class="fact out">품절</span>');
       fx.innerHTML = f.join('');
@@ -1084,41 +1135,49 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     var sales = rows.map(function (r) { return r[2]; });
     var mines = rows.map(function (r) { return r[3]; });
     var outs = rows.map(function (r) { return r[4] === 1; });
+    var is4910 = it.src === '4910';
+    var newbies = is4910 ? rows.map(function (r) { return r.length > 7 ? r[7] : null; }) : [];
 
     var okMine = mines.filter(function (v) { return v != null; });
     var okNorm = normals.filter(function (v) { return v != null; });
     if (!okMine.length) { cv.parentNode.style.display = 'none'; fb.style.display = 'block';
       fb.textContent = '선택한 기간에 관측치가 없습니다'; return; }
     var minMine = Math.min.apply(null, okMine);
+    var okNb = newbies.filter(function (v) { return v != null; });
+    var minAll = okNb.length ? Math.min(minMine, Math.min.apply(null, okNb)) : minMine;
     var maxNorm = okNorm.length ? Math.max.apply(null, okNorm) : minMine;
     var lowIdx = mines.indexOf(minMine);
 
     /* U9 — 0원 시작이 아닌 동적 스케일링 */
-    var yMin = Math.floor(minMine * 0.9 / 1000) * 1000;
+    var yMin = Math.floor(minAll * 0.9 / 1000) * 1000;
     var yMax = Math.ceil(maxNorm * 1.05 / 1000) * 1000;
+
+    var datasets = [
+      { label: '정상가', data: normals, borderColor: cMuted, borderWidth: 1.5, borderDash: [5, 4],
+        pointRadius: 0, pointHoverRadius: 0, tension: 0, fill: false },
+      { label: is4910 ? '4910 표시가' : '무신사 판매가', data: sales, borderColor: cAcc, borderWidth: 2,
+        pointRadius: 3, pointBackgroundColor: cAcc, pointBorderColor: cBg, pointBorderWidth: 1.5,
+        pointHoverRadius: 5, tension: 0.1, fill: false },
+      { label: '나의 실구매가', data: mines, borderColor: cDown, borderWidth: 3,
+        tension: 0.1, fill: false,
+        segment: { borderDash: function (c) { return outs[c.p1DataIndex] ? [4, 4] : undefined; } },
+        pointStyle: rows.map(function (r, i) { return outs[i] ? 'crossRot' : 'circle'; }),
+        pointRadius: rows.map(function (r, i) { return outs[i] ? 5 : (i === lowIdx ? 6.5 : 3.5); }),
+        pointBackgroundColor: rows.map(function (r, i) { return outs[i] ? cMuted : cDown; }),
+        pointBorderColor: rows.map(function (r, i) { return outs[i] ? cMuted : cBg; }),
+        pointBorderWidth: rows.map(function (r, i) { return outs[i] ? 2 : 2; }),
+        pointHoverRadius: 7 }
+    ];
+    if (is4910) {
+      datasets.push({ label: '쿠폰적용가(신규회원)', data: newbies, borderColor: cMuted, borderWidth: 1.5,
+        pointRadius: 2, pointBackgroundColor: cMuted, pointBorderWidth: 0,
+        pointHoverRadius: 4, tension: 0.1, fill: false });
+    }
 
     chart = new Chart(cv, {
       type: 'line',
       plugins: [lowestPin],
-      data: {
-        labels: labels,
-        datasets: [
-          { label: '정상가', data: normals, borderColor: cMuted, borderWidth: 1.5, borderDash: [5, 4],
-            pointRadius: 0, pointHoverRadius: 0, tension: 0, fill: false },
-          { label: '무신사 판매가', data: sales, borderColor: cAcc, borderWidth: 2,
-            pointRadius: 3, pointBackgroundColor: cAcc, pointBorderColor: cBg, pointBorderWidth: 1.5,
-            pointHoverRadius: 5, tension: 0.1, fill: false },
-          { label: '나의 실구매가', data: mines, borderColor: cDown, borderWidth: 3,
-            tension: 0.1, fill: false,
-            segment: { borderDash: function (c) { return outs[c.p1DataIndex] ? [4, 4] : undefined; } },
-            pointStyle: rows.map(function (r, i) { return outs[i] ? 'crossRot' : 'circle'; }),
-            pointRadius: rows.map(function (r, i) { return outs[i] ? 5 : (i === lowIdx ? 6.5 : 3.5); }),
-            pointBackgroundColor: rows.map(function (r, i) { return outs[i] ? cMuted : cDown; }),
-            pointBorderColor: rows.map(function (r, i) { return outs[i] ? cMuted : cBg; }),
-            pointBorderWidth: rows.map(function (r, i) { return outs[i] ? 2 : 2; }),
-            pointHoverRadius: 7 }
-        ]
-      },
+      data: { labels: labels, datasets: datasets },
       options: {
         responsive: true, maintainAspectRatio: false,
         animation: { duration: 260 },
@@ -1158,7 +1217,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   function fillTable(it) {
     var tb = document.getElementById('mRows');
     if (!it.tracked) {
-      tb.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:28px 0">아직 관측 기록이 없습니다</td></tr>';
+      tb.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:28px 0">아직 관측 기록이 없습니다</td></tr>';
       return;
     }
     var rows = slice(it).slice().reverse();
@@ -1174,6 +1233,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         '<td class="mine-c num">' + won(r[3]) + '</td>' +
         '<td>' + dCell + '</td>' +
         '<td class="num">' + won(r[2]) + '</td>' +
+        '<td class="nb-col num">' + won(r.length > 7 ? r[7] : null) + '</td>' +
         '<td class="num" style="color:var(--muted)">' + won(r[1]) + '</td>' +
         '<td>' + (r[4] === 1
           ? '<span class="st">품절</span>'
@@ -1184,7 +1244,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   /* ── 초기 렌더 + 딥링크 (기획 S9) ──────────────────────── */
   render();
   var dl = new URLSearchParams(location.search).get('goods') || (D.targetGoodsNo ? String(D.targetGoodsNo) : null);
-  if (dl) openModal(Number(dl));
+  if (dl) openModal(dl);
 })();
 </script>
 </body>
