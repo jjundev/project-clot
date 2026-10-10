@@ -5,13 +5,12 @@ on:
     branches: [main]
     paths:
       - data/prices.db
-      - data/4910.db
       - src/dashboard.template.html
       - src/visualizer.js
       - .github/workflows/pages.yml
   # Pushes made with GITHUB_TOKEN (the Actions daily run) do not fire `push`, so follow it explicitly.
   workflow_run:
-    workflows: ['Daily price tracker']
+    workflows: ['Daily price tracker', '4910 tracker']
     types: [completed]
     branches: [main]
   workflow_dispatch:
@@ -42,13 +41,20 @@ jobs:
         with:
           node-version: 24 # node:sqlite
 
+      # 4910.db lives in the data-4910 Release, not in git. A missing asset must not fail the deploy:
+      # the build then skips the 4910 section and the Musinsa dashboard still ships.
+      - name: Pull 4910.db from the data-4910 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node src/cli.js 4910-db pull || echo "::warning::4910.db not available"
+
       - name: Build dashboard from the committed prices.db
         run: |
           mkdir _site
           CLOT_DASHBOARD_PATH=_site/index.html node src/cli.js visualize --no-open
           printf 'User-agent: *\nDisallow: /\n' > _site/robots.txt
           test -s _site/index.html
-          test -s _site/4910-all.js || echo "::warning::4910-all.js not built"
+          test -s _site/4910/index.js || echo "::warning::4910 index not built"
 
       - uses: actions/configure-pages@v5
 
