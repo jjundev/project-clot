@@ -17,7 +17,16 @@ function dropLines(drops) {
   );
 }
 
-export function format4910Digest(result, { limit = 10 } = {}) {
+function likedDropLines(drops) {
+  return drops.map(
+    (d) =>
+      `🔻 [${escapeHtml(d.market_name ?? '-')}] ${escapeHtml(d.name)} — ${fmt(d.prevPrice)}→${fmt(d.currentPrice)}원\n` +
+      `  • <a href="${escapeHtml(d.url)}">바로가기</a>`
+  );
+}
+
+// `liked` is the liked-items sync result; 'none' (no token) and null add nothing, 'expired' adds a renewal warning.
+export function format4910Digest(result, { limit = 10, liked = null } = {}) {
   const head = [`<b>🇯🇵 [Project-Clot] 4910 유니클로·GU 리포트 (${result.date})</b>\n`, scanLine(result.brandCounts)];
   const { diff } = result;
   if (!diff) return head.join('\n');
@@ -28,12 +37,24 @@ export function format4910Digest(result, { limit = 10 } = {}) {
       : `신규 ${fmt(diff.added.length)} · 가격변동 ${fmt(diff.priceChanged)} · 종료 ${fmt(diff.dropped.length)} · 재등장 ${fmt(diff.revived.length)}`
   );
 
+  let likedDrops = [];
+  if (liked?.memberStatus === 'expired') {
+    head.push('⚠️ 4910 로그인 만료 — ABLY_JWT_TOKEN 갱신 필요');
+  } else if (liked?.memberStatus === 'ok') {
+    head.push(`찜 ${fmt(liked.liked)}개 · 가격 기록 ${fmt(liked.logged)}개`);
+    likedDrops = likedDropLines(liked.drops.slice(0, limit));
+  }
+
   const lines = dropLines(diff.drops.slice(0, limit));
-  const build = () =>
-    lines.length ? [...head, '', `<b>📉 10% 이상 하락 (상위 ${lines.length}):</b>`, ...lines].join('\n') : head.join('\n');
+  const build = () => {
+    const out = [...head];
+    if (lines.length) out.push('', `<b>📉 10% 이상 하락 (상위 ${lines.length}):</b>`, ...lines);
+    if (likedDrops.length) out.push('', `<b>💜 찜 상품 회원가 하락 (상위 ${likedDrops.length}):</b>`, ...likedDrops);
+    return out.join('\n');
+  };
   let text = build();
-  while (text.length > TELEGRAM_MAX && lines.length) {
-    lines.pop();
+  while (text.length > TELEGRAM_MAX && (lines.length || likedDrops.length)) {
+    (lines.length ? lines : likedDrops).pop();
     text = build();
   }
   return text.length > TELEGRAM_MAX ? text.slice(0, TELEGRAM_MAX) : text;

@@ -29,6 +29,7 @@ import { BRANDS_4910, createClient } from './site4910/client.js';
 import { Store4910 } from './site4910/store.js';
 import { track4910 } from './site4910/track.js';
 import { format4910Digest } from './site4910/digest.js';
+import { syncLiked4910, readAblyToken } from './site4910/liked.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -479,8 +480,9 @@ export async function sessionKeeperSuffix({
 }
 
 /**
- * Scans Uniqlo and GU on 4910.kr into data/4910.db and sends one digest. Never throws: a 4910 failure
- * (runner IP blocked, API change) must not stop the Musinsa commit that follows in the daily run.
+ * Scans Uniqlo and GU on 4910.kr into data/4910.db, records member prices of the liked items, and sends one digest.
+ * Never throws: a 4910 failure (runner IP blocked, API change, expired login) must not stop the Musinsa commit that
+ * follows in the daily run. The scan and the liked sync fail independently; only a successful scan sends the digest.
  */
 export async function run4910Step({
   flags = {},
@@ -488,6 +490,8 @@ export async function run4910Step({
   openStore = () => new Store4910(),
   makeClient = () => createClient(),
   trackFn = track4910,
+  syncLikedFn = syncLiked4910,
+  readToken = readAblyToken,
   notify = sendTelegramMessage,
   log = console.log,
 } = {}) {
@@ -506,19 +510,49 @@ export async function run4910Step({
   const dryRun = Boolean(flags['dry-run']);
   let store = null;
   try {
-    if (!dryRun) store = openStore();
-    const result = await trackFn({ client: makeClient(), store, date: today, brands, dryRun, log });
+    let client = null;
+    let result = null;
+    let scanError = null;
+    try {
+      if (!dryRun) store = openStore();
+      client = makeClient();
+      result = await trackFn({ client, store, date: today, brands, dryRun, log });
+    } catch (err) {
+      scanError = err;
+      log(`⚠️ [4910] 수집 실패 (${err.message})`);
+    }
+
     if (dryRun) {
+      if (scanError) return { ran: true, ok: false, error: scanError.message };
       log(format4910Digest(result));
       return { ran: true, ok: true, result };
     }
+
+    let liked = null;
+    if (store && client) {
+      const memberToken = readToken();
+      if (!memberToken) {
+        log('[4910] ABLY_JWT_TOKEN 없음 — 찜 가격 기록 건너뜀');
+      } else {
+        try {
+          liked = await syncLikedFn({ client, store, date: today, memberToken, log });
+          log(`💜 [4910] 찜 ${liked.liked}개 · 가격 기록 ${liked.logged}개 (${liked.memberStatus})`);
+        } catch (err) {
+          liked = null;
+          log(`⚠️ [4910] 찜 가격 기록 실패 (${err.message})`);
+        }
+      }
+    }
+
+    if (scanError) return { ran: true, ok: false, error: scanError.message, liked };
+
     const { diff } = result;
     log(
       `🇯🇵 [4910] ${result.brandCounts.map((b) => `${b.name} ${b.scanned}`).join(' / ')} 스캔 — ` +
         `가격변동 ${diff.priceChanged}, 신규 ${diff.added.length}, 종료 ${diff.dropped.length}`
     );
-    await notify(format4910Digest(result));
-    return { ran: true, ok: true, result };
+    await notify(format4910Digest(result, { liked }));
+    return { ran: true, ok: true, result, liked };
   } catch (err) {
     log(`⚠️ [4910] 수집 실패 (${err.message})`);
     return { ran: true, ok: false, error: err.message };

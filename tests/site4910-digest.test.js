@@ -78,3 +78,57 @@ test('keeps at most 10 drops and stays under 4096 chars', () => {
   assert.ok(shown > 0 && shown < 10);
   assert.match(huge, new RegExp(`상위 ${shown}\\)`));
 });
+
+const likedDrop = (sno, prevPrice, currentPrice, name = `liked ${sno}`) => ({
+  sno, name, market_name: '모에모에', url: `https://4910.kr/goods/${sno}`, prevPrice, currentPrice,
+});
+const likedOk = (drops = [likedDrop(7, 20000, 19440, '모에모에 상품')]) => ({ memberStatus: 'ok', liked: 12, logged: 11, drops });
+
+test('liked ok adds the count line and a 💜 drop section', () => {
+  const text = format4910Digest(result, { liked: likedOk() });
+  assert.match(text, /찜 12개 · 가격 기록 11개/);
+  assert.match(text, /<b>💜 찜 상품 회원가 하락 \(상위 1\):<\/b>/);
+  assert.match(text, /🔻 \[모에모에\] 모에모에 상품 — 20,000→19,440원\n  • <a href="https:\/\/4910\.kr\/goods\/7">바로가기<\/a>/);
+  assert.ok(text.indexOf('찜 12개') > text.indexOf('신규 3'));
+  assert.ok(text.indexOf('📉') < text.indexOf('💜'));
+});
+
+test('liked ok with no drops adds only the count line', () => {
+  const text = format4910Digest(result, { liked: likedOk([]) });
+  assert.match(text, /찜 12개 · 가격 기록 11개/);
+  assert.doesNotMatch(text, /💜/);
+});
+
+test('liked drops respect the limit', () => {
+  const drops = Array.from({ length: 5 }, (_, i) => likedDrop(i + 1, 20000, 19000));
+  const text = format4910Digest({ ...result, diff: diff({ drops: [] }) }, { limit: 3, liked: likedOk(drops) });
+  assert.match(text, /💜 찜 상품 회원가 하락 \(상위 3\)/);
+  assert.equal((text.match(/바로가기/g) || []).length, 3);
+});
+
+test('liked expired adds the expiry warning', () => {
+  const text = format4910Digest(result, { liked: { memberStatus: 'expired', liked: 0, logged: 0, drops: [] } });
+  assert.match(text, /⚠️ 4910 로그인 만료 — ABLY_JWT_TOKEN 갱신 필요/);
+  assert.doesNotMatch(text, /찜 \d+개/);
+});
+
+test('liked none or null adds nothing', () => {
+  const base = format4910Digest(result);
+  assert.equal(format4910Digest(result, { liked: null }), base);
+  assert.equal(format4910Digest(result, { liked: { memberStatus: 'none', liked: 0, logged: 0, drops: [] } }), base);
+});
+
+test('liked lines are not added to a dry-run digest', () => {
+  const text = format4910Digest({ ...result, diff: null }, { liked: likedOk() });
+  assert.doesNotMatch(text, /찜|💜/);
+});
+
+test('over 4096 chars drops scan lines before liked lines', () => {
+  const many = Array.from({ length: 10 }, (_, i) => drop(i + 1, 50000, 40000, { name: '가'.repeat(300) }));
+  const likedMany = Array.from({ length: 10 }, (_, i) => likedDrop(i + 1, 20000, 19000, '나'.repeat(100)));
+  const text = format4910Digest({ ...result, diff: diff({ drops: many }) }, { liked: likedOk(likedMany) });
+  assert.ok(text.length <= 4096, `length ${text.length}`);
+  assert.equal((text.match(/💜 찜 상품 회원가 하락 \(상위 10\)/g) || []).length, 1);
+  const scanShown = Number(text.match(/📉 10% 이상 하락 \(상위 (\d+)\)/)[1]);
+  assert.ok(scanShown > 0 && scanShown < 10, `scan lines shown ${scanShown}`);
+});

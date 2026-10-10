@@ -167,3 +167,93 @@ test('a runner blocked by Cloudflare logs 수집 실패 and sends no digest (rea
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+const LIKED = { memberStatus: 'ok', liked: 3, logged: 3, drops: [] };
+
+function likedSpy(result = LIKED) {
+  const fn = async (args) => {
+    fn.calls.push(args);
+    return result;
+  };
+  fn.calls = [];
+  return fn;
+}
+
+test('run4910Step runs the liked sync after the scan and passes it to the digest', async () => {
+  const store = fakeStore();
+  const notify = spyFn();
+  const log = logSpy();
+  const client = { id: 'c' };
+  const syncLikedFn = likedSpy();
+  const res = await run4910Step({
+    today: TODAY, openStore: () => store, makeClient: () => client, trackFn: trackSpy(), notify, log, readToken: () => 'T', syncLikedFn,
+  });
+  assert.equal(res.ok, true);
+  assert.equal(syncLikedFn.calls.length, 1);
+  assert.deepEqual(syncLikedFn.calls[0], { client, store, date: TODAY, memberToken: 'T', log });
+  assert.equal(notify.calls.length, 1);
+  assert.match(notify.calls[0][0], /찜 3개 · 가격 기록 3개/);
+  assert.equal(res.liked, LIKED);
+  assert.match(log.lines.join('\n'), /💜 \[4910\] 찜 3개 · 가격 기록 3개 \(ok\)/);
+  assert.doesNotMatch(log.lines.join('\n'), /\bT\b.*token/i);
+  assert.deepEqual(store.calls, ['checkpoint', 'close']);
+});
+
+test('run4910Step without a token skips the liked sync', async () => {
+  const notify = spyFn();
+  const log = logSpy();
+  const syncLikedFn = likedSpy();
+  const res = await run4910Step({
+    today: TODAY, openStore: fakeStore, makeClient: () => ({}), trackFn: trackSpy(), notify, log, readToken: () => null, syncLikedFn,
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.liked, null);
+  assert.equal(syncLikedFn.calls.length, 0);
+  assert.match(log.lines.join('\n'), /ABLY_JWT_TOKEN 없음/);
+  assert.equal(notify.calls.length, 1);
+  assert.doesNotMatch(notify.calls[0][0], /찜|로그인 만료/);
+});
+
+test('a liked sync failure still sends the scan digest', async () => {
+  const store = fakeStore();
+  const notify = spyFn();
+  const log = logSpy();
+  const res = await run4910Step({
+    today: TODAY, openStore: () => store, makeClient: () => ({}), trackFn: trackSpy(), notify, log, readToken: () => 'T',
+    syncLikedFn: async () => {
+      throw new Error('HTTP 500');
+    },
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.liked, null);
+  assert.equal(notify.calls.length, 1);
+  assert.match(log.lines.join('\n'), /⚠️ \[4910\] 찜 가격 기록 실패 \(HTTP 500\)/);
+  assert.deepEqual(store.calls, ['checkpoint', 'close']);
+});
+
+test('a failed scan still runs the liked sync but sends no digest', async () => {
+  const notify = spyFn();
+  const log = logSpy();
+  const syncLikedFn = likedSpy();
+  const res = await run4910Step({
+    today: TODAY, openStore: fakeStore, makeClient: () => ({}), notify, log, readToken: () => 'T', syncLikedFn,
+    trackFn: async () => {
+      throw new Error('HTTP 403');
+    },
+  });
+  assert.equal(res.ok, false);
+  assert.equal(res.error, 'HTTP 403');
+  assert.equal(syncLikedFn.calls.length, 1);
+  assert.equal(notify.calls.length, 0);
+  assert.match(log.lines.join('\n'), /⚠️ \[4910\] 수집 실패 \(HTTP 403\)/);
+});
+
+test('--dry-run never runs the liked sync', async () => {
+  const syncLikedFn = likedSpy();
+  const res = await run4910Step({
+    flags: { 'dry-run': true }, today: TODAY, openStore: fakeStore, makeClient: () => ({}), trackFn: trackSpy(), notify: spyFn(), log: logSpy(),
+    readToken: () => 'T', syncLikedFn,
+  });
+  assert.equal(res.ok, true);
+  assert.equal(syncLikedFn.calls.length, 0);
+});
