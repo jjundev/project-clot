@@ -431,3 +431,12 @@ test('getQualifiedSamples ignores listings under 10,000 won', () => {
   assert.equal(high.sno, 3);
   assert.deepEqual(s.getQualifiedSamples(99), { low: null, high: null });
 });
+
+test('getActivePriceRows returns only sno, market_sno and sale_price of ACTIVE listings', () => {
+  s.applyScan('2026-10-10', [row(1, 50000), row(2, 30000), { ...row(3, 20000), market_sno: 11 }], BOTH);
+  s.db.prepare(`UPDATE goods SET status = 'OUT_OF_SCOPE' WHERE sno = 2`).run();
+  assert.deepEqual(s.getActivePriceRows().map((r) => ({ ...r })), [
+    { sno: 1, market_sno: 10, sale_price: 50000 },
+    { sno: 3, market_sno: 11, sale_price: 20000 },
+  ]);
+});

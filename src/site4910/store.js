@@ -349,6 +349,11 @@ export class Store4910 {
     return { low: pick('ASC'), high: pick('DESC') };
   }
 
+  // Only the columns the coupon price needs: goods runs to ~300k rows.
+  getActivePriceRows() {
+    return this.db.prepare(`SELECT sno, market_sno, sale_price FROM goods WHERE status = 'ACTIVE' ORDER BY sno`).all();
+  }
+
   recordScanRun({ date, brandCounts, complete, changed, added, dropped, durationMs }) {
     this.db
       .prepare(`
