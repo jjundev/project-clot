@@ -271,7 +271,7 @@ export function buildClotDataPayload(dbOrWrapper, { targetGoodsNo, db4910 = null
  * @param {boolean} [options.openBrowser=true]
  * @param {number|string} [options.targetGoodsNo]
  * @param {string} [options.db4910Path] 4910.db to merge when the file exists.
- * @returns {{ outputPath: string, targetGoodsNo?: number, totalItems: number }}
+ * @returns {{ outputPath: string, targetGoodsNo?: number, totalItems: number, total4910All: number }}
  */
 export function generateDashboardHtml({
   db,
@@ -302,6 +302,7 @@ export function generateDashboardHtml({
   const digits = targetGoodsNo != null ? String(targetGoodsNo).replace(/\D/g, '') : '';
   const gNo = digits.length > 0 ? Number(digits) : undefined;
   let payload;
+  let scan = null;
   try {
     // A broken 4910.db (corrupt, locked, schema drift) must never block the Musinsa dashboard.
     if (db4910Path && fs.existsSync(db4910Path)) {
@@ -309,9 +310,11 @@ export function generateDashboardHtml({
       try {
         db4910 = new DatabaseSync(db4910Path, { readOnly: true });
         payload = buildClotDataPayload(activeDb, { targetGoodsNo: gNo, db4910 });
+        scan = buildScan4910Payload(db4910);
       } catch (err) {
         console.warn(`⚠️ [4910] 대시보드에서 4910 항목 제외: ${err.message}`);
         payload = undefined;
+        scan = null;
       } finally {
         if (db4910) db4910.close();
       }
@@ -322,6 +325,19 @@ export function generateDashboardHtml({
       activeDb.close();
     }
   }
+  payload.has4910All = scan != null;
+  payload.total4910All = scan ? scan.r.length : 0;
+
+  // Every scanned listing ships beside the HTML and loads only when the 4910 전체 chip asks for it. A build without
+  // one removes yesterday's file so the page never serves stale listings.
+  const scanPath = path.join(outDir, '4910-all.js');
+  if (scan) {
+    const scanJson = JSON.stringify(scan).replace(/<\/script/gi, '<\\/script');
+    fs.writeFileSync(scanPath, `window.__CLOT_4910_ALL__ = ${scanJson};\n`, 'utf-8');
+  } else {
+    fs.rmSync(scanPath, { force: true });
+  }
+
   const templateContent = fs.readFileSync(templatePath, 'utf-8');
 
   // Replace data placeholder using a function replacer to prevent '$' corruption (CRLF tolerant)
@@ -360,5 +376,6 @@ export function generateDashboardHtml({
     outputPath,
     targetGoodsNo: gNo !== undefined ? gNo : undefined,
     totalItems: payload.items.length,
+    total4910All: payload.total4910All,
   };
 }
