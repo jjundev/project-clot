@@ -28,7 +28,10 @@ function sellerCouponFromBest(best) {
 }
 
 const walletRows = (rows) => rows.filter((c) => c.market_sno == null);
-const sellerRowsSeen = (rows, marketSno, date) => rows.filter((c) => c.market_sno === Number(marketSno) && c.seen_date === date);
+// A seller-only coupon is found by its own sno, whichever seller's row it currently sits on: one coupon can reach
+// several sellers, but wallet_coupons keeps one row per coupon. Empty when it was not seen on `date`.
+const sellerCouponSeen = (rows, couponSno, date) =>
+  rows.filter((c) => c.coupon_sno === couponSno && c.market_sno != null && c.seen_date === date);
 
 // Today's sample listings of a seller: the priciest first, then the cheapest, once each.
 function samplesOf(store, marketSno) {
@@ -97,7 +100,7 @@ export async function learnMarketCoupons({ client, store, date, marketSnos, memb
         else if (walletSnos.has(best.couponSno)) set = wallet;
         else {
           store.addMarketCoupon(date, marketSno, sellerCouponFromBest(best));
-          set = sellerRowsSeen(store.getWallet(), marketSno, date);
+          set = sellerCouponSeen(store.getWallet(), best.couponSno, date);
         }
       }
       if (Math.abs(L - (best?.discount ?? 0) - couponPrice(L, set)) > 10) mismatch = true;
@@ -121,7 +124,8 @@ export async function learnMarketCoupons({ client, store, date, marketSnos, memb
 
 /**
  * Prices every ACTIVE listing from its seller's market_coupons row for `date`: no row or a mismatch → NULL, no coupon
- * → sale price, a wallet coupon → the whole wallet, a seller-only coupon → that seller's coupons seen on `date`.
+ * → sale price, a wallet coupon → the whole wallet, a seller-only coupon → that coupon's row if it was seen on `date`,
+ * else NULL (never the list price: the seller does have a coupon, we just cannot price it).
  */
 export function applyCouponPrices({ store, date }) {
   const today = store.getMarketCoupons(date);
@@ -131,7 +135,11 @@ export function applyCouponPrices({ store, date }) {
   const setOf = new Map();
   for (const [marketSno, row] of today) {
     if (row.mismatch || row.coupon_sno == null) continue;
-    setOf.set(marketSno, walletSnos.has(row.coupon_sno) ? wallet : sellerRowsSeen(all, marketSno, date));
+    if (walletSnos.has(row.coupon_sno)) setOf.set(marketSno, wallet);
+    else {
+      const own = sellerCouponSeen(all, row.coupon_sno, date);
+      if (own.length) setOf.set(marketSno, own);
+    }
   }
 
   const prices = new Map();
@@ -140,7 +148,8 @@ export function applyCouponPrices({ store, date }) {
     const row = today.get(g.market_sno);
     let price = null;
     if (g.sale_price != null && row && !row.mismatch) {
-      price = row.coupon_sno == null ? g.sale_price : couponPrice(g.sale_price, setOf.get(g.market_sno));
+      if (row.coupon_sno == null) price = g.sale_price;
+      else if (setOf.has(g.market_sno)) price = couponPrice(g.sale_price, setOf.get(g.market_sno));
     }
     prices.set(g.sno, price);
     if (price != null) priced++;

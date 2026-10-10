@@ -119,6 +119,28 @@ test('applyCouponPrices uses only seller-only coupons seen today', () => {
   assert.equal(store.getGoods(1).coupon_price, 47650);
 });
 
+test('a seller-only coupon row that is missing or not seen today prices the seller NULL', () => {
+  store.replaceWallet(DATE, W);
+  seed(goods(1, 10, 50150), goods(2, 20, 50150));
+  store.addMarketCoupon('2026-10-10', 10, pct(998, 5, Infinity, { min: 0 }));
+  store.recordMarketCoupon({ market_sno: 10, date: DATE, coupon_sno: 998, coupon_name: 'stale', checked_price: 50150, coupon_discount: 2508, mismatch: false });
+  store.recordMarketCoupon({ market_sno: 20, date: DATE, coupon_sno: 997, coupon_name: 'gone', checked_price: 50150, coupon_discount: 2508, mismatch: false });
+  assert.deepEqual(applyCouponPrices({ store, date: DATE }), { priced: 0, nulled: 2 });
+  assert.equal(store.getGoods(1).coupon_price, null);
+  assert.equal(store.getGoods(2).coupon_price, null);
+});
+
+test('two sellers whose best is the same seller-only coupon both get the discounted price', async () => {
+  seed(goods(1, 10, 50150), goods(2, 20, 50150));
+  const shared = { couponSno: 999, name: '[4910] 공동 5% 쿠폰', discount: 2507, percent: 5, price: null, max: Infinity, min: 0 };
+  const res = await learn(fakeClient({ best: { 10: shared, 20: shared } }), [10, 20]);
+  assert.equal(res.eligible, 2);
+  assert.equal(res.mismatched, 0);
+  assert.deepEqual(applyCouponPrices({ store, date: DATE }), { priced: 2, nulled: 0 });
+  assert.equal(store.getGoods(1).coupon_price, 47650);
+  assert.equal(store.getGoods(2).coupon_price, 47650);
+});
+
 test('learnMarketCoupons records a seller-only coupon from best-coupon', async () => {
   seed(goods(1, 10, 50150), goods(2, 10, 12000));
   const tngt = (discount) => ({ couponSno: 999, name: '[4910] TNGT 5% 쿠폰', discount });
