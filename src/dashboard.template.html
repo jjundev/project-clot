@@ -746,7 +746,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   var PAGE = 120;
   document.querySelector('[data-src="4910all"]').hidden = !D.has4910All;
 
-  /* ── 4910 전체: 칩을 누를 때만 4910-all.js 를 <script> 로 불러온다 (file:// 에서도 동작) ── */
+  /* ── 4910 전체: 첫 렌더 뒤 4910-all.js 를 <script> 로 불러와 `전체`·`4910 전체`에 합친다 (file:// 에서도 동작) ── */
   var all4910 = { status: 'idle', promise: null };
   function ensure4910All() {
     if (all4910.status === 'ready') return Promise.resolve(true);
@@ -791,7 +791,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   }
 
   function inSrc(it) {
-    if (state.src === 'all') return it.src !== '4910all';
+    if (state.src === 'all') return true;
     if (state.src === '4910all') return is4910(it);
     return it.src === state.src;
   }
@@ -916,14 +916,16 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     var srcCounts = { all: 0, musinsa: 0, '4910': 0, '4910all': 0 };
     D.items.forEach(function (it) {
       if (!inCat(it)) return;
-      if (it.src !== '4910all') srcCounts.all++;
+      srcCounts.all++;
       if (is4910(it)) srcCounts['4910all']++;
       if (it.src !== '4910all' && srcCounts[it.src] !== undefined) srcCounts[it.src]++;
     });
-    document.getElementById('sAll').textContent = srcCounts.all;
+    // Before the listings load only the build-time total is known (category scope unknown).
+    var pending4910 = D.has4910All && all4910.status !== 'ready';
+    document.getElementById('sAll').textContent = !pending4910 ? srcCounts.all
+      : (state.cat === 'all' ? srcCounts.all + (D.total4910All || 0) : '—');
     document.getElementById('sMusinsa').textContent = srcCounts.musinsa;
     document.getElementById('s4910').textContent = srcCounts['4910'];
-    // Before the listings load only the build-time total is known (category scope unknown).
     document.getElementById('s4910all').textContent = all4910.status === 'ready' ? srcCounts['4910all']
       : (state.cat === 'all' ? (D.total4910All || 0) + srcCounts['4910'] : '—');
     document.querySelectorAll('[data-src]').forEach(function (b) {
@@ -1057,7 +1059,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     var it = D.items.filter(function (x) { return x.k === String(key); })[0];
     if (!it) return;
     if (view.indexOf(it) === -1) {
-      state.filter = 'all'; state.src = it.src === '4910all' ? '4910all' : 'all'; state.q = ''; qEl.value = ''; render();
+      state.filter = 'all'; state.src = 'all'; state.q = ''; qEl.value = ''; render();
     }
     lastFocus = document.activeElement;
     modalItem = it; range = 0;
@@ -1338,7 +1340,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
 
   /* ── 초기 렌더 + 딥링크 (기획 S9) ──────────────────────── */
   render();
-  if (state.src === '4910all') ensure4910All();
+  if (D.has4910All) ensure4910All();
   var dl = new URLSearchParams(location.search).get('goods') || (D.targetGoodsNo ? String(D.targetGoodsNo) : null);
   if (dl) {
     var hit = D.items.some(function (x) { return x.k === dl; });
