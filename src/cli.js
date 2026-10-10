@@ -530,17 +530,17 @@ export async function run4910Step({
 
     let liked = null;
     if (store && client) {
-      const memberToken = readToken();
-      if (!memberToken) {
-        log('[4910] ABLY_JWT_TOKEN 없음 — 찜 가격 기록 건너뜀');
-      } else {
-        try {
+      try {
+        const memberToken = readToken();
+        if (!memberToken) {
+          log('[4910] ABLY_JWT_TOKEN 없음 — 찜 가격 기록 건너뜀');
+        } else {
           liked = await syncLikedFn({ client, store, date: today, memberToken, log });
           log(`💜 [4910] 찜 ${liked.liked}개 · 가격 기록 ${liked.logged}개 (${liked.memberStatus})`);
-        } catch (err) {
-          liked = null;
-          log(`⚠️ [4910] 찜 가격 기록 실패 (${err.message})`);
         }
+      } catch (err) {
+        liked = null;
+        log(`⚠️ [4910] 찜 가격 기록 실패 (${err.message})`);
       }
     }
 

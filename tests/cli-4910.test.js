@@ -257,3 +257,20 @@ test('--dry-run never runs the liked sync', async () => {
   assert.equal(res.ok, true);
   assert.equal(syncLikedFn.calls.length, 0);
 });
+
+test('a throwing readToken still sends the scan digest', async () => {
+  const notify = spyFn();
+  const log = logSpy();
+  const syncLikedFn = likedSpy();
+  const res = await run4910Step({
+    today: TODAY, openStore: fakeStore, makeClient: () => ({}), trackFn: trackSpy(), notify, log, syncLikedFn,
+    readToken: () => {
+      throw new Error('EACCES: permission denied');
+    },
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.liked, null);
+  assert.equal(notify.calls.length, 1);
+  assert.equal(syncLikedFn.calls.length, 0);
+  assert.match(log.lines.join('\n'), /찜 가격 기록 실패/);
+});
