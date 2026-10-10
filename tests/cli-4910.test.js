@@ -108,7 +108,7 @@ test('run4910Step notifies once and checkpoints on success', async () => {
   assert.deepEqual(trackFn.args.client, { id: 'c' });
   assert.deepEqual(trackFn.args.brands.map((b) => b.sno), [2421, 13647]);
   assert.equal(notify.calls.length, 1);
-  assert.match(notify.calls[0][0], /4910 유니클로·GU 리포트 \(2026-10-10\)/);
+  assert.match(notify.calls[0][0], /4910 리포트 \(2026-10-10\)/);
   assert.deepEqual(store.calls, ['checkpoint', 'close']);
   assert.match(log.lines.join('\n'), /🇯🇵 \[4910\] 유니클로 10520 \/ GU 5359 스캔 — 가격변동 7, 신규 2, 종료 1/);
 });
@@ -141,7 +141,7 @@ test('run4910Step --dry-run does not notify or open a store', async () => {
   assert.equal(trackFn.args.store, null);
   assert.equal(opened, false);
   assert.equal(notify.calls.length, 0);
-  assert.match(log.lines.join('\n'), /유니클로 10,529 · GU 5,359 스캔/);
+  assert.match(log.lines.join('\n'), /브랜드 2개 스캔 \(불완전 0\) · 판매글 15,879/);
 });
 
 test('a runner blocked by Cloudflare logs 수집 실패 and sends no digest (real client and store)', async () => {

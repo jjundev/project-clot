@@ -106,6 +106,8 @@ export async function track4910({
   }
   // Also without a token: listings with no coupon result today get NULL rather than yesterday's price.
   const { priced } = applyCouponPrices({ store, date });
+  // The digest shows a coupon price next to each alert; drops are a short list, so read them back one by one.
+  for (const d of diff.drops) d.couponPrice = store.getGoods(d.row.sno)?.coupon_price ?? null;
 
   const durationMs = Date.now() - started;
   store.recordScanRun({

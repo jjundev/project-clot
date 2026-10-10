@@ -195,6 +195,25 @@ test('with a member token the qualified sellers get coupon prices', async () => 
   assert.equal(store.getGoods(3).coupon_price, 9900); // below the coupon minimum
 });
 
+const LIST_PRICE = { 1: 40000, 2: 30000, 3: 9900, 11: 19900, 12: 29900 }; // day-2 prices of the drop test below
+
+test('a >=10% drop carries its coupon price with a member token, null without', async () => {
+  const member = {
+    async getMyCoupons() { return WALLET; },
+    async getMe() { return { emoney: 0 }; },
+    async getGoodsDetail(sno) { return { optionSno: sno * 10 }; },
+    async getBestCoupon(optionSno) { return { couponSno: 7, name: '10% 쿠폰', discount: LIST_PRICE[optionSno / 10] * 0.1 }; },
+  };
+  const dropped = { ...CATALOG, 2421: [[1, 40000], [2, 30000], [3, 9900]] }; // listing 1: 50,000 -> 40,000 (-20%)
+  await track4910({ makeClient: fakeClients(CATALOG, { member }), store, date: '2026-10-10', brands: BRANDS, memberToken: 'T', log: quiet });
+
+  const withToken = await track4910({ makeClient: fakeClients(dropped, { member }), store, date: '2026-10-11', brands: BRANDS, memberToken: 'T', log: quiet });
+  assert.deepEqual(withToken.diff.drops.map((d) => [d.row.sno, d.couponPrice]), [[1, 36000]]);
+
+  const noToken = await track4910({ makeClient: fakeClients({ ...dropped, 2421: [[1, 30000], [2, 30000], [3, 9900]] }), store, date: '2026-10-12', brands: BRANDS, log: quiet });
+  assert.deepEqual(noToken.diff.drops.map((d) => [d.row.sno, d.couponPrice]), [[1, null]]);
+});
+
 test('a coupon failure does not stop the scan', async () => {
   const member = { async getMyCoupons() { throw Object.assign(new Error('4910 my coupons failed: HTTP 500'), { status: 500 }); } };
   const lines = [];
