@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import vm from 'node:vm';
 import { DatabaseSync } from 'node:sqlite';
 import { generateDashboardHtml } from '../src/visualizer.js';
 import { Store4910 } from '../src/site4910/store.js';
@@ -65,10 +66,20 @@ describe('Visualizer HTML Generation', () => {
     return db;
   }
 
+  // Each build empties <outDir>/4910, so contract builds get their own directory rather than os.tmpdir() itself.
+  function buildInTempDir(prefix) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+    tempFiles.push(dir);
+    const out = path.join(dir, 'dashboard.html');
+    generateDashboardHtml({ db: createTestDb(), outputPath: out, openBrowser: false });
+    return fs.readFileSync(out, 'utf-8');
+  }
+
   test('generateDashboardHtml writes valid standalone HTML with injected data and no sample badges', () => {
     const db = createTestDb();
-    const tempOutput = path.join(os.tmpdir(), `clot-test-dashboard-${Date.now()}.html`);
-    tempFiles.push(tempOutput);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-test-dashboard-'));
+    tempFiles.push(dir);
+    const tempOutput = path.join(dir, 'dashboard.html');
 
     const res = generateDashboardHtml({
       db,
@@ -180,37 +191,83 @@ describe('Visualizer HTML Generation', () => {
     assert.equal(warns.length, 1);
   });
 
-  test('generateDashboardHtml writes 4910-all.js beside the HTML', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-html-4910all-'));
-    tempFiles.push(dir);
+  const scanListing = (sno, brand_sno, brand, sale_price = 21600) => ({
+    sno, brand_sno, brand, name: `listing ${sno}`, market_sno: 1, market_name: 'UNIQLO', category: null,
+    sale_price, original_price: 51300, discount_rate: 57, image_url: null, url: `https://4910.kr/goods/${sno}`, closed: false,
+  });
+
+  function scanDb(dir, rows) {
     const db4910Path = path.join(dir, '4910.db');
     const store = new Store4910(db4910Path);
-    store.applyScan('2026-10-10', [{
-      sno: 71863924, brand_sno: 2421, brand: '유니클로', name: '플리스', market_sno: 1, market_name: 'UNIQLO', category: null,
-      sale_price: 21600, original_price: 51300, discount_rate: 57, image_url: null, url: 'https://4910.kr/goods/71863924', closed: false,
-    }], { completeBrands: [2421] });
-    store.recordScanRun({ date: '2026-10-10', brandCounts: {}, complete: true, changed: 0, added: 1, dropped: 0, durationMs: 1 });
+    store.applyScan('2026-10-10', rows, { completeBrands: [...new Set(rows.map((r) => r.brand_sno))] });
+    store.recordScanRun({ date: '2026-10-10', brandCounts: {}, complete: true, changed: 0, added: rows.length, dropped: 0, durationMs: 1 });
+    return { store, db4910Path };
+  }
+
+  // Runs a generated data script the way the page does and returns its window.
+  function runScript(file, win = {}) {
+    vm.runInNewContext(fs.readFileSync(file, 'utf-8'), { window: win });
+    return win;
+  }
+  // Values from another vm realm fail deepStrictEqual on prototypes alone.
+  const plain = (v) => JSON.parse(JSON.stringify(v));
+
+  test('generateDashboardHtml writes 4910/index.js and one file per brand, and removes 4910-all.js', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-html-4910brands-'));
+    tempFiles.push(dir);
+    fs.writeFileSync(path.join(dir, '4910-all.js'), 'stale');
+    const { store, db4910Path } = scanDb(dir, [
+      scanListing(71863924, 2421, '유니클로'), scanListing(71863925, 2421, '유니클로'), scanListing(80000001, 13647, 'GU'),
+    ]);
+    store.setCouponPrices([[71863924, 18000]]);
     store.close();
 
     const tempOutput = path.join(dir, 'index.html');
     const res = generateDashboardHtml({ db: createTestDb(), outputPath: tempOutput, openBrowser: false, db4910Path });
-    const js = fs.readFileSync(path.join(dir, '4910-all.js'), 'utf-8');
-    assert.ok(js.startsWith('window.__CLOT_4910_ALL__ = {'));
-    assert.ok(js.endsWith(';\n'));
-    assert.ok(js.includes('71863924'));
-    assert.equal(res.total4910All, 1);
+    assert.equal(fs.existsSync(path.join(dir, '4910-all.js')), false);
+    assert.deepEqual(fs.readdirSync(path.join(dir, '4910')).sort(), ['b13647.js', 'b2421.js', 'index.js']);
+
+    const indexJs = fs.readFileSync(path.join(dir, '4910', 'index.js'), 'utf-8');
+    assert.ok(indexJs.startsWith('window.__CLOT_4910_INDEX__ = {'));
+    assert.ok(indexJs.endsWith(';\n'));
+    const idx = runScript(path.join(dir, '4910', 'index.js')).__CLOT_4910_INDEX__;
+    assert.equal(idx.v, 2);
+    assert.equal(idx.lastScan, '2026-10-10');
+    assert.deepEqual(plain(idx.brands), [[2421, '유니클로', 2], [13647, 'GU', 1]]);
+
+    // Brand files accumulate on one window object, keyed by brand sno.
+    const win = runScript(path.join(dir, '4910', 'b2421.js'));
+    runScript(path.join(dir, '4910', 'b13647.js'), win);
+    assert.deepEqual(Object.keys(win.__CLOT_4910_B__).sort(), ['13647', '2421']);
+    const uniqlo = win.__CLOT_4910_B__[2421];
+    assert.equal(uniqlo.brandSno, 2421);
+    assert.deepEqual(plain(uniqlo.r.map((r) => [r[0], r[8]])), [[71863924, 18000], [71863925, null]]);
+
+    assert.equal(res.total4910All, 3);
     const html = fs.readFileSync(tempOutput, 'utf-8');
     assert.ok(html.includes('"has4910All":true'));
-    assert.ok(html.includes('"total4910All":1'));
+    assert.ok(html.includes('"total4910All":3'));
     assert.ok(!html.includes('"src":"4910all"'));
   });
 
-  test('without a 4910.db the dashboard reports has4910All false and writes no 4910-all.js', () => {
+  test('a rebuild removes brand files that no longer exist', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-html-4910rebuild-'));
+    tempFiles.push(dir);
+    fs.mkdirSync(path.join(dir, '4910'));
+    fs.writeFileSync(path.join(dir, '4910', 'b999.js'), 'stale');
+    const { store, db4910Path } = scanDb(dir, [scanListing(71863924, 2421, '유니클로')]);
+    store.close();
+    generateDashboardHtml({ db: createTestDb(), outputPath: path.join(dir, 'index.html'), openBrowser: false, db4910Path });
+    assert.deepEqual(fs.readdirSync(path.join(dir, '4910')).sort(), ['b2421.js', 'index.js']);
+  });
+
+  test('without a 4910.db the dashboard reports has4910All false and writes no 4910 files', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-html-no4910all-'));
     tempFiles.push(dir);
     const tempOutput = path.join(dir, 'index.html');
     const res = generateDashboardHtml({ db: createTestDb(), outputPath: tempOutput, openBrowser: false, db4910Path: path.join(dir, 'missing.db') });
     assert.equal(res.total4910All, 0);
+    assert.equal(fs.existsSync(path.join(dir, '4910')), false);
     assert.equal(fs.existsSync(path.join(dir, '4910-all.js')), false);
     const html = fs.readFileSync(tempOutput, 'utf-8');
     assert.ok(html.includes('"has4910All":false'));
@@ -235,17 +292,19 @@ describe('Visualizer HTML Generation', () => {
       console.warn = origWarn;
     }
     assert.equal(res.total4910All, 0);
-    assert.equal(fs.existsSync(path.join(dir, '4910-all.js')), false);
+    assert.equal(fs.existsSync(path.join(dir, '4910')), false);
     const html = fs.readFileSync(tempOutput, 'utf-8');
     assert.ok(html.includes('"k":"4910:71863924"'));
     assert.ok(html.includes('"has4910All":false'));
   });
 
-  test('a failing 4910 build removes a stale 4910-all.js', () => {
+  test('a failing 4910 build removes stale 4910 files', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-html-stale4910all-'));
     tempFiles.push(dir);
     const stale = path.join(dir, '4910-all.js');
     fs.writeFileSync(stale, 'stale');
+    fs.mkdirSync(path.join(dir, '4910'));
+    fs.writeFileSync(path.join(dir, '4910', 'index.js'), 'stale');
     const db4910Path = path.join(dir, '4910.db');
     fs.writeFileSync(db4910Path, 'this is definitely not a sqlite database '.repeat(200));
     const tempOutput = path.join(dir, 'index.html');
@@ -257,28 +316,35 @@ describe('Visualizer HTML Generation', () => {
       console.warn = origWarn;
     }
     assert.equal(fs.existsSync(stale), false);
+    assert.equal(fs.existsSync(path.join(dir, '4910')), false);
     const html = fs.readFileSync(tempOutput, 'utf-8');
     assert.ok(html.includes('"has4910All":false'));
     assert.ok(html.includes('"src":"musinsa"'));
   });
 
   test('template carries the 4910 전체 chip, lazy loader and paged grid', () => {
-    const tempOutput = path.join(os.tmpdir(), `clot-4910all-contract-${Date.now()}.html`);
-    tempFiles.push(tempOutput);
-    generateDashboardHtml({ db: createTestDb(), outputPath: tempOutput, openBrowser: false });
-    const html = fs.readFileSync(tempOutput, 'utf-8');
-    for (const s of ['data-src="4910all"', '4910 찜', '4910 전체', "'4910-all.js?v='", '__CLOT_4910_ALL__',
+    const html = buildInTempDir('clot-4910all-contract-');
+    for (const s of ['data-src="4910all"', '4910 찜', '4910 전체', "'4910/index.js'", "'?v='", '__CLOT_4910_INDEX__', '__CLOT_4910_B__',
       '4910 판매글 불러오는 중…', '4910 전체 목록을 불러오지 못했습니다', 'data-retry-4910',
       'id="gridMore"', 'var PAGE = 120', 'IntersectionObserver', "rootMargin: '600px'", "'표시가'"]) {
       assert.ok(html.includes(s), s);
     }
   });
 
+  test('template loads brand files on demand and offers coupon sorts', () => {
+    const html = buildInTempDir('clot-4910brands-contract-');
+    for (const s of ['__CLOT_4910_INDEX__', 'data-b4910', "'4910/b'", 'value="coupon"', 'value="couponRate"',
+      '쿠폰가 낮은순', '쿠폰 할인율순', '쿠폰가 ', "'&brand='", "get('brand')"]) {
+      assert.ok(html.includes(s), s);
+    }
+    assert.ok(!html.includes('4910-all.js'));
+    // No background load after first paint: only the 4910 전체 chip starts it.
+    assert.ok(!/^\s*if \(D\.has4910All\) ensure4910\w*\(\);/m.test(html));
+    assert.ok(!html.includes('ensure4910All();'));
+  });
+
   test('template has the source chips and the new-member column', () => {
-    const tempOutput = path.join(os.tmpdir(), `clot-src-chips-${Date.now()}.html`);
-    tempFiles.push(tempOutput);
-    generateDashboardHtml({ db: createTestDb(), outputPath: tempOutput, openBrowser: false });
-    const content = fs.readFileSync(tempOutput, 'utf-8');
+    const content = buildInTempDir('clot-src-chips-');
     assert.ok(content.includes('data-src="all"'));
     assert.ok(content.includes('data-src="musinsa"'));
     assert.ok(content.includes('data-src="4910"'));
@@ -293,10 +359,7 @@ describe('Visualizer HTML Generation', () => {
   });
 
   test('generated dashboard asks search engines not to index it', () => {
-    const tempOutput = path.join(os.tmpdir(), `clot-noindex-${Date.now()}.html`);
-    tempFiles.push(tempOutput);
-    generateDashboardHtml({ db: createTestDb(), outputPath: tempOutput, openBrowser: false });
-    assert.match(fs.readFileSync(tempOutput, 'utf-8'), /<meta name="robots" content="noindex, nofollow">/);
+    assert.match(buildInTempDir('clot-noindex-'), /<meta name="robots" content="noindex, nofollow">/);
   });
 });
 

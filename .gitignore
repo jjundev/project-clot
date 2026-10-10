@@ -5,5 +5,6 @@ logs/
 .DS_Store
 data/dashboard.html
 data/4910-all.js
+data/4910/
 data/prices.db-*
 data/4910.db-*

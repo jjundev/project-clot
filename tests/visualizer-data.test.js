@@ -2,7 +2,7 @@ import './setup-env.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { buildClotDataPayload, buildScan4910Payload } from '../src/visualizer.js';
+import { buildClotDataPayload, buildScan4910Payload, buildScan4910Index } from '../src/visualizer.js';
 import { Store4910 } from '../src/site4910/store.js';
 
 describe('Visualizer Data Extraction', () => {
@@ -302,6 +302,54 @@ describe('Visualizer Data Extraction', () => {
       store.db.exec('DROP TABLE liked_goods');
       const p = buildScan4910Payload(store.db);
       assert.deepEqual(p.r.map((r) => r[0]), [1, 2]);
+      store.close();
+    });
+
+    test('index lists brands by active count and skips empty brands', () => {
+      const store = new Store4910(':memory:');
+      const rows = [
+        scanRow(1, 1000, 2421), scanRow(2, 1000, 2421),
+        scanRow(3, 1000, 13647), scanRow(4, 1000, 13647), scanRow(5, 1000, 13647),
+        scanRow(6, 1000, 500), scanRow(7, 1000, 600),
+      ];
+      store.applyScan('2026-10-10', rows, { completeBrands: [2421, 13647, 500, 600] });
+      store.recordScanRun(run('2026-10-10', true));
+      store.db.prepare("UPDATE goods SET status = 'DROPPED' WHERE sno = 6").run();      // brand 500: nothing ACTIVE
+      // Liked: brand 600 has nothing else, and GU's count leaves listing 5 out.
+      store.syncLiked([7, 5].map((sno) => ({ sno, name: `listing ${sno}`, url: `https://4910.kr/goods/${sno}` })), '2026-10-10');
+
+      const idx = buildScan4910Index(store.db);
+      assert.equal(idx.v, 2);
+      assert.equal(idx.lastScan, '2026-10-10');
+      assert.deepEqual(idx.brands, [[2421, '유니클로', 2], [13647, 'GU', 2]]);
+      // The chip count is exactly what the brand file holds.
+      for (const [sno, , count] of idx.brands) {
+        assert.equal(buildScan4910Payload(store.db, { brandSno: sno }).r.length, count);
+      }
+      store.close();
+    });
+
+    test('brand payload carries coupon_price as the 9th field', () => {
+      const store = fixture();
+      store.db.prepare("UPDATE liked_goods SET status = 'UNLIKED' WHERE sno = 2").run();
+      store.setCouponPrices([[1, 39000]]);
+      const p = buildScan4910Payload(store.db, { brandSno: 2421 });
+      assert.equal(p.v, 1);
+      assert.equal(p.brandSno, 2421);
+      assert.deepEqual(p.r.map((r) => r[0]), [1]);   // GU's listing 2 stays in its own file
+      assert.equal(p.r[0].length, 9);
+      assert.equal(p.r[0][8], 39000);
+      const gu = buildScan4910Payload(store.db, { brandSno: 13647 });
+      assert.deepEqual(gu.r.map((r) => [r[0], r[8]]), [[2, null]]);
+      store.close();
+    });
+
+    test('a 4910.db without coupon_price gives cp null', () => {
+      const store = fixture();
+      store.db.exec('ALTER TABLE goods DROP COLUMN coupon_price');
+      const p = buildScan4910Payload(store.db, { brandSno: 2421 });
+      assert.deepEqual(p.r.map((r) => [r[0], r[8]]), [[1, null]]);
+      assert.deepEqual(buildScan4910Index(store.db).brands, [[2421, '유니클로', 1]]);
       store.close();
     });
 
