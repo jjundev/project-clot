@@ -20,6 +20,6 @@ if (!process.env.CLOT_4910_DB_PATH) {
 }
 
 // Never notify for real: skip the repo's .env (src/notifier.js) and macOS banners, and drop any
-// Telegram/Discord credentials inherited from the shell. Tests that need creds set them explicitly.
+// Telegram/Discord credentials (and the 4910 member token) inherited from the shell. Tests that need creds set them explicitly.
 process.env.CLOT_NOTIFY_SANDBOX = '1';
-for (const key of ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'DISCORD_WEBHOOK_URL']) delete process.env[key];
+for (const key of ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'DISCORD_WEBHOOK_URL', 'ABLY_JWT_TOKEN']) delete process.env[key];
