@@ -271,11 +271,12 @@ export class Store4910 {
   }
 
   /**
-   * Swaps the member's wallet (market_sno IS NULL rows) for `coupons`, which the caller has already filtered to
-   * the usable ones, and reports the coupon names that appeared or vanished since the previous wallet.
-   * Seller-only coupons (market_sno set) are left alone.
+   * Swaps the member's wallet (market_sno IS NULL rows) for the usable ones among `coupons` (the client returns
+   * every coupon with a `usable` flag), and reports the coupon names that appeared or vanished since the previous
+   * wallet. Seller-only coupons (market_sno set) are left alone.
    */
-  replaceWallet(date, coupons) {
+  replaceWallet(date, allCoupons) {
+    const coupons = allCoupons.filter((c) => c.usable !== false);
     this.db.exec('BEGIN');
     try {
       const prev = new Set(this.db.prepare('SELECT name FROM wallet_coupons WHERE market_sno IS NULL').all().map((c) => c.name));

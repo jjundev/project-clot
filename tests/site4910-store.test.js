@@ -246,7 +246,7 @@ test('market_type_sno is stored on insert and update, and changing it alone logs
   assert.equal(s.getChanges(1).length, 1);
 });
 
-test('a scan with no listings of an unseen brand is still initial only when goods is empty', () => {
+test('initial means goods was empty before the call', () => {
   assert.equal(s.isEmpty(), true);
   const d1 = s.applyScan('2026-10-10', [row(1, 50000)], { completeBrands: [2421] });
   assert.equal(d1.initial, true);
@@ -360,6 +360,14 @@ test('replaceWallet reports added and removed coupon names', () => {
   assert.deepEqual(s.replaceWallet('2026-10-11', [coupon(2, 'B'), coupon(3, 'C')]), { added: ['C'], removed: ['A'] });
   assert.deepEqual(s.getWallet().map((c) => c.name).sort(), ['B', 'C']);
   assert.equal(s.getWallet().find((c) => c.name === 'B').seen_date, '2026-10-11');
+});
+
+test('replaceWallet stores and reports only usable coupons', () => {
+  const r = s.replaceWallet('2026-10-10', [coupon(1, 'A'), coupon(2, 'B', { usable: false }), coupon(3, 'C', { usable: true })]);
+  assert.deepEqual(r, { added: ['A', 'C'], removed: [] });
+  assert.deepEqual(s.getWallet().map((c) => c.coupon_sno), [1, 3]);
+  // a coupon that turns unusable counts as removed
+  assert.deepEqual(s.replaceWallet('2026-10-11', [coupon(1, 'A', { usable: false }), coupon(3, 'C')]), { added: [], removed: ['A'] });
 });
 
 test('wallet max Infinity is stored as NULL and read back as null; seller-only coupons survive replaceWallet', () => {
