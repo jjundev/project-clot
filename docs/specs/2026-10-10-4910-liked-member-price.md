@@ -12,6 +12,7 @@ Classification: architectural — 회원 인증, 찜 동기화, 새 테이블, �
 - 비로그인 쿠폰적용가는 **신규회원 기준**: 21,600 × 0.85 = 18,360 = `[🎁첫 구매 ONLY] 15%`(앱 전용) 쿠폰 적용값.
 - 회원 인증: 쿠키 `ably-jwt-token` → `Authorization: JWT <token>` (4910 `_app` 번들 axios 인터셉터). 번들에 토큰 갱신 로직 없음. 익명 토큰은 JWT지만 `exp` 없이 `iat`만.
 - 찜 목록: `GET https://api.a-bly.com/aglo/api/members/me/liked-goods/?limit=&last_sno=` (4910 `/liked` 페이지 번들 `readLikedGoodsList`). 항목은 브랜드 목록 API와 같은 `item.sno`/`logging.analytics`/`render` 형식(페이지 렌더러가 같은 필드를 읽음). 응답 최상위 키는 미검증.
+- **Gate verified 2026-10-10 (member token):** 찜 목록 응답 최상위 키 `total_count`, `goods_list`, `last_sno`(마지막 페이지에서 `null`). 항목 `item`/`logging`/`render`, `logging.analytics`에 `BRAND_SNO`, `BRAND_NAME`, `MARKET_NAME`, `SALES_PRICE` 있음. 회원 상세도 `price_description.text == "쿠폰적용가"`, `applied_coupon`은 null. 표본 3개 모두 회원가 ≠ 비로그인가이고 회원가가 더 높음(예: 비로그인 48,450 / 회원 51,870 / 표시가 59,000) — 신규회원 첫 구매 쿠폰이 기존 회원에게는 빠지기 때문. 회원 토큰 JWT 페이로드 키 `user_id`, `username`, `email`, `iat`, `exp` 없음.
 - 무신사 대시보드: 상품 625개(ACTIVE+SOLDOUT), HTML 513KB. 가격 튜플 `[date, 정가, 판매가, my, 품절, 쿠폰명, 쿠폰할인]`(`src/visualizer.js:69-77`), 최저가·하락은 `my`(`[3]`) 기준(`src/dashboard.template.html:681-686`).
 
 ## Behavior when done
