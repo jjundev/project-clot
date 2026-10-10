@@ -180,6 +180,100 @@ describe('Visualizer HTML Generation', () => {
     assert.equal(warns.length, 1);
   });
 
+  test('generateDashboardHtml writes 4910-all.js beside the HTML', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-html-4910all-'));
+    tempFiles.push(dir);
+    const db4910Path = path.join(dir, '4910.db');
+    const store = new Store4910(db4910Path);
+    store.applyScan('2026-10-10', [{
+      sno: 71863924, brand_sno: 2421, brand: '유니클로', name: '플리스', market_sno: 1, market_name: 'UNIQLO', category: null,
+      sale_price: 21600, original_price: 51300, discount_rate: 57, image_url: null, url: 'https://4910.kr/goods/71863924', closed: false,
+    }], { completeBrands: [2421] });
+    store.recordScanRun({ date: '2026-10-10', brandCounts: {}, complete: true, changed: 0, added: 1, dropped: 0, durationMs: 1 });
+    store.close();
+
+    const tempOutput = path.join(dir, 'index.html');
+    const res = generateDashboardHtml({ db: createTestDb(), outputPath: tempOutput, openBrowser: false, db4910Path });
+    const js = fs.readFileSync(path.join(dir, '4910-all.js'), 'utf-8');
+    assert.ok(js.startsWith('window.__CLOT_4910_ALL__ = {'));
+    assert.ok(js.endsWith(';\n'));
+    assert.ok(js.includes('71863924'));
+    assert.equal(res.total4910All, 1);
+    const html = fs.readFileSync(tempOutput, 'utf-8');
+    assert.ok(html.includes('"has4910All":true'));
+    assert.ok(html.includes('"total4910All":1'));
+    assert.ok(!html.includes('"src":"4910all"'));
+  });
+
+  test('without a 4910.db the dashboard reports has4910All false and writes no 4910-all.js', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-html-no4910all-'));
+    tempFiles.push(dir);
+    const tempOutput = path.join(dir, 'index.html');
+    const res = generateDashboardHtml({ db: createTestDb(), outputPath: tempOutput, openBrowser: false, db4910Path: path.join(dir, 'missing.db') });
+    assert.equal(res.total4910All, 0);
+    assert.equal(fs.existsSync(path.join(dir, '4910-all.js')), false);
+    const html = fs.readFileSync(tempOutput, 'utf-8');
+    assert.ok(html.includes('"has4910All":false'));
+    assert.ok(html.includes('"total4910All":0'));
+  });
+
+  test('a broken scan table drops only 4910 전체; liked items stay', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-html-scanfail-'));
+    tempFiles.push(dir);
+    const db4910Path = path.join(dir, '4910.db');
+    const store = new Store4910(db4910Path);
+    store.syncLiked([{ sno: 71863924, brand: '유니클로', name: '플리스', market_name: 'UNIQLO', url: 'https://4910.kr/goods/71863924', image_url: null }], '2026-10-11');
+    store.db.exec('DROP TABLE scan_runs');
+    store.close();
+    const tempOutput = path.join(dir, 'index.html');
+    const origWarn = console.warn;
+    console.warn = () => {};
+    let res;
+    try {
+      res = generateDashboardHtml({ db: createTestDb(), outputPath: tempOutput, openBrowser: false, db4910Path });
+    } finally {
+      console.warn = origWarn;
+    }
+    assert.equal(res.total4910All, 0);
+    assert.equal(fs.existsSync(path.join(dir, '4910-all.js')), false);
+    const html = fs.readFileSync(tempOutput, 'utf-8');
+    assert.ok(html.includes('"k":"4910:71863924"'));
+    assert.ok(html.includes('"has4910All":false'));
+  });
+
+  test('a failing 4910 build removes a stale 4910-all.js', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-html-stale4910all-'));
+    tempFiles.push(dir);
+    const stale = path.join(dir, '4910-all.js');
+    fs.writeFileSync(stale, 'stale');
+    const db4910Path = path.join(dir, '4910.db');
+    fs.writeFileSync(db4910Path, 'this is definitely not a sqlite database '.repeat(200));
+    const tempOutput = path.join(dir, 'index.html');
+    const origWarn = console.warn;
+    console.warn = () => {};
+    try {
+      generateDashboardHtml({ db: createTestDb(), outputPath: tempOutput, openBrowser: false, db4910Path });
+    } finally {
+      console.warn = origWarn;
+    }
+    assert.equal(fs.existsSync(stale), false);
+    const html = fs.readFileSync(tempOutput, 'utf-8');
+    assert.ok(html.includes('"has4910All":false'));
+    assert.ok(html.includes('"src":"musinsa"'));
+  });
+
+  test('template carries the 4910 전체 chip, lazy loader and paged grid', () => {
+    const tempOutput = path.join(os.tmpdir(), `clot-4910all-contract-${Date.now()}.html`);
+    tempFiles.push(tempOutput);
+    generateDashboardHtml({ db: createTestDb(), outputPath: tempOutput, openBrowser: false });
+    const html = fs.readFileSync(tempOutput, 'utf-8');
+    for (const s of ['data-src="4910all"', '4910 찜', '4910 전체', "'4910-all.js?v='", '__CLOT_4910_ALL__',
+      '4910 판매글 불러오는 중…', '4910 전체 목록을 불러오지 못했습니다', 'data-retry-4910',
+      'id="gridMore"', 'var PAGE = 120', 'IntersectionObserver', "rootMargin: '600px'", "'표시가'"]) {
+      assert.ok(html.includes(s), s);
+    }
+  });
+
   test('template has the source chips and the new-member column', () => {
     const tempOutput = path.join(os.tmpdir(), `clot-src-chips-${Date.now()}.html`);
     tempFiles.push(tempOutput);
@@ -192,7 +286,7 @@ describe('Visualizer HTML Generation', () => {
     assert.ok(content.includes('4910에서 보기 ↗'));
     assert.ok(content.includes('쿠폰적용가(신규회원 기준)'));
     // 4910 cards and the modal show brand + seller; low/drop/delta only compare rows on the same price basis.
-    assert.ok(content.includes("it.src === '4910' && it.m ? ' · '"));
+    assert.ok(content.includes("is4910(it) && it.m ? ' · '"));
     assert.ok(content.includes('r[5] !== last[5]'));
     assert.ok(content.includes('prev[5] === last[5]'));
     assert.ok(content.includes('r[5] === older[5]'));

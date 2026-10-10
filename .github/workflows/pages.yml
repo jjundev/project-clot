@@ -48,6 +48,7 @@ jobs:
           CLOT_DASHBOARD_PATH=_site/index.html node src/cli.js visualize --no-open
           printf 'User-agent: *\nDisallow: /\n' > _site/robots.txt
           test -s _site/index.html
+          test -s _site/4910-all.js || echo "::warning::4910-all.js not built"
 
       - uses: actions/configure-pages@v5
 

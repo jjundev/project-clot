@@ -2,7 +2,7 @@ import './setup-env.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { buildClotDataPayload } from '../src/visualizer.js';
+import { buildClotDataPayload, buildScan4910Payload } from '../src/visualizer.js';
 import { Store4910 } from '../src/site4910/store.js';
 
 describe('Visualizer Data Extraction', () => {
@@ -241,6 +241,76 @@ describe('Visualizer Data Extraction', () => {
       const payload = buildClotDataPayload(db, { db4910: store.db });
       const keys = payload.items.filter((it) => it.n === 71863924).map((it) => it.k).sort();
       assert.deepEqual(keys, ['4910:71863924', '71863924']);
+      store.close();
+    });
+  });
+
+  describe('buildScan4910Payload', () => {
+    const scanRow = (sno, price, brand_sno = 2421, image_url = null) => ({
+      sno, brand_sno, brand: brand_sno === 2421 ? '유니클로' : 'GU', name: `listing ${sno}`,
+      market_sno: 10, market_name: 'seller', category: 'cat', sale_price: price, original_price: price * 2,
+      discount_rate: 50, image_url, url: `https://4910.kr/goods/${sno}`, closed: false,
+    });
+    const BOTH = { completeBrands: [2421, 13647] };
+    const run = (date, complete) => ({ date, brandCounts: {}, complete, changed: 0, added: 0, dropped: 0, durationMs: 1 });
+
+    function fixture() {
+      const store = new Store4910(':memory:');
+      const img1 = 'https://d3ha2047wt6x28.cloudfront.net/x/1.jpg';
+      const img2 = 'https://other.cdn/2.jpg';
+      store.applyScan('2026-10-10', [scanRow(1, 50000, 2421, img1), scanRow(2, 30000, 13647, img2), scanRow(3, 1000)], BOTH);
+      store.recordScanRun(run('2026-10-10', true));
+      store.applyScan('2026-10-11', [scanRow(1, 45000, 2421, img1), scanRow(2, 30000, 13647, img2), scanRow(3, 1000)], BOTH);
+      store.recordScanRun(run('2026-10-11', false));
+      store.db.prepare("UPDATE goods SET status = 'DROPPED' WHERE sno = 3").run();
+      store.syncLiked([{ sno: 2, name: 'listing 2', url: 'https://4910.kr/goods/2' }], '2026-10-11');
+      return store;
+    }
+
+    test('emits compact ACTIVE listings', () => {
+      const store = fixture();
+      const p = buildScan4910Payload(store.db);
+      assert.equal(p.v, 1);
+      assert.equal(p.imgBase, 'https://d3ha2047wt6x28.cloudfront.net/');
+      assert.equal(p.lastScan, '2026-10-11');           // an incomplete run still counts
+      assert.deepEqual(p.r.map((r) => r[0]), [1]);
+      const [, bIdx, mIdx, name, img, fs, cat, H] = p.r[0];
+      assert.equal(p.b[bIdx], '유니클로');
+      assert.equal(p.m[mIdx], 'seller');
+      assert.equal(name, 'listing 1');
+      assert.equal(img, 'x/1.jpg');
+      assert.equal(fs, '2026-10-10');
+      assert.equal(typeof cat, 'string');
+      assert.deepEqual(H, [['2026-10-10', 100000, 50000], ['2026-10-11', 90000, 45000]]);
+      store.close();
+    });
+
+    test('liked ACTIVE listings are excluded but UNLIKED ones are not', () => {
+      const store = fixture();
+      store.db.prepare("UPDATE liked_goods SET status = 'UNLIKED' WHERE sno = 2").run();
+      const p = buildScan4910Payload(store.db);
+      assert.deepEqual(p.r.map((r) => r[0]), [1, 2]);
+      const r2 = p.r[1];
+      assert.equal(p.b[r2[1]], 'GU');
+      assert.equal(r2[2], p.r[0][2]);
+      assert.equal(r2[4], 'https://other.cdn/2.jpg');
+      store.close();
+    });
+
+    test('works on a 4910.db without liked tables', () => {
+      const store = fixture();
+      store.db.exec('DROP TABLE liked_goods');
+      const p = buildScan4910Payload(store.db);
+      assert.deepEqual(p.r.map((r) => r[0]), [1, 2]);
+      store.close();
+    });
+
+    test('no scan_runs gives lastScan null', () => {
+      const store = new Store4910(':memory:');
+      store.applyScan('2026-10-10', [scanRow(1, 50000)], BOTH);
+      const p = buildScan4910Payload(store.db);
+      assert.equal(p.lastScan, null);
+      assert.equal(p.r[0][4], '');
       store.close();
     });
   });

@@ -75,6 +75,69 @@ function buildLikedItems(db4910) {
   }));
 }
 
+const IMG_BASE_4910 = 'https://d3ha2047wt6x28.cloudfront.net/';
+
+/**
+ * Packs every ACTIVE scanned 4910 listing into the compact `4910-all.js` payload. Liked ACTIVE listings are left
+ * out: the liked items already carry them with member prices under the same `4910:sno` key.
+ * @param {import('node:sqlite').DatabaseSync} db4910
+ * @returns {{ v: 1, lastScan: string|null, imgBase: string, b: string[], m: string[], r: any[][] }}
+ */
+export function buildScan4910Payload(db4910) {
+  const hasLiked = db4910
+    .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = 'liked_goods'")
+    .get();
+  const likedFilter = hasLiked ? "AND sno NOT IN (SELECT sno FROM liked_goods WHERE status = 'ACTIVE')" : '';
+  const goods = db4910
+    .prepare(`SELECT sno, brand, market_name, name, image_url, first_seen_date FROM goods WHERE status = 'ACTIVE' ${likedFilter} ORDER BY sno ASC`)
+    .all();
+  const changes = db4910
+    .prepare(`
+      SELECT sno, date, original_price, sale_price FROM price_changes
+      WHERE sno IN (SELECT sno FROM goods WHERE status = 'ACTIVE' ${likedFilter})
+      ORDER BY date ASC, id ASC
+    `)
+    .all();
+
+  const histBySno = new Map();
+  for (const c of changes) {
+    const h = [c.date, c.original_price ?? null, c.sale_price ?? null];
+    const arr = histBySno.get(c.sno);
+    if (arr) arr.push(h);
+    else histBySno.set(c.sno, [h]);
+  }
+
+  const b = [];
+  const m = [];
+  const bIdx = new Map();
+  const mIdx = new Map();
+  const indexOf = (arr, idx, v) => {
+    if (!idx.has(v)) {
+      idx.set(v, arr.length);
+      arr.push(v);
+    }
+    return idx.get(v);
+  };
+
+  const r = goods.map((g) => {
+    const img = g.image_url || '';
+    return [
+      Number(g.sno),
+      indexOf(b, bIdx, g.brand || g.market_name || '4910'),
+      indexOf(m, mIdx, g.market_name || ''),
+      g.name || '상품',
+      img.startsWith(IMG_BASE_4910) ? img.slice(IMG_BASE_4910.length) : img,
+      g.first_seen_date || '',
+      classifyCategory(g.name, g.brand),
+      histBySno.get(g.sno) || [],
+    ];
+  });
+
+  // Any run counts, complete or not: a listing unchanged on the latest scan day must not keep yesterday's drop.
+  const lastScan = db4910.prepare('SELECT MAX(date) AS d FROM scan_runs').get()?.d ?? null;
+  return { v: 1, lastScan, imgBase: IMG_BASE_4910, b, m, r };
+}
+
 /**
  * Extracts raw data from SQLite and builds the dashboard data contract.
  * @param {import('node:sqlite').DatabaseSync | { db: import('node:sqlite').DatabaseSync }} dbOrWrapper
@@ -209,7 +272,7 @@ export function buildClotDataPayload(dbOrWrapper, { targetGoodsNo, db4910 = null
  * @param {boolean} [options.openBrowser=true]
  * @param {number|string} [options.targetGoodsNo]
  * @param {string} [options.db4910Path] 4910.db to merge when the file exists.
- * @returns {{ outputPath: string, targetGoodsNo?: number, totalItems: number }}
+ * @returns {{ outputPath: string, targetGoodsNo?: number, totalItems: number, total4910All: number }}
  */
 export function generateDashboardHtml({
   db,
@@ -240,6 +303,7 @@ export function generateDashboardHtml({
   const digits = targetGoodsNo != null ? String(targetGoodsNo).replace(/\D/g, '') : '';
   const gNo = digits.length > 0 ? Number(digits) : undefined;
   let payload;
+  let scan = null;
   try {
     // A broken 4910.db (corrupt, locked, schema drift) must never block the Musinsa dashboard.
     if (db4910Path && fs.existsSync(db4910Path)) {
@@ -247,9 +311,16 @@ export function generateDashboardHtml({
       try {
         db4910 = new DatabaseSync(db4910Path, { readOnly: true });
         payload = buildClotDataPayload(activeDb, { targetGoodsNo: gNo, db4910 });
+        // The scan listings fail on their own: the liked items above stay on the dashboard.
+        try {
+          scan = buildScan4910Payload(db4910);
+        } catch (err) {
+          console.warn(`⚠️ [4910] 대시보드에서 4910 전체 목록 제외: ${err.message}`);
+        }
       } catch (err) {
         console.warn(`⚠️ [4910] 대시보드에서 4910 항목 제외: ${err.message}`);
         payload = undefined;
+        scan = null;
       } finally {
         if (db4910) db4910.close();
       }
@@ -260,6 +331,19 @@ export function generateDashboardHtml({
       activeDb.close();
     }
   }
+  payload.has4910All = scan != null;
+  payload.total4910All = scan ? scan.r.length : 0;
+
+  // Every scanned listing ships beside the HTML and loads only when the 4910 전체 chip asks for it. A build without
+  // one removes yesterday's file so the page never serves stale listings.
+  const scanPath = path.join(outDir, '4910-all.js');
+  if (scan) {
+    const scanJson = JSON.stringify(scan).replace(/<\/script/gi, '<\\/script');
+    fs.writeFileSync(scanPath, `window.__CLOT_4910_ALL__ = ${scanJson};\n`, 'utf-8');
+  } else {
+    fs.rmSync(scanPath, { force: true });
+  }
+
   const templateContent = fs.readFileSync(templatePath, 'utf-8');
 
   // Replace data placeholder using a function replacer to prevent '$' corruption (CRLF tolerant)
@@ -298,5 +382,6 @@ export function generateDashboardHtml({
     outputPath,
     targetGoodsNo: gNo !== undefined ? gNo : undefined,
     totalItems: payload.items.length,
+    total4910All: payload.total4910All,
   };
 }
