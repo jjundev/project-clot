@@ -75,8 +75,10 @@ export function pullDb({ dest, run = defaultRun, tmpDir }) {
 }
 
 // Folds the WAL into the main file and compacts it, so the gzip holds the whole DB and nothing else.
-// Refuses an absent or empty DB: pushing that would overwrite the Release with nothing.
-function prepareForPush(src) {
+// Refuses an absent or empty DB (pushing that would overwrite the Release with nothing) and, unless allowFresh, a DB
+// with fewer than two scan days: that is a fresh DB from a skipped or failed `4910-db pull`, and uploading it would
+// replace the Release's history with a single day.
+function prepareForPush(src, allowFresh) {
   if (!fs.existsSync(src)) throw new Error(`${src} does not exist; nothing to push`);
   const db = new DatabaseSync(src);
   try {
@@ -87,6 +89,20 @@ function prepareForPush(src) {
       throw new Error(`${src} has no goods table; refusing to push (${err.message})`);
     }
     if (goods === 0) throw new Error(`${src} has 0 goods rows; refusing to overwrite the release with an empty DB`);
+    if (!allowFresh) {
+      let days;
+      try {
+        days = db.prepare('SELECT COUNT(DISTINCT date) AS n FROM scan_runs').get().n;
+      } catch (err) {
+        throw new Error(`${src} has no scan_runs table; refusing to push (${err.message})`);
+      }
+      if (days < 2) {
+        throw new Error(
+          `${src} has ${days} scan day(s); it looks like a fresh DB (was \`4910-db pull\` skipped or did it fail?) and ` +
+            'pushing it would replace the release history. Pass --allow-fresh to push it anyway.'
+        );
+      }
+    }
     db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
     db.exec('VACUUM');
   } finally {
@@ -98,8 +114,8 @@ function prepareForPush(src) {
  * Uploads `src` as 4910.db.gz, keeping the asset it replaces as 4910.db.prev.gz (a one-step undo). Creates the
  * Release when absent. Only the prev download is optional; any other gh failure throws.
  */
-export function pushDb({ src, run = defaultRun, tmpDir }) {
-  prepareForPush(src);
+export function pushDb({ src, run = defaultRun, tmpDir, allowFresh = false }) {
+  prepareForPush(src, allowFresh);
   return withTmpDir(tmpDir, (dir) => {
     const gz = path.join(dir, ASSET_4910);
     fs.writeFileSync(gz, zlib.gzipSync(fs.readFileSync(src), { level: 9 }));

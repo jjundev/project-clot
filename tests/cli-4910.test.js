@@ -60,16 +60,41 @@ test('parseArgs treats --skip-4910 and --dry-run as booleans', () => {
 
 test('run4910Step skips with --skip-4910', async () => {
   let opened = false;
-  const res = await run4910Step({ flags: { 'skip-4910': true }, today: TODAY, openStore: () => { opened = true; } });
+  const res = await run4910Step({ dbExists: () => true, flags: { 'skip-4910': true }, today: TODAY, openStore: () => { opened = true; } });
   assert.deepEqual(res, { ran: false, ok: true });
   assert.equal(opened, false);
+});
+
+test('run4910Step refuses to run without a DB file, before opening the store', async () => {
+  let opened = false;
+  const trackFn = trackSpy();
+  const notify = spyFn();
+  const log = logSpy();
+  const res = await run4910Step({
+    today: TODAY, dbExists: () => false, openStore: () => { opened = true; return fakeStore(); }, makeClient: () => ({}), trackFn, notify, log,
+    readToken: () => { throw new Error('token must not be read'); },
+  });
+  assert.equal(res.ran, false);
+  assert.equal(res.ok, false);
+  assert.match(res.error, /4910\.db 없음/);
+  assert.match(log.lines.join('\n'), /⚠️ \[4910\] 4910\.db 없음 — 먼저 `node src\/cli\.js 4910-db pull`/);
+  assert.equal(opened, false);
+  assert.equal(trackFn.args, undefined);
+  assert.equal(notify.calls.length, 0);
+});
+
+test('a dry run does not need the DB file', async () => {
+  const trackFn = trackSpy();
+  const res = await run4910Step({ flags: { 'dry-run': true }, today: TODAY, dbExists: () => false, makeClient: () => ({}), trackFn, notify: spyFn(), log: logSpy() });
+  assert.equal(res.ok, true);
+  assert.equal(trackFn.args.store, null);
 });
 
 test('run4910Step swallows a client failure', async () => {
   const store = fakeStore();
   const notify = spyFn();
   const log = logSpy();
-  const res = await run4910Step({
+  const res = await run4910Step({ dbExists: () => true,
     today: TODAY,
     openStore: () => store,
     makeClient: () => ({}),
@@ -89,7 +114,7 @@ test('run4910Step swallows a client failure', async () => {
 
 test('run4910Step swallows a store that fails to open', async () => {
   const log = logSpy();
-  const res = await run4910Step({ today: TODAY, openStore: () => { throw new Error('disk I/O error'); }, notify: spyFn(), log });
+  const res = await run4910Step({ dbExists: () => true, today: TODAY, openStore: () => { throw new Error('disk I/O error'); }, notify: spyFn(), log });
   assert.equal(res.ok, false);
   assert.match(log.lines.join('\n'), /⚠️ \[4910\] 수집 실패 \(disk I\/O error\)/);
 });
@@ -99,7 +124,7 @@ test('run4910Step notifies once and checkpoints on success', async () => {
   const notify = spyFn();
   const log = logSpy();
   const trackFn = trackSpy();
-  const res = await run4910Step({ today: TODAY, openStore: () => store, makeClient: () => ({ id: 'c' }), trackFn, notify, log });
+  const res = await run4910Step({ dbExists: () => true, today: TODAY, openStore: () => store, makeClient: () => ({ id: 'c' }), trackFn, notify, log });
 
   assert.equal(res.ok, true);
   assert.equal(res.result, RESULT);
@@ -117,22 +142,22 @@ test('run4910Step notifies once and checkpoints on success', async () => {
 
 test('run4910Step --brand gu passes only GU', async () => {
   const trackFn = trackSpy();
-  await run4910Step({ flags: { brand: 'gu' }, today: TODAY, openStore: fakeStore, makeClient: () => ({}), trackFn, notify: spyFn(), log: logSpy() });
+  await run4910Step({ dbExists: () => true, flags: { brand: 'gu' }, today: TODAY, openStore: fakeStore, makeClient: () => ({}), trackFn, notify: spyFn(), log: logSpy() });
   assert.deepEqual(trackFn.args.brands.map((b) => b.sno), [13647]);
 });
 
 test('--brand 2421 scans only that brand; --brand nike is rejected', async () => {
   const trackFn = trackSpy();
   const common = { today: TODAY, openStore: fakeStore, makeClient: () => ({}), trackFn, notify: spyFn(), log: logSpy() };
-  await run4910Step({ ...common, flags: { brand: '2421' } });
+  await run4910Step({ dbExists: () => true, ...common, flags: { brand: '2421' } });
   assert.deepEqual(trackFn.args.brands, [{ sno: 2421, name: 'brand 2421' }]);
-  await run4910Step({ ...common, flags: { brand: 'uniqlo' } });
+  await run4910Step({ dbExists: () => true, ...common, flags: { brand: 'uniqlo' } });
   assert.deepEqual(trackFn.args.brands, [{ sno: 2421, name: '유니클로' }]);
 
   for (const bad of ['nike', 'constructor', '12ab', true]) {
     const spy = trackSpy();
     const log = logSpy();
-    const res = await run4910Step({ ...common, trackFn: spy, log, flags: { brand: bad } });
+    const res = await run4910Step({ dbExists: () => true, ...common, trackFn: spy, log, flags: { brand: bad } });
     assert.equal(res.ran, false);
     assert.equal(res.ok, false);
     assert.match(res.error, /unknown brand/);
@@ -145,7 +170,7 @@ test('--concurrency is clamped to 1-4 and defaults to 3', async () => {
   const seen = [];
   for (const concurrency of [undefined, '2', '5', '99', '0', 'fast', true]) {
     const trackFn = trackSpy();
-    await run4910Step({
+    await run4910Step({ dbExists: () => true,
       flags: { concurrency }, today: TODAY, openStore: fakeStore, makeClient: () => ({}), trackFn, notify: spyFn(), log: logSpy(),
     });
     seen.push(trackFn.args.concurrency);
@@ -159,7 +184,7 @@ test('the member token is read once and shared by the scan and the liked sync, w
   const clients = [];
   const trackFn = trackSpy();
   const syncLikedFn = likedSpy();
-  await run4910Step({
+  await run4910Step({ dbExists: () => true,
     today: TODAY, openStore: () => store, makeClient: () => { const c = { n: clients.length }; clients.push(c); return c; },
     trackFn, notify: spyFn(), log: logSpy(), syncLikedFn, readToken: () => { reads++; return 'T'; },
   });
@@ -195,10 +220,15 @@ test('run4910Db passes the DB path through and reports the byte count', () => {
   const seen = [];
   const pull = run4910Db({ sub: 'pull', dbPath: '/x/4910.db', pullFn: (a) => (seen.push(['pull', a]), { bytes: 1234567 }), log });
   const push = run4910Db({ sub: 'push', dbPath: '/x/4910.db', pushFn: (a) => (seen.push(['push', a]), { bytes: 42 }), log });
-  assert.deepEqual(seen, [['pull', { dest: '/x/4910.db' }], ['push', { src: '/x/4910.db' }]]);
+  const fresh = run4910Db({ sub: 'push', allowFresh: true, dbPath: '/x/4910.db', pushFn: (a) => (seen.push(['push', a]), { bytes: 1 }), log });
+  assert.equal(fresh.ok, true);
+  assert.deepEqual(seen, [
+    ['pull', { dest: '/x/4910.db' }], ['push', { src: '/x/4910.db', allowFresh: false }], ['push', { src: '/x/4910.db', allowFresh: true }],
+  ]);
   assert.deepEqual([pull, push], [{ ok: true, bytes: 1234567 }, { ok: true, bytes: 42 }]);
   assert.match(log.lines[0], /pulled 1,234,567 bytes/);
   assert.match(log.lines[1], /pushed 42 gzipped bytes/);
+  assert.deepEqual(parseArgs(['4910-db', 'push', '--allow-fresh']), { command: '4910-db', flags: { 'allow-fresh': true }, positional: ['push'] });
 });
 
 test('run4910Db turns a failure into a warning, not a throw', () => {
@@ -213,7 +243,7 @@ test('run4910Step --dry-run does not notify or open a store', async () => {
   const notify = spyFn();
   const log = logSpy();
   const trackFn = trackSpy();
-  const res = await run4910Step({
+  const res = await run4910Step({ dbExists: () => true,
     flags: { 'dry-run': true }, today: TODAY, openStore: () => { opened = true; }, makeClient: () => ({}), trackFn, notify, log,
   });
   assert.equal(res.ok, true);
@@ -230,7 +260,7 @@ test('a runner blocked by Cloudflare logs 수집 실패 and sends no digest (rea
   try {
     const notify = spyFn();
     const log = logSpy();
-    const res = await run4910Step({
+    const res = await run4910Step({ dbExists: () => true,
       today: TODAY,
       openStore: () => (store = new Store4910(path.join(dir, '4910.db'))),
       makeClient: () => createClient({ fetchFn: async () => new Response('<html>blocked</html>', { status: 403 }), delayMs: 0, retryBaseMs: 0 }),
@@ -265,7 +295,7 @@ test('run4910Step runs the liked sync after the scan and passes it to the digest
   const log = logSpy();
   const client = { id: 'c' };
   const syncLikedFn = likedSpy();
-  const res = await run4910Step({
+  const res = await run4910Step({ dbExists: () => true,
     today: TODAY, openStore: () => store, makeClient: () => client, trackFn: trackSpy(), notify, log, readToken: () => 'T', syncLikedFn,
   });
   assert.equal(res.ok, true);
@@ -283,7 +313,7 @@ test('run4910Step without a token skips the liked sync', async () => {
   const notify = spyFn();
   const log = logSpy();
   const syncLikedFn = likedSpy();
-  const res = await run4910Step({
+  const res = await run4910Step({ dbExists: () => true,
     today: TODAY, openStore: fakeStore, makeClient: () => ({}), trackFn: trackSpy(), notify, log, readToken: () => null, syncLikedFn,
   });
   assert.equal(res.ok, true);
@@ -298,7 +328,7 @@ test('a liked sync failure still sends the scan digest', async () => {
   const store = fakeStore();
   const notify = spyFn();
   const log = logSpy();
-  const res = await run4910Step({
+  const res = await run4910Step({ dbExists: () => true,
     today: TODAY, openStore: () => store, makeClient: () => ({}), trackFn: trackSpy(), notify, log, readToken: () => 'T',
     syncLikedFn: async () => {
       throw new Error('HTTP 500');
@@ -316,7 +346,7 @@ test('a failed scan still runs the liked sync but sends no digest', async () => 
   const notify = spyFn();
   const log = logSpy();
   const syncLikedFn = likedSpy();
-  const res = await run4910Step({
+  const res = await run4910Step({ dbExists: () => true,
     today: TODAY, openStore: fakeStore, makeClient: () => ({}), notify, log, readToken: () => 'T', syncLikedFn,
     trackFn: async () => {
       throw new Error('HTTP 403');
@@ -331,7 +361,7 @@ test('a failed scan still runs the liked sync but sends no digest', async () => 
 
 test('--dry-run never runs the liked sync', async () => {
   const syncLikedFn = likedSpy();
-  const res = await run4910Step({
+  const res = await run4910Step({ dbExists: () => true,
     flags: { 'dry-run': true }, today: TODAY, openStore: fakeStore, makeClient: () => ({}), trackFn: trackSpy(), notify: spyFn(), log: logSpy(),
     readToken: () => 'T', syncLikedFn,
   });
@@ -343,7 +373,7 @@ test('a throwing readToken still sends the scan digest', async () => {
   const notify = spyFn();
   const log = logSpy();
   const syncLikedFn = likedSpy();
-  const res = await run4910Step({
+  const res = await run4910Step({ dbExists: () => true,
     today: TODAY, openStore: fakeStore, makeClient: () => ({}), trackFn: trackSpy(), notify, log, syncLikedFn,
     readToken: () => {
       throw new Error('EACCES: permission denied');

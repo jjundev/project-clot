@@ -47,7 +47,7 @@ export function parseArgs(rawArgs = process.argv.slice(2)) {
   const command = args[0] || 'help';
   const flags = {};
   const positional = [];
-  const BOOLEAN_FLAGS = new Set(['force', 'with-discovery', 'no-open', 'help', 'skip-opencli', 'assume-awake', 'json', 'skip-4910', 'dry-run']);
+  const BOOLEAN_FLAGS = new Set(['force', 'with-discovery', 'no-open', 'help', 'skip-opencli', 'assume-awake', 'json', 'skip-4910', 'dry-run', 'allow-fresh']);
 
   for (let i = 1; i < args.length; i++) {
     const a = args[i];
@@ -499,6 +499,7 @@ export async function run4910Step({
   flags = {},
   today,
   openStore = () => new Store4910(),
+  dbExists = () => fs.existsSync(default4910DbPath()),
   makeClient = () => createClient(),
   trackFn = track4910,
   syncLikedFn = syncLiked4910,
@@ -514,6 +515,14 @@ export async function run4910Step({
     return { ran: false, ok: false, error: brandError };
   }
   const concurrency = Math.min(parseConcurrency(flags.concurrency, 3), 4);
+
+  // Opening the store would create an empty DB, the scan would fill it with one day, and a push would then replace the
+  // release history. The DB has to come from `4910-db pull` first.
+  if (!flags['dry-run'] && !dbExists()) {
+    const error = '4910.db 없음 — 먼저 `node src/cli.js 4910-db pull`';
+    log(`⚠️ [4910] ${error}`);
+    return { ran: false, ok: false, error };
+  }
 
   // One token read serves the scan (member-price coupons) and the liked sync; a throwing read means no token.
   let memberToken = null;
@@ -587,13 +596,13 @@ export async function run4910Step({
 }
 
 /** `4910-db pull|push`: moves data/4910.db (or CLOT_4910_DB_PATH) to and from the data-4910 Release asset. */
-export function run4910Db({ sub, dbPath = default4910DbPath(), pullFn = pullDb, pushFn = pushDb, log = console.log } = {}) {
+export function run4910Db({ sub, allowFresh = false, dbPath = default4910DbPath(), pullFn = pullDb, pushFn = pushDb, log = console.log } = {}) {
   if (sub !== 'pull' && sub !== 'push') {
-    log('Usage: node src/cli.js 4910-db pull|push');
+    log('Usage: node src/cli.js 4910-db pull|push [--allow-fresh]');
     return { ok: false };
   }
   try {
-    const { bytes } = sub === 'pull' ? pullFn({ dest: dbPath }) : pushFn({ src: dbPath });
+    const { bytes } = sub === 'pull' ? pullFn({ dest: dbPath }) : pushFn({ src: dbPath, allowFresh });
     log(sub === 'pull' ? `⬇️ [4910-db] pulled ${bytes.toLocaleString('en-US')} bytes into ${dbPath}` : `⬆️ [4910-db] pushed ${bytes.toLocaleString('en-US')} gzipped bytes from ${dbPath}`);
     return { ok: true, bytes };
   } catch (err) {
@@ -1165,7 +1174,7 @@ async function main() {
       break;
     }
     case '4910-db': {
-      const res = run4910Db({ sub: positional[0] });
+      const res = run4910Db({ sub: positional[0], allowFresh: Boolean(flags['allow-fresh']) });
       if (!res.ok) process.exitCode = 1;
       break;
     }
@@ -1197,7 +1206,8 @@ Commands:
                          Discover popular products; real prices for up to <n> of them (default 120, 0 = off)
   track-4910 [--brand <sno>|uniqlo|gu] [--concurrency=1-4] [--dry-run]
                          Scan the top 4910.kr brands into data/4910.db (--dry-run writes nothing)
-  4910-db pull|push      Download / upload data/4910.db as the data-4910 GitHub Release asset (gh CLI)
+  4910-db pull|push [--allow-fresh]
+                         Download / upload data/4910.db as the data-4910 GitHub Release asset (gh CLI)
   sync                   Sync liked items from Musinsa account
   track [goodsNo] [--concurrency=1-5]  Track active items or promote discovery item to VIP
   watch <url/goodsNo>    Manually add a product to track

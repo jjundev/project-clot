@@ -25,8 +25,11 @@ function fakeRun(handler = () => undefined) {
   return run;
 }
 
-function makeDb(file, goodsRows = 2) {
+function makeDb(file, goodsRows = 2, scanDays = 2) {
   const store = new Store4910(file);
+  for (let d = 1; d <= scanDays; d++) {
+    store.db.prepare('INSERT INTO scan_runs (date, completed_at) VALUES (?, ?)').run(`2026-10-0${d}`, 'x');
+  }
   for (let i = 1; i <= goodsRows; i++) {
     store.db
       .prepare("INSERT INTO goods (sno, brand_sno, name, url, first_seen_date) VALUES (?, 1, 'g', 'u', '2026-10-10')")
@@ -192,6 +195,8 @@ test('pushDb folds the WAL into the pushed file', (t) => {
   const dir = scratch(t);
   const src = path.join(dir, '4910.db');
   const store = new Store4910(src); // stays open: rows live in the -wal file
+  store.db.prepare('INSERT INTO scan_runs (date, completed_at) VALUES (?, ?)').run('2026-10-01', 'x');
+  store.db.prepare('INSERT INTO scan_runs (date, completed_at) VALUES (?, ?)').run('2026-10-02', 'x');
   store.db.prepare("INSERT INTO goods (sno, brand_sno, name, url, first_seen_date) VALUES (7, 1, 'g', 'u', '2026-10-10')").run();
   let uploaded;
   const run = fakeRun((args) => {
@@ -204,4 +209,37 @@ test('pushDb folds the WAL into the pushed file', (t) => {
   const check = new DatabaseSync(restored);
   assert.equal(check.prepare('SELECT COUNT(*) AS n FROM goods').get().n, 1);
   check.close();
+});
+
+test('pushDb refuses a one-day DB (a skipped pull) with zero gh calls, unless allowFresh', (t) => {
+  const dir = scratch(t);
+  const src = path.join(dir, '4910.db');
+  makeDb(src, 2, 1);
+  const run = releaseState();
+  assert.throws(() => pushDb({ src, run, tmpDir: path.join(dir, 'tmp') }), /1 scan day.*pull.*--allow-fresh/s);
+  assert.equal(run.calls.length, 0);
+
+  pushDb({ src, run, tmpDir: path.join(dir, 'tmp'), allowFresh: true });
+  assert.equal(run.calls.at(-1).args[1], 'upload');
+});
+
+test('pushDb refuses a DB with no scan days, and still refuses an empty DB under allowFresh', (t) => {
+  const dir = scratch(t);
+  const none = path.join(dir, 'none.db');
+  const empty = path.join(dir, 'empty.db');
+  makeDb(none, 2, 0);
+  makeDb(empty, 0, 5);
+  const run = releaseState();
+  assert.throws(() => pushDb({ src: none, run }), /0 scan day/);
+  assert.throws(() => pushDb({ src: empty, run, allowFresh: true }), /0 goods rows/);
+  assert.equal(run.calls.length, 0);
+});
+
+test('pushDb uploads a two-day DB without allowFresh', (t) => {
+  const dir = scratch(t);
+  const src = path.join(dir, '4910.db');
+  makeDb(src, 2, 2);
+  const run = releaseState();
+  pushDb({ src, run, tmpDir: path.join(dir, 'tmp') });
+  assert.equal(run.calls.at(-1).args[1], 'upload');
 });
