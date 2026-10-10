@@ -355,6 +355,12 @@ const coupon = (couponSno, name, extra = {}) => ({
   couponSno, name, type: 'PERCENT', percent: 10, price: null, max: 5000, min: 10000, finishedAt: '2026-12-31', ...extra,
 });
 
+test('getActiveMarketSnos returns the sellers that own an ACTIVE listing', () => {
+  s.applyScan('2026-10-10', [row(1, 50000), { ...row(2, 30000), market_sno: 20 }, { ...row(3, 30000), market_sno: null }], BOTH);
+  s.markOutOfScope({ activeBrandSnos: [2421], qualifiedMarketSnos: [10] }); // listing 2 (seller 20) leaves ACTIVE
+  assert.deepEqual([...s.getActiveMarketSnos()], [10]);
+});
+
 test('replaceWallet reports added and removed coupon names', () => {
   assert.deepEqual(s.replaceWallet('2026-10-10', [coupon(1, 'A'), coupon(2, 'B')]), { added: ['A', 'B'], removed: [] });
   assert.deepEqual(s.replaceWallet('2026-10-11', [coupon(2, 'B'), coupon(3, 'C')]), { added: ['C'], removed: ['A'] });

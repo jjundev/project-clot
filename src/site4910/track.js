@@ -7,9 +7,12 @@ import { refreshMarkets } from './sellers.js';
 import { learnMarketCoupons, applyCouponPrices } from './coupons.js';
 import { mapConcurrent } from '../pool.js';
 
-// Keeps a degraded (slow, not dead) API from running the Actions job into its timeout; brands not finished by
-// then count as incomplete, so their listings take no misses.
-export const BUDGET_MS_4910 = 25 * 60_000;
+// Keeps a degraded (slow, not dead) API from running the Actions job (45-minute timeout) into its timeout; brands
+// not finished by then count as incomplete, so their listings take no misses.
+export const BUDGET_MS_4910 = 20 * 60_000;
+// The whole run, from its start: past it the seller checks and the coupon sampling start no new work, so the
+// coupon prices, scan_runs and the Release push still happen inside the job timeout.
+export const RUN_BUDGET_MS_4910 = 35 * 60_000;
 
 // Hands each concurrent worker a client of its own (each client keeps its own request spacing). A client is
 // made only when none is free, so at most `concurrency` clients ever exist.
@@ -33,14 +36,15 @@ async function scanOne(client, brand, deadline) {
   }
 }
 
+// Item by item, not push(...list): spreading a first-day `added` list (~120k rows) as call arguments overflows
+// the stack. (No test: a stack-overflow-sized fixture would only test V8's argument limit.)
 function mergeDiffs(diffs, initial) {
   const merged = { initial, added: [], priceChanged: 0, drops: [], revived: [], dropped: [] };
   for (const d of diffs) {
-    merged.added.push(...d.added);
     merged.priceChanged += d.priceChanged;
-    merged.drops.push(...d.drops);
-    merged.revived.push(...d.revived);
-    merged.dropped.push(...d.dropped);
+    for (const key of ['added', 'drops', 'revived', 'dropped']) {
+      for (const item of d[key]) merged[key].push(item);
+    }
   }
   merged.drops.sort((a, b) => b.dropRate - a.dropRate);
   return merged;
@@ -54,10 +58,11 @@ function mergeDiffs(diffs, initial) {
  */
 export async function track4910({
   makeClient, store, date, brands = null, concurrency = 3, dryRun = false, memberToken = null,
-  budgetMs = BUDGET_MS_4910, now = new Date(), log = console.log,
+  budgetMs = BUDGET_MS_4910, runBudgetMs = RUN_BUDGET_MS_4910, now = new Date(), log = console.log,
 }) {
   const started = Date.now();
   const deadline = started + budgetMs;
+  const runDeadline = started + runBudgetMs;
   const withClient = clientPool(makeClient);
   const initial = dryRun ? false : store.isEmpty();
 
@@ -84,10 +89,15 @@ export async function track4910({
     };
   }
 
-  const { qualified, checked } = await withClient((client) => refreshMarkets({ client, store, date, marketSnos, log }));
+  const { qualified, checked } = await withClient((client) => refreshMarkets({ client, store, date, marketSnos, deadline: runDeadline, log }));
   // Every stored qualified seller, not only today's: an incomplete brand's unseen listings must stay as they are.
   const qualifiedMarketSnos = [...store.getMarkets().values()].filter((m) => m.qualified).map((m) => m.sno);
-  const outOfScope = store.markOutOfScope({ activeBrandSnos: brandList.map((b) => b.sno), qualifiedMarketSnos });
+  // An explicit brand list (`--brand`) is a partial run: the stored brand list stays in scope, so the brands not
+  // scanned today keep their ACTIVE rows instead of going OUT_OF_SCOPE (and REVIVED on the next full run).
+  const activeBrandSnos = brands
+    ? [...new Set([...store.getActiveBrands().map((b) => Number(b.sno)), ...brandList.map((b) => Number(b.sno))])]
+    : brandList.map((b) => b.sno);
+  const outOfScope = store.markOutOfScope({ activeBrandSnos, qualifiedMarketSnos });
 
   const diffs = brandList.map((brand, i) => {
     const rows = [...scans[i].rows.values()].filter((r) => qualified.has(Number(r.market_sno)));
@@ -98,7 +108,7 @@ export async function track4910({
 
   let learned;
   try {
-    learned = await withClient((client) => learnMarketCoupons({ client, store, date, marketSnos: [...qualified], memberToken, log }));
+    learned = await withClient((client) => learnMarketCoupons({ client, store, date, marketSnos: [...qualified], memberToken, deadline: runDeadline, log }));
   } catch (err) {
     // The client never puts the member token in an error message.
     log(`⚠️ [4910] 쿠폰 학습 실패 (${err.status ?? err.name}: ${err.message})`);

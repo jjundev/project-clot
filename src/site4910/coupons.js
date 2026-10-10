@@ -39,7 +39,11 @@ function samplesOf(store, marketSno) {
   return [high, low].filter((s, i, all) => s && all.findIndex((o) => o?.sno === s.sno) === i);
 }
 
-export async function learnMarketCoupons({ client, store, date, marketSnos, memberToken, log = console.log }) {
+/**
+ * Reads the wallet and the e-money balance, then samples each seller's best coupon. Past `deadline` no new seller
+ * is sampled: the sellers not reached get no market_coupons row today, so their listings' coupon price is NULL.
+ */
+export async function learnMarketCoupons({ client, store, date, marketSnos, memberToken, deadline = Infinity, log = console.log }) {
   const result = { memberStatus: 'none', wallet: 0, walletChanges: { added: [], removed: [] }, emoney: null, eligible: 0, mismatched: 0 };
   if (!memberToken) return result;
   const expired = () => {
@@ -57,6 +61,7 @@ export async function learnMarketCoupons({ client, store, date, marketSnos, memb
   result.walletChanges = store.replaceWallet(date, coupons);
   const wallet = walletRows(store.getWallet());
   const walletSnos = new Set(wallet.map((c) => c.coupon_sno));
+  const walletMin = new Map(wallet.map((c) => [c.coupon_sno, c.min]));
   result.wallet = wallet.length;
   result.memberStatus = 'ok';
 
@@ -66,7 +71,11 @@ export async function learnMarketCoupons({ client, store, date, marketSnos, memb
     log(`⚠️ [4910] 포인트 조회 실패 (HTTP ${err.status ?? '?'})`);
   }
 
-  for (const marketSno of marketSnos) {
+  for (const [i, marketSno] of marketSnos.entries()) {
+    if (Date.now() > deadline) {
+      log(`⚠️ [4910] 실행 예산 초과 — 판매처 ${marketSnos.length - i}곳 쿠폰 확인 생략 (쿠폰가 없음)`);
+      break;
+    }
     let first = null;
     let set = null;
     let mismatch = false;
@@ -104,6 +113,9 @@ export async function learnMarketCoupons({ client, store, date, marketSnos, memb
         }
       }
       if (Math.abs(L - (best?.discount ?? 0) - couponPrice(L, set)) > 10) mismatch = true;
+      // The wallet's minimum comes from parsed condition text; best-coupon states it directly, so a disagreement
+      // means our wallet terms are wrong for this seller even when the sampled prices happen to match.
+      if (best && walletSnos.has(best.couponSno) && typeof best.min === 'number' && best.min !== walletMin.get(best.couponSno)) mismatch = true;
     }
 
     if (!first) continue;

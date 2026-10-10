@@ -308,3 +308,34 @@ test('the token never appears in logs', async () => {
   assert.ok(logs.length > 0);
   assert.ok(logs.every((l) => !String(l).includes(SECRET)));
 });
+
+test('a wallet best coupon whose minimum differs from the stored wallet row marks the seller mismatched', async () => {
+  seed(goods(1, 10, 85400), goods(2, 20, 85400));
+  // Seller 10: same discount, but best-coupon says the minimum is 30,000 (the wallet text parsed as 10,000).
+  // Seller 20: best-coupon gives no minimum at all, which is not a disagreement.
+  const client = fakeClient({ best: { 10: { ...wallet20(17080), min: 30000 }, 20: { ...wallet20(17080), min: null } } });
+  const res = await learn(client, [10, 20]);
+  assert.equal(res.mismatched, 1);
+  assert.equal(store.getMarketCoupons(DATE).get(10).mismatch, 1);
+  assert.equal(store.getMarketCoupons(DATE).get(20).mismatch, 0);
+  applyCouponPrices({ store, date: DATE });
+  assert.equal(store.getGoods(1).coupon_price, null);
+  assert.equal(store.getGoods(2).coupon_price, 68320);
+});
+
+test('past the deadline the wallet is still read but no seller is sampled', async () => {
+  seed(goods(1, 10, 85400));
+  const client = fakeClient({ best: { 10: wallet20(17080) } });
+  const logs = [];
+  const res = await learn(client, [10, 20], logs, { deadline: Date.now() - 1 });
+  assert.equal(client.calls.coupons, 1);
+  assert.equal(res.memberStatus, 'ok');
+  assert.equal(res.wallet, 3);
+  assert.deepEqual(client.calls.detail, []);
+  assert.deepEqual(client.calls.best, []);
+  assert.equal(store.getMarketCoupons(DATE).size, 0);
+  assert.equal(logs.filter((l) => /예산/.test(l)).length, 1);
+  assert.doesNotMatch(logs.join('\n'), new RegExp(SECRET));
+  applyCouponPrices({ store, date: DATE });
+  assert.equal(store.getGoods(1).coupon_price, null);
+});

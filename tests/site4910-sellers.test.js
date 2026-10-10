@@ -113,3 +113,31 @@ test('returns only sellers from marketSnos and logs one summary line plus a few 
   assert.ok(lines.length <= 6, `too chatty: ${lines.length} lines`);
   assert.ok(lines.some((l) => /20/.test(l)));
 });
+
+const listing = (sno, market_sno) => ({
+  sno, brand_sno: 2421, brand: '유니클로', name: `listing ${sno}`, market_sno, market_name: null, category: null,
+  sale_price: 10000, original_price: 10000, discount_rate: null, image_url: null, url: `https://4910.kr/goods/${sno}`,
+});
+
+test('new sellers that own ACTIVE listings are checked before other new sellers and stale ones', async () => {
+  // Day 1 of seller filtering: 7 and 8 own ACTIVE rows from before, 1 and 2 are new to the store, 3 is stale.
+  store.applyScan('2026-10-10', [listing(70, 7), listing(80, 8)]);
+  seed(3, '2026-10-01', true);
+  const client = fakeClient({ 1: GOOD, 2: GOOD, 3: GOOD, 7: GOOD, 8: BAD });
+  const r = await refreshMarkets({ client, store, date: TODAY, marketSnos: [1, 2, 3, 7, 8], maxChecks: 3, log: quiet });
+  assert.deepEqual(client.calls, [7, 8, 1]);
+  assert.deepEqual([...r.qualified].sort(), [1, 3, 7]);
+});
+
+test('past the deadline no seller is checked; stored verdicts stand and new sellers do not qualify', async () => {
+  seed(1, '2026-10-01', true); // stale but qualified
+  const client = fakeClient({ 1: BAD, 2: GOOD });
+  const lines = [];
+  const r = await refreshMarkets({ client, store, date: TODAY, marketSnos: [1, 2], deadline: Date.now() - 1, log: (l) => lines.push(l) });
+  assert.deepEqual(client.calls, []);
+  assert.equal(r.checked, 0);
+  assert.deepEqual([...r.qualified], [1]);
+  assert.equal(store.getMarkets().has(2), false);
+  assert.ok(lines.some((l) => /budget/.test(l)));
+  assert.ok(lines.some((l) => /2 left for later/.test(l)));
+});

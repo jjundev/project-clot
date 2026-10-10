@@ -163,6 +163,44 @@ test('an incomplete brand does not push its listings to OUT_OF_SCOPE or misses',
   assert.equal(count('SELECT complete AS n FROM scan_runs WHERE date = ?', '2026-10-11'), 0);
 });
 
+test('a single-brand run (--brand) leaves the other stored brands\' ACTIVE rows alone', async () => {
+  store.upsertBrands('2026-10-09', BRANDS, []);
+  await track4910({ makeClient: fakeClients(CATALOG), store, date: '2026-10-10', brands: BRANDS, log: quiet });
+  const changesBefore = count('SELECT COUNT(*) AS n FROM price_changes');
+
+  const res = await track4910({ makeClient: fakeClients(CATALOG), store, date: '2026-10-11', brands: [BRANDS[1]], log: quiet });
+  assert.equal(res.outOfScope, 0);
+  for (const sno of [1, 2, 3]) assert.equal(store.getGoods(sno).status, 'ACTIVE', `uniqlo listing ${sno}`);
+  assert.equal(count('SELECT COUNT(*) AS n FROM price_changes'), changesBefore);
+
+  // The next full run finds nothing to revive.
+  const full = await track4910({ makeClient: fakeClients(CATALOG), store, date: '2026-10-12', brands: BRANDS, log: quiet });
+  assert.equal(full.diff.revived.length, 0);
+  assert.equal(count('SELECT COUNT(*) AS n FROM price_changes'), changesBefore);
+});
+
+test('past the run budget no seller is checked and no coupon is sampled, but the run still finishes', async () => {
+  const calls = { coupons: 0, best: 0 };
+  const member = {
+    async getMyCoupons() { calls.coupons++; return WALLET; },
+    async getMe() { return { emoney: 0 }; },
+    async getGoodsDetail(sno) { return { optionSno: sno * 10 }; },
+    async getBestCoupon() { calls.best++; return null; },
+  };
+  const makeClient = fakeClients(CATALOG, { member });
+  const lines = [];
+  const res = await track4910({
+    makeClient, store, date: '2026-10-10', brands: BRANDS, memberToken: 'T', runBudgetMs: -1, log: (l) => lines.push(l),
+  });
+  assert.equal(makeClient.stats.marketCalls, 0);
+  assert.deepEqual(res.sellers, { seen: 1, qualified: 0, checked: 0 });
+  assert.equal(calls.coupons, 1); // the wallet is still read
+  assert.equal(calls.best, 0);
+  assert.equal(res.coupons.priced, 0);
+  assert.equal(count('SELECT COUNT(*) AS n FROM scan_runs'), 1);
+  assert.match(lines.join('\n'), /run budget/);
+});
+
 test('without a member token the scan still stores rows and coupon_price stays null', async () => {
   await track4910({ makeClient: fakeClients(CATALOG), store, date: '2026-10-10', brands: BRANDS, log: quiet });
   store.setCouponPrices(new Map([[1, 40000]])); // yesterday's value must not survive today

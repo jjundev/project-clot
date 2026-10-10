@@ -274,6 +274,14 @@ export class Store4910 {
     return new Map(this.db.prepare('SELECT * FROM markets ORDER BY sno').all().map((m) => [m.sno, m]));
   }
 
+  // Sellers that own at least one ACTIVE listing: refreshMarkets checks these first among the new sellers, so a
+  // capped run does not push legitimate listings to OUT_OF_SCOPE only because their seller was not reached.
+  getActiveMarketSnos() {
+    return new Set(
+      this.db.prepare("SELECT DISTINCT market_sno FROM goods WHERE status = 'ACTIVE' AND market_sno IS NOT NULL").all().map((r) => Number(r.market_sno))
+    );
+  }
+
   /**
    * Swaps the member's wallet (market_sno IS NULL rows) for the usable ones among `coupons` (the client returns
    * every coupon with a `usable` flag), and reports the coupon names that appeared or vanished since the previous
