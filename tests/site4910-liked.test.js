@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Store4910 } from '../src/site4910/store.js';
-import { LIKED_BUDGET_MS_4910, readAblyToken, tokenExpiry, syncLiked4910 } from '../src/site4910/liked.js';
+import { LIKED_BUDGET_MS_4910, MAX_LIKED_PAGES_4910, readAblyToken, tokenExpiry, syncLiked4910 } from '../src/site4910/liked.js';
 
 const SECRET = 'SECRET-TOKEN';
 const DATE = '2026-10-10';
@@ -139,6 +139,29 @@ test('a liked-list failure after page 1 leaves likes untouched', async () => {
   const before = store.db.prepare('SELECT sno, status FROM liked_goods ORDER BY sno').all();
   const client = fakeClient({ pages: [{ entries: [entry(9)], lastSno: 5 }, httpErr(500)] });
   await assert.rejects(run(client), (err) => err.status === 500);
+  assert.deepEqual(store.db.prepare('SELECT sno, status FROM liked_goods ORDER BY sno').all(), before);
+});
+
+test('a repeating liked cursor rejects and leaves likes untouched', async () => {
+  store.syncLiked([{ ...entryRow(5) }], '2026-10-09');
+  const before = store.db.prepare('SELECT sno, status FROM liked_goods ORDER BY sno').all();
+  const client = fakeClient({
+    pages: [{ entries: [entry(9)], lastSno: 9 }, { entries: [entry(10)], lastSno: 9 }, { entries: [entry(11)], lastSno: 9 }],
+  });
+  await assert.rejects(run(client), (err) => /cursor repeated/.test(err.message) && !err.message.includes(SECRET));
+  assert.equal(client.calls.list, 2);
+  assert.deepEqual(store.db.prepare('SELECT sno, status FROM liked_goods ORDER BY sno').all(), before);
+});
+
+test('hitting the liked page cap rejects and leaves likes untouched', async () => {
+  assert.equal(MAX_LIKED_PAGES_4910, 50);
+  store.syncLiked([{ ...entryRow(5) }], '2026-10-09');
+  const before = store.db.prepare('SELECT sno, status FROM liked_goods ORDER BY sno').all();
+  const client = fakeClient({
+    pages: [{ entries: [entry(9)], lastSno: 9 }, { entries: [entry(10)], lastSno: 10 }, { entries: [entry(11)], lastSno: 11 }],
+  });
+  await assert.rejects(run(client, { maxPages: 2 }), (err) => /page cap/.test(err.message) && !err.message.includes(SECRET));
+  assert.equal(client.calls.list, 2);
   assert.deepEqual(store.db.prepare('SELECT sno, status FROM liked_goods ORDER BY sno').all(), before);
 });
 

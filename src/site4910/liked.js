@@ -5,7 +5,7 @@ import path from 'node:path';
 import { toRow } from './client.js';
 
 export const LIKED_BUDGET_MS_4910 = 4 * 60_000;
-const MAX_LIKED_PAGES = 50;
+export const MAX_LIKED_PAGES_4910 = 50;
 const COOKIE_NAME = 'ably-jwt-token';
 
 // The token may be pasted as a bare JWT, a quoted value, a URL-encoded value or a whole cookie string.
@@ -51,21 +51,25 @@ export function tokenExpiry(token) {
   }
 }
 
-// Pages the whole liked list; MEMBER_AUTH or any other failure rejects before anything is written.
-async function listAllLiked(client, memberToken) {
+// Pages the whole liked list; MEMBER_AUTH or any other failure rejects before anything is written. A list that
+// cannot be read to its end (page cap hit, or the cursor stops advancing) rejects too: a partial list would make
+// syncLiked mark every unread like as UNLIKED.
+async function listAllLiked(client, memberToken, maxPages) {
   const rows = [];
   let lastSno = null;
-  for (let page = 0; page < MAX_LIKED_PAGES; page++) {
+  for (let page = 0; page < maxPages; page++) {
     const res = await client.listLikedGoods({ memberToken, lastSno });
-    if (!res.entries.length) break;
+    if (!res.entries.length) return rows;
     for (const entry of res.entries) {
       const a = entry.logging?.analytics ?? {};
       rows.push(toRow(entry, { sno: a.BRAND_SNO ?? null, name: a.BRAND_NAME ?? null }));
     }
-    lastSno = res.lastSno ?? null;
-    if (lastSno === null) break;
+    const next = res.lastSno ?? null;
+    if (next === null) return rows;
+    if (next === lastSno) throw new Error('4910 liked list did not finish (cursor repeated)');
+    lastSno = next;
   }
-  return rows;
+  throw new Error('4910 liked list did not finish (page cap)');
 }
 
 // A drop is only meaningful between days priced the same way: member vs member, or coupon/list vs coupon/list.
@@ -76,14 +80,16 @@ function comparablePrices(prev, row) {
   return { prevPrice: prev.coupon_price ?? prev.list_price, currentPrice: row.coupon_price ?? row.list_price };
 }
 
-export async function syncLiked4910({ client, store, date, memberToken, budgetMs = LIKED_BUDGET_MS_4910, log = console.log }) {
+export async function syncLiked4910({
+  client, store, date, memberToken, budgetMs = LIKED_BUDGET_MS_4910, maxPages = MAX_LIKED_PAGES_4910, log = console.log,
+}) {
   const result = { memberStatus: 'none', liked: 0, logged: 0, drops: [] };
   if (!memberToken) return result;
   const deadline = Date.now() + budgetMs;
 
   let rows;
   try {
-    rows = await listAllLiked(client, memberToken);
+    rows = await listAllLiked(client, memberToken, maxPages);
   } catch (err) {
     if (err.code === 'MEMBER_AUTH') return { ...result, memberStatus: 'expired' };
     throw err;
