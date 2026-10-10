@@ -191,6 +191,11 @@ describe('Visualizer HTML Generation', () => {
     assert.ok(content.includes('class="nb-col"'));
     assert.ok(content.includes('4910에서 보기 ↗'));
     assert.ok(content.includes('쿠폰적용가(신규회원 기준)'));
+    // 4910 cards and the modal show brand + seller; low/drop/delta only compare rows on the same price basis.
+    assert.ok(content.includes("it.src === '4910' && it.m ? ' · '"));
+    assert.ok(content.includes('r[5] !== last[5]'));
+    assert.ok(content.includes('prev[5] === last[5]'));
+    assert.ok(content.includes('r[5] === older[5]'));
   });
 
   test('generated dashboard asks search engines not to index it', () => {

@@ -692,13 +692,19 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     it.couponName = last[5];
     it.rate = (it.normal && it.my != null) ? Math.round((1 - it.my / it.normal) * 100) : 0;
 
+    // 4910 rows are priced on different bases ('내 회원가' vs '쿠폰적용가(신규회원 기준)', slot [5]); only
+    // rows on the latest row's basis are comparable, so a coupon-only day never fakes a drop or a low.
+    var is4910Item = it.src === '4910';
     var lowMy = Infinity, lowDate = null;
-    L.forEach(function (r) { if (r[3] != null && r[3] < lowMy) { lowMy = r[3]; lowDate = r[0]; } });
+    L.forEach(function (r) {
+      if (is4910Item && r[5] !== last[5]) return;
+      if (r[3] != null && r[3] < lowMy) { lowMy = r[3]; lowDate = r[0]; }
+    });
     it.lowMy = lowMy === Infinity ? null : lowMy;
     it.lowDate = lowDate;
     it.isLow = it.lowMy != null && it.my != null && it.my <= it.lowMy;
 
-    it.dropAmt = (prev && prev[3] != null && it.my != null && it.my < prev[3]) ? prev[3] - it.my : 0;
+    it.dropAmt = (prev && (!is4910Item || prev[5] === last[5]) && prev[3] != null && it.my != null && it.my < prev[3]) ? prev[3] - it.my : 0;
   });
 
   var COUNTS = {
@@ -810,7 +816,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       '</div>' +
       '<div class="card-body">' +
       (tags ? '<div class="tag-row">' + tags + '</div>' : '') +
-      '<div class="brand">' + esc(it.b) + '</div>' +
+      '<div class="brand">' + esc(it.b) + (it.src === '4910' && it.m ? ' · ' + esc(it.m) : '') + '</div>' +
       '<div class="gname">' + esc(it.g) + '</div>' + body + '</div></button>';
   }
 
@@ -1033,7 +1039,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
 
   function fillModal(it) {
     document.getElementById('mThumb').innerHTML = thumbHtml(it);
-    document.getElementById('mBrand').textContent = it.b;
+    document.getElementById('mBrand').textContent = it.b + (it.src === '4910' && it.m ? ' · ' + it.m : '');
     document.getElementById('mName').textContent = it.g;
     document.getElementById('mNo').textContent = '상품번호 ' + it.n;
     var is4910 = it.src === '4910';
@@ -1223,12 +1229,13 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     var rows = slice(it).slice().reverse();
     tb.innerHTML = rows.map(function (r, i) {
       var older = rows[i + 1];
-      var d = older ? r[3] - older[3] : null;
+      var sameBasis = !older || it.src !== '4910' || r[5] === older[5];
+      var d = (older && sameBasis) ? r[3] - older[3] : null;
       var dCell = d == null ? '<span class="delta-flat">—</span>'
         : d < 0 ? '<span class="delta-down num">↓ ' + Math.abs(d).toLocaleString('ko-KR') + '</span>'
         : d > 0 ? '<span class="delta-up num">↑ ' + d.toLocaleString('ko-KR') + '</span>'
         : '<span class="delta-flat">변동 없음</span>';
-      var isLowRow = r[3] === it.lowMy;
+      var isLowRow = r[3] === it.lowMy && (it.src !== '4910' || r[5] === it.couponName);
       return '<tr><td>' + r[0] + '</td>' +
         '<td class="mine-c num">' + won(r[3]) + '</td>' +
         '<td>' + dCell + '</td>' +
