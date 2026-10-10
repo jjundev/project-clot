@@ -238,6 +238,18 @@ describe('Visualizer HTML Generation', () => {
     assert.ok(html.includes('"src":"musinsa"'));
   });
 
+  test('template carries the 4910 전체 chip, lazy loader and paged grid', () => {
+    const tempOutput = path.join(os.tmpdir(), `clot-4910all-contract-${Date.now()}.html`);
+    tempFiles.push(tempOutput);
+    generateDashboardHtml({ db: createTestDb(), outputPath: tempOutput, openBrowser: false });
+    const html = fs.readFileSync(tempOutput, 'utf-8');
+    for (const s of ['data-src="4910all"', '4910 찜', '4910 전체', "'4910-all.js?v='", '__CLOT_4910_ALL__',
+      '4910 판매글 불러오는 중…', '4910 전체 목록을 불러오지 못했습니다', 'data-retry-4910',
+      'id="gridMore"', 'var PAGE = 120', 'IntersectionObserver', "rootMargin: '600px'", "'표시가'"]) {
+      assert.ok(html.includes(s), s);
+    }
+  });
+
   test('template has the source chips and the new-member column', () => {
     const tempOutput = path.join(os.tmpdir(), `clot-src-chips-${Date.now()}.html`);
     tempFiles.push(tempOutput);
@@ -250,7 +262,7 @@ describe('Visualizer HTML Generation', () => {
     assert.ok(content.includes('4910에서 보기 ↗'));
     assert.ok(content.includes('쿠폰적용가(신규회원 기준)'));
     // 4910 cards and the modal show brand + seller; low/drop/delta only compare rows on the same price basis.
-    assert.ok(content.includes("it.src === '4910' && it.m ? ' · '"));
+    assert.ok(content.includes("is4910(it) && it.m ? ' · '"));
     assert.ok(content.includes('r[5] !== last[5]'));
     assert.ok(content.includes('prev[5] === last[5]'));
     assert.ok(content.includes('r[5] === older[5]'));
