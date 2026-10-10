@@ -5,6 +5,7 @@ const escapeHtml = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '
 const fmt = (n) => Number(n).toLocaleString('en-US');
 
 const MAX_INCOMPLETE_NAMES = 5;
+const MAX_COUPON_NAMES = 5;
 const EXPIRED_LINE = '⚠️ 4910 로그인 만료 — ABLY_JWT_TOKEN 갱신 필요';
 
 // ~100 brands: one summary line, never a per-brand list. A dry run has no seller filter, so it counts scanned rows.
@@ -18,14 +19,18 @@ function scanLine(brandCounts, sellers) {
   return line;
 }
 
+// At most MAX_COUPON_NAMES names, then " 외 N" for the rest (a first wallet read can add dozens).
+const nameList = (names) =>
+  names.slice(0, MAX_COUPON_NAMES).map(escapeHtml).join(', ') + (names.length > MAX_COUPON_NAMES ? ` 외 ${fmt(names.length - MAX_COUPON_NAMES)}` : '');
+
 // 'ok' lists the wallet and its changes, 'error' a failure; 'none', 'expired' (reported separately) and null add nothing.
 function couponLines(coupons) {
   if (coupons?.memberStatus === 'error') return ['⚠️ 4910 쿠폰 계산 실패 — Actions 로그 확인'];
   if (coupons?.memberStatus !== 'ok') return [];
   const out = [`🎟 쿠폰 ${fmt(coupons.wallet)}장 · 쿠폰 적용 셀러 ${fmt(coupons.eligible)}곳${coupons.emoney == null ? '' : ` · 포인트 ${fmt(coupons.emoney)}원`}`];
   const { added = [], removed = [] } = coupons.walletChanges ?? {};
-  if (added.length) out.push(`🎟 새 쿠폰: ${added.map(escapeHtml).join(', ')}`);
-  if (removed.length) out.push(`🎟 사라진 쿠폰: ${removed.map(escapeHtml).join(', ')}`);
+  if (added.length) out.push(`🎟 새 쿠폰: ${nameList(added)}`);
+  if (removed.length) out.push(`🎟 사라진 쿠폰: ${nameList(removed)}`);
   if (coupons.mismatched > 0) out.push(`⚠️ 쿠폰 계산 불일치 셀러 ${fmt(coupons.mismatched)}곳 — 해당 쿠폰가 숨김`);
   return out;
 }

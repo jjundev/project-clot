@@ -1,7 +1,7 @@
 // Daily sync of the member's liked 4910 items: refresh the like list, then record each item's display (list),
 // coupon and member price. The member token is only ever passed to the client and never logged or stored.
-// member_price is the 4910 wallet price (list price minus the best-coupon discount) since 2026-10-11. Earlier rows
-// hold the Ably app's /api/v2 member price instead.
+// member_price is the 4910 wallet price (list price minus the best-coupon discount) from the first track-4910 run
+// after this change (2026-10). Earlier rows hold the Ably app's /api/v2 member price instead.
 import fs from 'node:fs';
 import path from 'node:path';
 import { toRow } from './client.js';

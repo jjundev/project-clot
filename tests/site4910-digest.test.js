@@ -178,6 +178,13 @@ test('wallet changes list added and removed coupons, HTML-escaped', () => {
   assert.doesNotMatch(format4910Digest({ ...result, coupons: coupons() }), /새 쿠폰|사라진 쿠폰/);
 });
 
+test('wallet change lines list at most 5 names, then the count of the rest', () => {
+  const names = (prefix, n) => Array.from({ length: n }, (_, i) => `${prefix}${i + 1}`);
+  const text = format4910Digest({ ...result, coupons: coupons({ walletChanges: { added: names('새', 12), removed: names('옛', 5) } }) });
+  assert.match(text, /^🎟 새 쿠폰: 새1, 새2, 새3, 새4, 새5 외 7$/m);
+  assert.match(text, /^🎟 사라진 쿠폰: 옛1, 옛2, 옛3, 옛4, 옛5$/m);
+});
+
 test('mismatch adds a warning line', () => {
   const text = format4910Digest({ ...result, coupons: coupons({ mismatched: 3 }) });
   assert.match(text, /⚠️ 쿠폰 계산 불일치 셀러 3곳 — 해당 쿠폰가 숨김/);

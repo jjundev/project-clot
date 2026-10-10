@@ -341,6 +341,9 @@ describe('Visualizer HTML Generation', () => {
     // No background load after first paint: only the 4910 전체 chip starts it.
     assert.ok(!/^\s*if \(D\.has4910All\) ensure4910\w*\(\);/m.test(html));
     assert.ok(!html.includes('ensure4910All();'));
+    // The brand bar is built once per index and then updated in place (scroll position and focus survive renders).
+    const renderBar = html.slice(html.indexOf('function renderBrandBar()'), html.indexOf("brandBar.addEventListener('click'"));
+    assert.ok(renderBar.length > 0 && !renderBar.includes('innerHTML'));
   });
 
   test('template has the source chips and the new-member column', () => {

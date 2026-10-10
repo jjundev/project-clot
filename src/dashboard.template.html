@@ -808,16 +808,38 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     return b ? b[1] : String(sno);
   }
   var brandBar = document.getElementById('b4910Bar');
+  // The chips are built once per loaded index; every later render only updates them in place, so the bar keeps
+  // its scroll position and the focused chip keeps keyboard focus.
+  var brandChips = {};
+  var brandChipsFor = null;
+  function buildBrandBar() {
+    brandBar.innerHTML = idx4910.brands.map(function (b) {
+      return '<button class="chip" type="button" data-b4910="' + b[0] + '" aria-pressed="false">' +
+        esc(b[1]) + ' <span class="c num"></span></button>';
+    }).join('');
+    brandChips = {};
+    brandBar.querySelectorAll('[data-b4910]').forEach(function (el) { brandChips[el.dataset.b4910] = el; });
+    brandChipsFor = idx4910.brands;
+  }
   function renderBrandBar() {
     brandBar.hidden = state.src !== '4910all' || idx4910.status !== 'ready';
     if (brandBar.hidden) return;
-    brandBar.innerHTML = idx4910.brands.map(function (b) {
+    if (brandChipsFor !== idx4910.brands) buildBrandBar();
+    idx4910.brands.forEach(function (b) {
+      var el = brandChips[b[0]];
       var st = (b4910[b[0]] || {}).status;
       var c = st === 'loading' ? '…' : st === 'error' ? '!' : b[2].toLocaleString('ko-KR');
-      return '<button class="chip" type="button" data-b4910="' + b[0] + '" aria-pressed="' + Boolean(sel4910[b[0]]) + '"' +
-        (st === 'error' ? ' data-state="error" title="불러오지 못했습니다 · 다시 누르면 다시 시도"' : '') + '>' +
-        esc(b[1]) + ' <span class="c num">' + c + '</span></button>';
-    }).join('');
+      el.setAttribute('aria-pressed', String(Boolean(sel4910[b[0]])));
+      if (st === 'error') {
+        el.dataset.state = 'error';
+        el.title = '불러오지 못했습니다 · 다시 누르면 다시 시도';
+      } else {
+        delete el.dataset.state;
+        el.removeAttribute('title');
+      }
+      var count = el.querySelector('.c');
+      if (count.textContent !== c) count.textContent = c;
+    });
   }
   brandBar.addEventListener('click', function (e) {
     var b = e.target.closest('[data-b4910]');
