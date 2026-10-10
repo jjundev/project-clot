@@ -12,6 +12,13 @@ if (!process.env.CLOT_DB_PATH) {
   process.on('exit', () => fs.rmSync(tmpDir, { recursive: true, force: true }));
 }
 
+// Same for the 4910 store: never let a test open the committed data/4910.db.
+if (!process.env.CLOT_4910_DB_PATH) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-test-4910-'));
+  process.env.CLOT_4910_DB_PATH = path.join(tmpDir, '4910.db');
+  process.on('exit', () => fs.rmSync(tmpDir, { recursive: true, force: true }));
+}
+
 // Never notify for real: skip the repo's .env (src/notifier.js) and macOS banners, and drop any
 // Telegram/Discord credentials inherited from the shell. Tests that need creds set them explicitly.
 process.env.CLOT_NOTIFY_SANDBOX = '1';

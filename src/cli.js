@@ -25,6 +25,10 @@ import { classifyCategory } from './classifier.js';
 import { probeBrowserBridge, getMacPowerState } from './power.js';
 import { runAudit, formatAuditTerminal } from './audit.js';
 import { skipDailyRun, formatSkipTerminal } from './skip.js';
+import { BRANDS_4910, createClient } from './site4910/client.js';
+import { Store4910 } from './site4910/store.js';
+import { track4910 } from './site4910/track.js';
+import { format4910Digest } from './site4910/digest.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -40,7 +44,7 @@ export function parseArgs(rawArgs = process.argv.slice(2)) {
   const command = args[0] || 'help';
   const flags = {};
   const positional = [];
-  const BOOLEAN_FLAGS = new Set(['force', 'with-discovery', 'no-open', 'help', 'skip-opencli', 'assume-awake', 'json']);
+  const BOOLEAN_FLAGS = new Set(['force', 'with-discovery', 'no-open', 'help', 'skip-opencli', 'assume-awake', 'json', 'skip-4910', 'dry-run']);
 
   for (let i = 1; i < args.length; i++) {
     const a = args[i];
@@ -474,6 +478,64 @@ export async function sessionKeeperSuffix({
   }
 }
 
+/**
+ * Scans Uniqlo and GU on 4910.kr into data/4910.db and sends one digest. Never throws: a 4910 failure
+ * (runner IP blocked, API change) must not stop the Musinsa commit that follows in the daily run.
+ */
+export async function run4910Step({
+  flags = {},
+  today,
+  openStore = () => new Store4910(),
+  makeClient = () => createClient(),
+  trackFn = track4910,
+  notify = sendTelegramMessage,
+  log = console.log,
+} = {}) {
+  if (flags['skip-4910']) return { ran: false, ok: true };
+
+  let brands = BRANDS_4910;
+  if (flags.brand !== undefined) {
+    brands = BRANDS_4910.filter((b) => b.key === flags.brand);
+    if (!brands.length) {
+      const error = `unknown brand '${flags.brand}' (use ${BRANDS_4910.map((b) => b.key).join(' | ')})`;
+      log(`⚠️ [4910] ${error}`);
+      return { ran: false, ok: false, error };
+    }
+  }
+
+  const dryRun = Boolean(flags['dry-run']);
+  let store = null;
+  try {
+    if (!dryRun) store = openStore();
+    const result = await trackFn({ client: makeClient(), store, date: today, brands, dryRun, log });
+    if (dryRun) {
+      log(format4910Digest(result));
+      return { ran: true, ok: true, result };
+    }
+    const { diff } = result;
+    log(
+      `🇯🇵 [4910] ${result.brandCounts.map((b) => `${b.name} ${b.scanned}`).join(' / ')} 스캔 — ` +
+        `가격변동 ${diff.priceChanged}, 신규 ${diff.added.length}, 종료 ${diff.dropped.length}`
+    );
+    await notify(format4910Digest(result));
+    return { ran: true, ok: true, result };
+  } catch (err) {
+    log(`⚠️ [4910] 수집 실패 (${err.message})`);
+    return { ran: true, ok: false, error: err.message };
+  } finally {
+    if (store) {
+      try {
+        store.checkpoint(); // otherwise today's rows can sit in the ignored -wal file and miss the commit
+      } catch (err) {
+        log(`⚠️ [4910] WAL checkpoint failed; the committed 4910.db may lag (${err.message})`);
+      }
+      try {
+        store.close();
+      } catch {}
+    }
+  }
+}
+
 async function handleDailyRun(flags) {
   const today = new Date().toISOString().split('T')[0];
   const force = Boolean(flags.force);
@@ -583,6 +645,10 @@ async function handleDailyRun(flags) {
       console.warn(`⚠️ Warning: Discovery failed (${discErr.message})`);
     }
   }
+
+  // 4910 (Uniqlo/GU) runs before the export so data/4910.db rides along in the same commit.
+  console.log(`\n🇯🇵 [4910] Scanning Uniqlo & GU listings on 4910.kr...`);
+  await run4910Step({ flags, today });
 
   // 4. Export JSON and try Git auto-commit
   exportDataForGit();
@@ -1030,6 +1096,12 @@ async function main() {
       }
       break;
     }
+    case 'track-4910': {
+      const today = new Date().toISOString().split('T')[0];
+      const res = await run4910Step({ flags, today });
+      if (!res.ok) process.exitCode = 1;
+      break;
+    }
     case 'skip': {
       const targetDate = positional[0] || new Date().toISOString().split('T')[0];
       const result = await skipDailyRun({
@@ -1049,13 +1121,16 @@ Usage:
   node src/cli.js <command> [options]
 
 Commands:
-  daily [--force] [--concurrency=1-5] [--with-discovery] [--skip-opencli] [--assume-awake]
+  daily [--force] [--concurrency=1-5] [--with-discovery] [--skip-opencli] [--assume-awake] [--skip-4910]
                          Run daily sync & price tracking (default concurrency: 3).
                          Defers OpenCLI automatically while the Mac is asleep / lid closed.
+                         Also scans Uniqlo & GU on 4910.kr unless --skip-4910.
   skip [date]            Skip today's (or specified date's) price collection and stop running tasks
   audit [date] [--json]  Audit collection integrity, OpenCLI auth rate & health status
   discover [--category <codes>] [--limit <n>] [--min-likes <n>] [--auth-limit <n>]
                          Discover popular products; real prices for up to <n> of them (default 120, 0 = off)
+  track-4910 [--brand uniqlo|gu] [--dry-run]
+                         Scan Uniqlo/GU listings on 4910.kr into data/4910.db (--dry-run writes nothing)
   sync                   Sync liked items from Musinsa account
   track [goodsNo] [--concurrency=1-5]  Track active items or promote discovery item to VIP
   watch <url/goodsNo>    Manually add a product to track

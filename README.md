@@ -38,6 +38,15 @@
    - `opencli musinsa mysize`: 과거 구매한 의류의 실측 치수(총장, 가슴, 허리, 어깨, 소매, 허벅지 cm)를 카테고리별(`top`, `pants`, `outer`)로 조회하고 검색 필터(`--as-filter`)로 변환합니다.
    - `opencli musinsa search <query> --my-size <category>`: 과거 구매했던 의류 실측을 자동으로 반영하여 내 몸에 맞는 상품을 손쉽게 검색합니다.
 
+9. **4910 유니클로·GU 추적 (`track-4910`)**
+   - [4910.kr](https://4910.kr)(에이블리 남성관)에 올라온 **유니클로·GU 판매글 전체**(약 1.6만 개)를 `daily` 실행 때마다 함께 스캔해 `data/4910.db`에 저장합니다.
+   - 4910의 유니클로·GU는 공식몰이 아니라 일본 구매대행 셀러의 판매글이므로, 판매글 번호(`sno`) 단위로 추적합니다. 같은 제품이라도 셀러별로 따로 기록됩니다.
+   - 이력은 **바뀔 때만** 남깁니다(신규·가격변동·종료·재등장). 완전한 스캔에서 2회 연속 보이지 않은 판매글은 종료(`DROPPED`)로 처리하고, 다시 보이면 재등장으로 되살립니다.
+   - 텔레그램으로 하루 1통, 브랜드별 스캔 수와 직전 기록가 대비 **10% 이상 하락한 상위 10개**를 보냅니다.
+   - 4910 수집이 실패해도 무신사 수집·커밋은 그대로 진행됩니다(`⚠️ [4910] 수집 실패` 로그만 남음).
+   - `daily` 안에서 자동으로 돌고(`--skip-4910`으로 제외), 단독 실행은 `track-4910 [--brand uniqlo|gu] [--dry-run]`입니다.
+   - ⚠️ **로컬(Mac)에서는 `--dry-run`으로만 실행하세요.** `data/4910.db`는 GitHub Actions가 매일 커밋하는 파일이라, 로컬에서 쓰면 다음 `git pull`이 덮어쓰기를 거부하고 텔레그램 요약도 한 통 더 갑니다. 로컬에 따로 쌓고 싶다면 `CLOT_4910_DB_PATH=/tmp/4910.db node src/cli.js track-4910`처럼 경로를 바꾸세요.
+
 ---
 
 ## 📁 디렉토리 구조
@@ -46,6 +55,7 @@
 ~/Documents/Private/project-clot/
 ├── data/
 │   ├── prices.db            # SQLite 데이터베이스 (시계열 가격 로그 & 상품 메타데이터)
+│   ├── 4910.db              # 4910 유니클로·GU 판매글 & 변동 이력
 │   └── latest_prices.json   # Git 저장소 공유용 최신 가격 스냅샷
 ├── logs/                    # 데몬 실행 로그 (daily.log)
 ├── src/
@@ -53,7 +63,8 @@
 │   ├── db.js                # SQLite 데이터베이스 레이어 (node:sqlite)
 │   ├── collector.js         # 상품 가격, 쿠폰, 품절 상태 수집기
 │   ├── sync.js              # 무신사 좋아요 목록 증분 동기화
-│   └── notifier.js          # macOS 데스크톱 및 텔레그램 알림 발송
+│   ├── notifier.js          # macOS 데스크톱 및 텔레그램 알림 발송
+│   └── site4910/            # 4910.kr 유니클로·GU 스캔 (client, store, track, digest)
 ├── package.json
 ├── .env.example             # 텔레그램/디스코드 웹훅 설정 템플릿
 └── README.md
@@ -84,6 +95,10 @@ node src/cli.js watch https://www.musinsa.com/products/3074360
 
 # 수동 관심 상품 추적 해제
 node src/cli.js unwatch 3074360
+
+# 4910 유니클로·GU 스캔 결과만 확인 (DB에 쓰지 않음, 텔레그램 없음)
+node src/cli.js track-4910 --dry-run
+node src/cli.js track-4910 --brand gu --dry-run
 
 # 오늘(또는 특정 날짜) 가격 조사 즉시 중단 및 생략 처리 (진행 중인 프로세스 자동 종료)
 node src/cli.js skip
@@ -216,7 +231,7 @@ Mac 없이 GitHub 러너에서 HTTPS 세션만으로 `daily --skip-opencli`를 �
 # 쿠키를 Secret으로 올리기 (값이 터미널에 출력되지 않음)
 node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(require("os").homedir()+"/.clot/musinsa-session.json")).cookie)' | gh secret set MUSINSA_COOKIE
 
-# 러너(데이터센터 IP)에서 무신사 접속·로그인 확인만 (DB 변경 없음)
+# 러너(데이터센터 IP)에서 무신사 접속·로그인과 4910 접속 확인만 (DB 변경 없음)
 gh workflow run daily.yml -f mode=probe
 ```
 

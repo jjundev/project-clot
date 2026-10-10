@@ -5,3 +5,4 @@ logs/
 .DS_Store
 data/dashboard.html
 data/prices.db-*
+data/4910.db-*
