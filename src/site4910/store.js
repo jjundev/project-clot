@@ -19,9 +19,13 @@ export const STATUS_OUT_OF_SCOPE = 'OUT_OF_SCOPE';
 // Row fields copied into goods on every sighting; a row is rewritten only when one of them differs.
 const UPDATABLE = ['brand_sno', 'brand', 'name', 'market_sno', 'market_type_sno', 'market_name', 'category', 'url', 'image_url', 'sale_price', 'original_price', 'discount_rate'];
 
+// The env var is read per call, not at module load, so tests can set it after import.
+export function default4910DbPath() {
+  return process.env.CLOT_4910_DB_PATH || path.join(ROOT_DIR, 'data', '4910.db');
+}
+
 export class Store4910 {
-  // The env var is read here, not at module load, so tests can set it after import.
-  constructor(dbPath = process.env.CLOT_4910_DB_PATH || path.join(ROOT_DIR, 'data', '4910.db')) {
+  constructor(dbPath = default4910DbPath()) {
     this.db = new DatabaseSync(dbPath);
     this.db.exec(`
       PRAGMA busy_timeout = 5000;

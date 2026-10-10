@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { parseArgs, run4910Step } from '../src/cli.js';
+import { parseArgs, run4910Step, run4910Db } from '../src/cli.js';
 import { createClient } from '../src/site4910/client.js';
 import { Store4910 } from '../src/site4910/store.js';
 
@@ -105,8 +105,10 @@ test('run4910Step notifies once and checkpoints on success', async () => {
   assert.equal(res.result, RESULT);
   assert.equal(trackFn.args.store, store);
   assert.equal(trackFn.args.date, TODAY);
-  assert.deepEqual(trackFn.args.client, { id: 'c' });
-  assert.deepEqual(trackFn.args.brands.map((b) => b.sno), [2421, 13647]);
+  assert.equal(typeof trackFn.args.makeClient, 'function');
+  assert.equal(trackFn.args.brands, null, 'no --brand: track4910 resolves the top brands itself');
+  assert.equal(trackFn.args.concurrency, 3);
+  assert.equal(trackFn.args.memberToken, null);
   assert.equal(notify.calls.length, 1);
   assert.match(notify.calls[0][0], /4910 리포트 \(2026-10-10\)/);
   assert.deepEqual(store.calls, ['checkpoint', 'close']);
@@ -119,13 +121,91 @@ test('run4910Step --brand gu passes only GU', async () => {
   assert.deepEqual(trackFn.args.brands.map((b) => b.sno), [13647]);
 });
 
-test('run4910Step rejects an unknown --brand without scanning', async () => {
+test('--brand 2421 scans only that brand; --brand nike is rejected', async () => {
   const trackFn = trackSpy();
-  const res = await run4910Step({ flags: { brand: 'zara' }, today: TODAY, openStore: fakeStore, trackFn, notify: spyFn(), log: logSpy() });
-  assert.equal(res.ran, false);
+  const common = { today: TODAY, openStore: fakeStore, makeClient: () => ({}), trackFn, notify: spyFn(), log: logSpy() };
+  await run4910Step({ ...common, flags: { brand: '2421' } });
+  assert.deepEqual(trackFn.args.brands, [{ sno: 2421, name: 'brand 2421' }]);
+  await run4910Step({ ...common, flags: { brand: 'uniqlo' } });
+  assert.deepEqual(trackFn.args.brands, [{ sno: 2421, name: '유니클로' }]);
+
+  for (const bad of ['nike', 'constructor', '12ab', true]) {
+    const spy = trackSpy();
+    const log = logSpy();
+    const res = await run4910Step({ ...common, trackFn: spy, log, flags: { brand: bad } });
+    assert.equal(res.ran, false);
+    assert.equal(res.ok, false);
+    assert.match(res.error, /unknown brand/);
+    assert.equal(spy.args, undefined, `${bad} must not start a scan`);
+    assert.match(log.lines.join('\n'), /⚠️ \[4910\] unknown brand/);
+  }
+});
+
+test('--concurrency is clamped to 1-4 and defaults to 3', async () => {
+  const seen = [];
+  for (const concurrency of [undefined, '2', '5', '99', '0', 'fast', true]) {
+    const trackFn = trackSpy();
+    await run4910Step({
+      flags: { concurrency }, today: TODAY, openStore: fakeStore, makeClient: () => ({}), trackFn, notify: spyFn(), log: logSpy(),
+    });
+    seen.push(trackFn.args.concurrency);
+  }
+  assert.deepEqual(seen, [3, 2, 4, 4, 1, 3, 3]);
+});
+
+test('the member token is read once and shared by the scan and the liked sync, which has its own client', async () => {
+  const store = fakeStore();
+  let reads = 0;
+  const clients = [];
+  const trackFn = trackSpy();
+  const syncLikedFn = likedSpy();
+  await run4910Step({
+    today: TODAY, openStore: () => store, makeClient: () => { const c = { n: clients.length }; clients.push(c); return c; },
+    trackFn, notify: spyFn(), log: logSpy(), syncLikedFn, readToken: () => { reads++; return 'T'; },
+  });
+  assert.equal(reads, 1);
+  assert.equal(trackFn.args.memberToken, 'T');
+  assert.equal(syncLikedFn.calls[0].memberToken, 'T');
+  assert.equal(syncLikedFn.calls[0].client, clients[0]);
+});
+
+test('daily no longer runs the 4910 step', () => {
+  const src = fs.readFileSync(new URL('../src/cli.js', import.meta.url), 'utf8');
+  const start = src.indexOf('async function handleDailyRun');
+  const end = src.indexOf('\n}\n', start);
+  assert.ok(start > 0 && end > start);
+  const body = src.slice(start, end);
+  assert.doesNotMatch(body, /run4910Step|4910/);
+  assert.doesNotMatch(src.slice(src.indexOf('Commands:')), /daily[^\n]*4910|unless --skip-4910/);
+});
+
+test('run4910Db rejects an unknown subcommand without touching the release', () => {
+  const log = logSpy();
+  const calls = [];
+  for (const sub of [undefined, 'sync']) {
+    const res = run4910Db({ sub, dbPath: '/x/4910.db', pullFn: () => calls.push('pull'), pushFn: () => calls.push('push'), log });
+    assert.equal(res.ok, false);
+  }
+  assert.deepEqual(calls, []);
+  assert.match(log.lines[0], /Usage: .*4910-db pull\|push/);
+});
+
+test('run4910Db passes the DB path through and reports the byte count', () => {
+  const log = logSpy();
+  const seen = [];
+  const pull = run4910Db({ sub: 'pull', dbPath: '/x/4910.db', pullFn: (a) => (seen.push(['pull', a]), { bytes: 1234567 }), log });
+  const push = run4910Db({ sub: 'push', dbPath: '/x/4910.db', pushFn: (a) => (seen.push(['push', a]), { bytes: 42 }), log });
+  assert.deepEqual(seen, [['pull', { dest: '/x/4910.db' }], ['push', { src: '/x/4910.db' }]]);
+  assert.deepEqual([pull, push], [{ ok: true, bytes: 1234567 }, { ok: true, bytes: 42 }]);
+  assert.match(log.lines[0], /pulled 1,234,567 bytes/);
+  assert.match(log.lines[1], /pushed 42 gzipped bytes/);
+});
+
+test('run4910Db turns a failure into a warning, not a throw', () => {
+  const log = logSpy();
+  const res = run4910Db({ sub: 'push', dbPath: '/x/4910.db', pushFn: () => { throw new Error('gh release upload failed (exit 1): HTTP 502'); }, log });
   assert.equal(res.ok, false);
-  assert.match(res.error, /unknown brand/);
-  assert.equal(trackFn.args, undefined);
+  assert.match(log.lines[0], /^⚠️ \[4910-db\] push failed: gh release upload failed.*HTTP 502/);
 });
 
 test('run4910Step --dry-run does not notify or open a store', async () => {
