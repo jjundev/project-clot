@@ -17,15 +17,73 @@ const DATA_DIR = path.join(ROOT_DIR, 'data');
 const DEFAULT_TEMPLATE = path.join(__dirname, 'dashboard.template.html');
 // CLOT_DASHBOARD_PATH keeps test runs from overwriting the real dashboard.
 const DEFAULT_OUTPUT = process.env.CLOT_DASHBOARD_PATH || path.join(DATA_DIR, 'dashboard.html');
+const DEFAULT_4910_DB = process.env.CLOT_4910_DB_PATH || path.join(DATA_DIR, '4910.db');
+
+/**
+ * Reads the ACTIVE liked 4910 items as dashboard items. A DB that predates the
+ * liked tables (or lacks either) yields no items rather than an error.
+ * @param {import('node:sqlite').DatabaseSync} db4910
+ * @returns {object[]}
+ */
+function buildLikedItems(db4910) {
+  const tables = db4910
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('liked_goods','liked_price_logs')")
+    .all();
+  if (tables.length < 2) return [];
+
+  const goods = db4910.prepare("SELECT * FROM liked_goods WHERE status = 'ACTIVE' ORDER BY sno ASC").all();
+  const logs = db4910
+    .prepare(`
+      SELECT sno, date, list_price, original_price, coupon_price, member_price, is_soldout
+      FROM liked_price_logs
+      WHERE sno IN (SELECT sno FROM liked_goods WHERE status = 'ACTIVE')
+      ORDER BY date ASC, id ASC
+    `)
+    .all();
+
+  const logsBySno = new Map();
+  for (const log of logs) {
+    const my = log.member_price ?? log.coupon_price ?? log.list_price ?? null;
+    const tuple = [
+      log.date,
+      log.original_price ?? null,
+      log.list_price ?? null,
+      my,
+      log.is_soldout ? 1 : 0,
+      log.member_price != null ? '내 회원가' : '쿠폰적용가(신규회원 기준)',
+      log.list_price != null && my != null ? Math.max(log.list_price - my, 0) : 0,
+      log.coupon_price ?? null,
+    ];
+    const arr = logsBySno.get(log.sno);
+    if (arr) arr.push(tuple);
+    else logsBySno.set(log.sno, [tuple]);
+  }
+
+  return goods.map((g) => ({
+    n: Number(g.sno),
+    k: `4910:${g.sno}`,
+    src: '4910',
+    b: g.brand || g.market_name || '4910',
+    m: g.market_name,
+    g: g.name || '상품',
+    u: g.url,
+    i: g.image_url || '',
+    s: 'ACTIVE',
+    c: classifyCategory(g.name, g.brand),
+    fs: g.first_liked_date || '',
+    L: logsBySno.get(g.sno) || [],
+  }));
+}
 
 /**
  * Extracts raw data from SQLite and builds the dashboard data contract.
  * @param {import('node:sqlite').DatabaseSync | { db: import('node:sqlite').DatabaseSync }} dbOrWrapper
  * @param {object} [options]
  * @param {number|string} [options.targetGoodsNo]
+ * @param {import('node:sqlite').DatabaseSync | null} [options.db4910] Optional 4910 DB whose liked items are merged in.
  * @returns {object} Dashboard data payload
  */
-export function buildClotDataPayload(dbOrWrapper, { targetGoodsNo } = {}) {
+export function buildClotDataPayload(dbOrWrapper, { targetGoodsNo, db4910 = null } = {}) {
   const rawDb = dbOrWrapper?.db ? dbOrWrapper.db : dbOrWrapper;
   if (!rawDb || typeof rawDb.prepare !== 'function') {
     throw new Error('A valid DatabaseSync instance is required to build clot data payload');
@@ -109,6 +167,8 @@ export function buildClotDataPayload(dbOrWrapper, { targetGoodsNo } = {}) {
   // 5. Structure items array
   const items = rawItems.map((it) => ({
     n: Number(it.goods_no),
+    k: String(it.goods_no),
+    src: 'musinsa',
     b: it.brand_name || '-',
     g: it.goods_name || '상품',
     u: it.url || `https://www.musinsa.com/products/${it.goods_no}`,
@@ -118,6 +178,13 @@ export function buildClotDataPayload(dbOrWrapper, { targetGoodsNo } = {}) {
     fs: it.first_seen_at ? it.first_seen_at.slice(0, 10) : '',
     L: logsByGoods.get(it.goods_no) || [],
   }));
+
+  if (db4910) {
+    for (const item of buildLikedItems(db4910)) {
+      for (const tuple of item.L) dateSet.add(tuple[0]);
+      items.push(item);
+    }
+  }
 
   const sortedDates = Array.from(dateSet).sort();
   const gNo = targetGoodsNo ? Number(targetGoodsNo) : undefined;
@@ -141,6 +208,7 @@ export function buildClotDataPayload(dbOrWrapper, { targetGoodsNo } = {}) {
  * @param {string} [options.templatePath]
  * @param {boolean} [options.openBrowser=true]
  * @param {number|string} [options.targetGoodsNo]
+ * @param {string} [options.db4910Path] 4910.db to merge when the file exists.
  * @returns {{ outputPath: string, targetGoodsNo?: number, totalItems: number }}
  */
 export function generateDashboardHtml({
@@ -149,6 +217,7 @@ export function generateDashboardHtml({
   templatePath = DEFAULT_TEMPLATE,
   openBrowser = true,
   targetGoodsNo,
+  db4910Path = DEFAULT_4910_DB,
 } = {}) {
   if (!fs.existsSync(templatePath)) {
     throw new Error(`Dashboard template file not found at: ${templatePath}`);
@@ -170,10 +239,15 @@ export function generateDashboardHtml({
 
   const digits = targetGoodsNo != null ? String(targetGoodsNo).replace(/\D/g, '') : '';
   const gNo = digits.length > 0 ? Number(digits) : undefined;
+  let db4910 = null;
   let payload;
   try {
-    payload = buildClotDataPayload(activeDb, { targetGoodsNo: gNo });
+    if (db4910Path && fs.existsSync(db4910Path)) {
+      db4910 = new DatabaseSync(db4910Path, { readOnly: true });
+    }
+    payload = buildClotDataPayload(activeDb, { targetGoodsNo: gNo, db4910 });
   } finally {
+    if (db4910) db4910.close();
     if (shouldCloseDb) {
       activeDb.close();
     }

@@ -3,6 +3,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { buildClotDataPayload } from '../src/visualizer.js';
+import { Store4910 } from '../src/site4910/store.js';
 
 describe('Visualizer Data Extraction', () => {
   function setupTestDb() {
@@ -162,6 +163,86 @@ describe('Visualizer Data Extraction', () => {
     const log3 = item1.L.find((entry) => entry[0] === '2026-08-03');
     assert.ok(log3);
     assert.equal(log3[3], 36000);
+  });
+
+  describe('liked 4910 items', () => {
+    function likedRow(sno, overrides = {}) {
+      return { sno, brand: '유니클로', name: '플리스 집업', market_name: 'UNIQLO', category: null, url: `https://4910.kr/goods/${sno}`, image_url: `/img/${sno}.jpg`, ...overrides };
+    }
+
+    test('without a 4910 DB, Musinsa items only gain k and src', () => {
+      const payload = buildClotDataPayload(setupTestDb());
+      assert.equal(payload.items[0].k, '1001');
+      assert.equal(payload.items[0].src, 'musinsa');
+      assert.equal(payload.items.some((it) => it.src === '4910'), false);
+      assert.deepEqual(payload.items[0].L[0], ['2026-08-01', 50000, 45000, 40000, 0, '5% 쿠폰', 5000]);
+    });
+
+    test('liked 4910 items join with 8-slot tuples', () => {
+      const store = new Store4910(':memory:');
+      store.syncLiked([likedRow(71863924)], '2026-10-11');
+      store.logLikedPrice({ sno: 71863924, date: '2026-10-11', list_price: 21600, original_price: 51300, coupon_price: 18360, member_price: 19440, is_soldout: 0 });
+      store.logLikedPrice({ sno: 71863924, date: '2026-10-12', list_price: 21600, original_price: 51300, coupon_price: 18360, member_price: null, is_soldout: 0 });
+
+      const payload = buildClotDataPayload(setupTestDb(), { db4910: store.db });
+      const item = payload.items.find((it) => it.src === '4910');
+      assert.ok(item);
+      assert.equal(item.n, 71863924);
+      assert.equal(item.k, '4910:71863924');
+      assert.equal(item.b, '유니클로');
+      assert.equal(item.m, 'UNIQLO');
+      assert.equal(item.g, '플리스 집업');
+      assert.equal(item.u, 'https://4910.kr/goods/71863924');
+      assert.equal(item.i, '/img/71863924.jpg');
+      assert.equal(item.s, 'ACTIVE');
+      assert.equal(item.fs, '2026-10-11');
+      assert.equal(typeof item.c, 'string');
+      assert.deepEqual(item.L[0], ['2026-10-11', 51300, 21600, 19440, 0, '내 회원가', 2160, 18360]);
+      assert.deepEqual(item.L[1], ['2026-10-12', 51300, 21600, 18360, 0, '쿠폰적용가(신규회원 기준)', 3240, 18360]);
+      assert.deepEqual(payload.dates, ['2026-08-01', '2026-08-02', '2026-10-11', '2026-10-12']);
+      store.close();
+    });
+
+    test('brand falls back to market_name then 4910', () => {
+      const store = new Store4910(':memory:');
+      store.syncLiked([likedRow(1, { brand: null }), likedRow(2, { brand: null, market_name: null })], '2026-10-11');
+      const payload = buildClotDataPayload(setupTestDb(), { db4910: store.db });
+      assert.equal(payload.items.find((it) => it.k === '4910:1').b, 'UNIQLO');
+      assert.equal(payload.items.find((it) => it.k === '4910:2').b, '4910');
+      store.close();
+    });
+
+    test('UNLIKED 4910 items are left out', () => {
+      const store = new Store4910(':memory:');
+      store.syncLiked([likedRow(10), likedRow(11)], '2026-10-11');
+      store.logLikedPrice({ sno: 10, date: '2026-10-11', list_price: 1000, original_price: 1000, coupon_price: null, member_price: null, is_soldout: 0 });
+      store.logLikedPrice({ sno: 11, date: '2026-09-01', list_price: 1000, original_price: 1000, coupon_price: null, member_price: null, is_soldout: 0 });
+      store.db.prepare("UPDATE liked_goods SET status = 'UNLIKED' WHERE sno = 11").run();
+
+      const payload = buildClotDataPayload(setupTestDb(), { db4910: store.db });
+      assert.deepEqual(payload.items.filter((it) => it.src === '4910').map((it) => it.n), [10]);
+      assert.equal(payload.dates.includes('2026-09-01'), false);
+      store.close();
+    });
+
+    test('a 4910.db without liked tables is skipped', () => {
+      const old4910 = new DatabaseSync(':memory:');
+      old4910.exec('CREATE TABLE goods (sno INTEGER PRIMARY KEY, name TEXT)');
+      const payload = buildClotDataPayload(setupTestDb(), { db4910: old4910 });
+      assert.equal(payload.items.some((it) => it.src === '4910'), false);
+      assert.equal(payload.items.length, 2);
+    });
+
+    test('a Musinsa goods_no equal to a 4910 sno keeps distinct keys', () => {
+      const db = setupTestDb();
+      db.prepare(`INSERT INTO items (goods_no, goods_name, brand_name, url, status, first_seen_at) VALUES (71863924, '무신사 상품', 'B', 'https://musinsa.com/71863924', 'ACTIVE', '2026-08-01T00:00:00Z')`).run();
+      const store = new Store4910(':memory:');
+      store.syncLiked([likedRow(71863924)], '2026-10-11');
+      const payload = buildClotDataPayload(db, { db4910: store.db });
+      const keys = payload.items.filter((it) => it.n === 71863924).map((it) => it.k).sort();
+      assert.deepEqual(keys, ['4910:71863924', '71863924']);
+      store.close();
+    });
   });
 
   test('buildClotDataPayload throws on invalid db input', () => {

@@ -6,6 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { generateDashboardHtml } from '../src/visualizer.js';
+import { Store4910 } from '../src/site4910/store.js';
 
 describe('Visualizer HTML Generation', () => {
   const tempFiles = [];
@@ -129,6 +130,32 @@ describe('Visualizer HTML Generation', () => {
 
     assert.equal(res.targetGoodsNo, 777);
     assert.ok(fs.existsSync(tempOutput));
+  });
+
+  test('generateDashboardHtml merges the 4910.db at db4910Path', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-html-4910-'));
+    tempFiles.push(dir);
+    const db4910Path = path.join(dir, '4910.db');
+    const store = new Store4910(db4910Path);
+    store.syncLiked([{ sno: 71863924, brand: '유니클로', name: '플리스', market_name: 'UNIQLO', url: 'https://4910.kr/goods/71863924', image_url: null }], '2026-10-11');
+    store.logLikedPrice({ sno: 71863924, date: '2026-10-11', list_price: 21600, original_price: 51300, coupon_price: 18360, member_price: 19440, is_soldout: 0 });
+    store.close();
+
+    const tempOutput = path.join(dir, 'dashboard.html');
+    const res = generateDashboardHtml({ db: createTestDb(), outputPath: tempOutput, openBrowser: false, db4910Path });
+    assert.equal(res.totalItems, 2);
+    const content = fs.readFileSync(tempOutput, 'utf-8');
+    assert.ok(content.includes('"k":"4910:71863924"'));
+    assert.ok(content.includes('"k":"777"'));
+  });
+
+  test('generateDashboardHtml without a 4910.db still renders', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-html-no4910-'));
+    tempFiles.push(dir);
+    const tempOutput = path.join(dir, 'dashboard.html');
+    const res = generateDashboardHtml({ db: createTestDb(), outputPath: tempOutput, openBrowser: false, db4910Path: path.join(dir, 'missing.db') });
+    assert.equal(res.totalItems, 1);
+    assert.ok(fs.readFileSync(tempOutput, 'utf-8').includes('"src":"musinsa"'));
   });
 
   test('generated dashboard asks search engines not to index it', () => {
