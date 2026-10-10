@@ -79,11 +79,36 @@ test('pages the ranking until n brands are collected', async () => {
   assert.equal(brands.length, 151); // 150 ranked (GU among them) + Uniqlo
 });
 
-test('stops paging when the ranking runs out before n', async () => {
-  const client = fakeClient(120);
-  const { brands } = await resolveBrands({ client, store, date: '2026-10-12', now: MONDAY, n: 300, log });
-  assert.equal(client.calls.length, 2);
-  assert.equal(brands.length, 121); // 120 ranked + Uniqlo
+test('a ranking that ends before n brands counts as a failure and is not saved', async () => {
+  store.upsertBrands('2026-10-05', [{ sno: 7, name: 'seven' }], PINNED_BRANDS_4910);
+  for (const total of [3, 120]) {
+    const client = fakeClient(total);
+    const { brands, refreshed } = await resolveBrands({ client, store, date: '2026-10-12', now: MONDAY, n: total === 3 ? 100 : 300, log });
+    assert.equal(refreshed, false);
+    assert.deepEqual(brands, [{ sno: 7, name: 'seven' }, UNIQLO, GU]);
+    assert.deepEqual(store.getActiveBrands().map((b) => b.sno), [7, UNIQLO.sno, GU.sno]);
+  }
+  assert.equal(logs.length, 2);
+  assert.match(logs[0], /ended at 3 of 100/);
+});
+
+test('a stuck cursor ends on the failure path instead of looping', async () => {
+  store.upsertBrands('2026-10-05', [{ sno: 7, name: 'seven' }], PINNED_BRANDS_4910);
+  const page = Array.from({ length: 50 }, (_, i) => ({ sno: i + 1, name: `brand ${i + 1}` }));
+  let calls = 0;
+  const repeating = { async listTopBrands() { calls += 1; return { brands: page, lastSno: 50 }; } };
+  const { brands, refreshed } = await resolveBrands({ client: repeating, store, date: '2026-10-12', now: MONDAY, log });
+  assert.equal(refreshed, false);
+  assert.ok(calls <= 3, `called ${calls} times`);
+  assert.deepEqual(brands, [{ sno: 7, name: 'seven' }, UNIQLO, GU]);
+  assert.match(logs[0], /not advancing/);
+
+  // a cursor that echoes back the same last_sno with fresh brands is also stuck
+  let n2 = 0;
+  const echo = { async listTopBrands() { n2 += 1; return { brands: [{ sno: 1000 + n2, name: 'x' }], lastSno: 5 }; } };
+  const r = await resolveBrands({ client: echo, store, date: '2026-10-12', now: MONDAY, log });
+  assert.equal(r.refreshed, false);
+  assert.ok(n2 <= 3, `called ${n2} times`);
 });
 
 test('uses stored brands on other days without calling the ranking', async () => {
