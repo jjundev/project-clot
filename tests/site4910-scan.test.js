@@ -17,7 +17,7 @@ const catalog = (n, priceOf = (i) => 1000 + ((i * 7919) % 200000)) =>
   Array.from({ length: n }, (_, i) => ({ sno: n - i, price: priceOf(i) }));
 
 // In-memory stand-in for listBrandGoods: inclusive price filter, NEW order (sno desc), cursor by lastSno, 3k cap.
-function fake(items, { brandTotal, matches = (it, lo, hi) => (lo == null || it.price >= lo) && (hi == null || it.price <= hi), failOn } = {}) {
+function fake(items, { brandTotal, cursorCap = CURSOR_CAP, matches = (it, lo, hi) => (lo == null || it.price >= lo) && (hi == null || it.price <= hi), failOn } = {}) {
   let call = 0;
   return {
     async listBrandGoods({ minPrice = null, maxPrice = null, lastSno = null, limit = 500 }) {
@@ -27,7 +27,7 @@ function fake(items, { brandTotal, matches = (it, lo, hi) => (lo == null || it.p
       const isBrandQuery = minPrice == null && maxPrice == null && lastSno == null;
       const totalCount = isBrandQuery && brandTotal != null ? brandTotal : filtered.length;
       const start = lastSno == null ? 0 : filtered.findIndex((it) => it.sno === lastSno) + 1;
-      const stop = Math.min(filtered.length, CURSOR_CAP);
+      const stop = Math.min(filtered.length, cursorCap);
       if (start >= stop) return { totalCount, entries: [], lastSno: null };
       const end = Math.min(start + limit, stop);
       const page = filtered.slice(start, end);
@@ -104,4 +104,19 @@ test('closed listings are left out of rows', async () => {
   const res = await scanBrand(client, brand);
   assert.deepEqual([...res.rows.keys()].sort(), [1, 3]);
   assert.equal(res.complete, true);
+});
+
+test('a slice that pages out fewer listings than its total is incomplete', async () => {
+  // If the API's cursor cap ever drops below sliceMax, paging ends early with last_sno null.
+  const res = await scanBrand(fake(catalog(2000), { cursorCap: 1500 }), brand, { sliceMax: 2500 });
+  assert.equal(res.rows.size, 1500);
+  assert.equal(res.complete, false);
+  assert.match(res.problems.join(), /fetched 1500 of 2000/);
+});
+
+test('a passed deadline stops the scan and marks it incomplete', async () => {
+  const res = await scanBrand(fake(catalog(6000)), brand, { sliceMax: 2500, deadline: Date.now() - 1 });
+  assert.equal(res.complete, false);
+  assert.equal(res.brandTotal, 6000);
+  assert.match(res.problems.join(), /time budget/);
 });

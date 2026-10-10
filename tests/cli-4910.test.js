@@ -1,7 +1,12 @@
 import './setup-env.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { parseArgs, run4910Step } from '../src/cli.js';
+import { createClient } from '../src/site4910/client.js';
+import { Store4910 } from '../src/site4910/store.js';
 
 const TODAY = '2026-10-10';
 
@@ -137,4 +142,28 @@ test('run4910Step --dry-run does not notify or open a store', async () => {
   assert.equal(opened, false);
   assert.equal(notify.calls.length, 0);
   assert.match(log.lines.join('\n'), /유니클로 10,529 · GU 5,359 스캔/);
+});
+
+test('a runner blocked by Cloudflare logs 수집 실패 and sends no digest (real client and store)', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-4910-cli-'));
+  let store;
+  try {
+    const notify = spyFn();
+    const log = logSpy();
+    const res = await run4910Step({
+      today: TODAY,
+      openStore: () => (store = new Store4910(path.join(dir, '4910.db'))),
+      makeClient: () => createClient({ fetchFn: async () => new Response('<html>blocked</html>', { status: 403 }), delayMs: 0, retryBaseMs: 0 }),
+      notify,
+      log,
+    });
+    assert.equal(res.ok, false);
+    assert.match(log.lines.join('\n'), /⚠️ \[4910\] 수집 실패 \(.*403/);
+    assert.equal(notify.calls.length, 0);
+    const check = new Store4910(path.join(dir, '4910.db'));
+    assert.equal(check.db.prepare('SELECT COUNT(*) AS n FROM goods').get().n, 0);
+    check.close();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

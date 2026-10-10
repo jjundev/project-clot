@@ -141,10 +141,11 @@ const sliceLabel = (lo, hi) => `${lo}-${hi ?? '∞'}`;
 /**
  * Enumerates every open listing of one brand. A single query's cursor stops near 3,000 listings, so the
  * price axis is bisected until each slice reports at most sliceMax. The scan is complete only when every
- * slice succeeded and the slice totals add up to the brand total within COMPLETE_TOLERANCE — the store
- * counts misses (and later drops listings) only for complete scans.
+ * slice succeeded, the slice totals add up to the brand total, and the listings actually paged out add up to
+ * the slice totals (both within COMPLETE_TOLERANCE) — the store counts misses (and later drops listings) only
+ * for complete scans, so a cursor that ends early must never pass as complete. Past `deadline` the scan stops.
  */
-export async function scanBrand(client, brand, { sliceMax = SLICE_MAX } = {}) {
+export async function scanBrand(client, brand, { sliceMax = SLICE_MAX, deadline = Infinity } = {}) {
   const result = { brandSno: brand.sno, brandTotal: null, sliceTotalSum: 0, rows: new Map(), complete: false, problems: [] };
   try {
     result.brandTotal = (await client.listBrandGoods({ brandSno: brand.sno, limit: 1 })).totalCount;
@@ -155,8 +156,14 @@ export async function scanBrand(client, brand, { sliceMax = SLICE_MAX } = {}) {
 
   const maxPages = Math.ceil(sliceMax / PAGE_LIMIT) + 5;
   const stack = [[0, null]];
-  while (stack.length) {
+  let fetched = 0; // every entry paged out, closed ones included, to compare against the API's totals
+  let outOfTime = false;
+  while (stack.length && !outOfTime) {
     const [lo, hi] = stack.pop();
+    if (Date.now() > deadline) {
+      outOfTime = true;
+      break;
+    }
     try {
       const { totalCount } = await client.listBrandGoods({ brandSno: brand.sno, minPrice: lo, maxPrice: hi, limit: 1 });
       if (totalCount > sliceMax && (hi === null || hi > lo)) {
@@ -176,11 +183,16 @@ export async function scanBrand(client, brand, { sliceMax = SLICE_MAX } = {}) {
       let lastSno = null;
       let pages = 0;
       do {
+        if (Date.now() > deadline) {
+          outOfTime = true;
+          break;
+        }
         if (pages++ >= maxPages) {
           result.problems.push(`slice ${sliceLabel(lo, hi)}: page cap ${maxPages} reached`);
           break;
         }
         const page = await client.listBrandGoods({ brandSno: brand.sno, minPrice: lo, maxPrice: hi, lastSno });
+        fetched += page.entries.length;
         for (const entry of page.entries) {
           const row = toRow(entry, brand);
           if (!row.closed) result.rows.set(row.sno, row);
@@ -192,9 +204,13 @@ export async function scanBrand(client, brand, { sliceMax = SLICE_MAX } = {}) {
     }
   }
 
+  if (outOfTime) result.problems.push('time budget exceeded');
   const drift = Math.abs(result.sliceTotalSum - result.brandTotal);
   if (drift > result.brandTotal * COMPLETE_TOLERANCE) {
     result.problems.push(`slice totals ${result.sliceTotalSum} vs brand total ${result.brandTotal}`);
+  }
+  if (result.sliceTotalSum - fetched > result.sliceTotalSum * COMPLETE_TOLERANCE) {
+    result.problems.push(`fetched ${fetched} of ${result.sliceTotalSum}`);
   }
   result.complete = result.problems.length === 0;
   return result;

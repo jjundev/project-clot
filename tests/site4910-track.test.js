@@ -95,3 +95,19 @@ test('probe4910 reports a blocked token request without throwing', async () => {
   assert.deepEqual(checks.map((c) => [c.name, c.ok]), [['4910 anonymous token', false], ['4910 uniqlo listing', false]]);
   assert.match(checks[0].detail, /403/);
 });
+
+test('budgetMs past means every brand is incomplete and nothing is missed', async () => {
+  await track4910({ client: fakeClient(CATALOG), store, date: '2026-10-10', brands: BRANDS, log: quiet });
+  const res = await track4910({ client: fakeClient({}), store, date: '2026-10-11', brands: BRANDS, budgetMs: -1, log: quiet });
+  assert.deepEqual(res.brandCounts.map((b) => b.complete), [false, false]);
+  assert.match(res.brandCounts[0].problems.join(), /time budget/);
+  assert.equal(store.getGoods(1).misses, 0);
+});
+
+test('track4910 throws when no brand could be reached', async () => {
+  await assert.rejects(
+    track4910({ client: fakeClient(CATALOG, { failing: [2421, 13647] }), store, date: '2026-10-10', brands: BRANDS, log: quiet }),
+    /HTTP 503/
+  );
+  assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM scan_runs').get().n, 0);
+});

@@ -1,8 +1,13 @@
 // Daily 4910 run: scan every brand, apply one diff to the store, and the GitHub-runner reachability probe.
 import { BRANDS_4910, scanBrand } from './client.js';
 
-export async function track4910({ client, store, date, brands = BRANDS_4910, dryRun = false, log = console.log }) {
+// Keeps a degraded (slow, not dead) API from running the Actions job into its 30-minute timeout before the
+// Musinsa commit; brands not finished by then count as incomplete, so their listings take no misses.
+export const BUDGET_MS_4910 = 8 * 60_000;
+
+export async function track4910({ client, store, date, brands = BRANDS_4910, dryRun = false, budgetMs = BUDGET_MS_4910, log = console.log }) {
   const started = Date.now();
+  const deadline = started + budgetMs;
   const brandCounts = [];
   const allRows = [];
   const completeBrands = [];
@@ -10,7 +15,7 @@ export async function track4910({ client, store, date, brands = BRANDS_4910, dry
   for (const brand of brands) {
     let scan;
     try {
-      scan = await scanBrand(client, brand);
+      scan = await scanBrand(client, brand, { deadline });
     } catch (err) {
       scan = { brandTotal: null, rows: new Map(), complete: false, problems: [`scan: ${err.message}`] };
     }
@@ -20,6 +25,11 @@ export async function track4910({ client, store, date, brands = BRANDS_4910, dry
     allRows.push(...scan.rows.values());
     if (scan.complete) completeBrands.push(brand.sno);
     log(`[4910] ${brand.name}: ${scan.rows.size}/${scan.brandTotal ?? '?'} 스캔${scan.complete ? '' : ` (불완전: ${scan.problems.slice(0, 3).join('; ')})`}`);
+  }
+
+  // Nothing reached 4910 at all (blocked runner, token endpoint down): a failure, not an empty scan.
+  if (brandCounts.every((b) => b.total === null)) {
+    throw new Error(brandCounts[0]?.problems[0] ?? 'no brand reachable');
   }
 
   if (dryRun) return { date, brandCounts, diff: null, durationMs: Date.now() - started };
