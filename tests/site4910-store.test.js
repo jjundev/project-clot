@@ -47,7 +47,42 @@ test('unchanged price writes no history row', () => {
   const d = s.applyScan('2026-10-11', [row(1, 50000)], BOTH);
   assert.equal(d.priceChanged, 0);
   assert.equal(s.getChanges(1).length, 1);
-  assert.equal(s.getGoods(1).last_seen_date, '2026-10-11');
+});
+
+test('an unchanged rescan writes no goods row', () => {
+  // data/4910.db is committed daily: rows that did not change must keep their bytes, or every commit rewrites ~16k rows.
+  s.applyScan('2026-10-10', [row(1, 50000), row(2, 30000)], BOTH);
+  const before = s.db.prepare('SELECT total_changes() AS n').get().n;
+  s.applyScan('2026-10-11', [row(1, 50000), row(2, 30000)], BOTH);
+  assert.equal(s.db.prepare('SELECT total_changes() AS n').get().n, before);
+  assert.equal('last_seen_date' in s.getGoods(1), false);
+});
+
+test('a changed name alone updates the row without a history entry', () => {
+  s.applyScan('2026-10-10', [row(1, 50000)], BOTH);
+  s.applyScan('2026-10-11', [{ ...row(1, 50000), name: 'renamed' }], BOTH);
+  assert.equal(s.getGoods(1).name, 'renamed');
+  assert.equal(s.getChanges(1).length, 1);
+});
+
+test('a listing without a price keeps its last price and logs nothing', () => {
+  s.applyScan('2026-10-10', [row(1, 50000), row(2, 1000)], BOTH);
+  const d = s.applyScan('2026-10-11', [{ ...row(1, 50000), sale_price: null, original_price: null }, row(2, 1000)], BOTH);
+  assert.equal(d.priceChanged, 0);
+  assert.equal(s.getChanges(1).length, 1);
+  assert.equal(s.getGoods(1).sale_price, 50000);
+  assert.equal(s.getGoods(1).misses, 0); // seen, so not a miss
+  s.applyScan('2026-10-12', [{ ...row(1, 50000), sale_price: null, original_price: null }, row(2, 1000)], BOTH);
+  assert.equal(s.getChanges(1).length, 1);
+});
+
+test('a new listing without a price gets its first price as a PRICE change, not a drop', () => {
+  s.applyScan('2026-10-10', [row(2, 1000)], BOTH);
+  s.applyScan('2026-10-11', [{ ...row(1, 0), sale_price: null, original_price: null }, row(2, 1000)], BOTH);
+  const d = s.applyScan('2026-10-12', [row(1, 30000), row(2, 1000)], BOTH);
+  assert.equal(d.priceChanged, 1);
+  assert.deepEqual(d.drops, []);
+  assert.equal(s.getGoods(1).lowest_price, 30000);
 });
 
 test('a 10% drop is a Drop; a 9% drop is only a PRICE change', () => {

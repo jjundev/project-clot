@@ -29,7 +29,7 @@ export function toRow(entry, brand) {
   const a = entry.logging?.analytics ?? {};
   const d = entry.render?.data ?? {};
   const sno = Number(entry.item.sno);
-  const salePrice = Number(a.SALES_PRICE);
+  const salePrice = parsePrice(a.SALES_PRICE); // null when missing; the store then keeps the last known price
   return {
     sno,
     brand_sno: brand.sno,
@@ -65,16 +65,31 @@ export function createClient({ fetchFn = fetch, delayMs = 300, retryBaseMs = 100
   let token = null;
   let listRequests = 0;
 
+  // Retries network errors, 429 and 5xx like the list call; any other status (a Cloudflare 403) fails at once.
   async function fetchToken() {
-    const res = await fetchFn(TOKEN_URL, {
-      headers: { 'User-Agent': USER_AGENT, Accept: 'application/json', Origin: 'https://4910.kr', Referer: 'https://4910.kr/' },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-    if (!res.ok) throw httpError(`4910 anonymous token HTTP ${res.status}`, res.status);
-    const body = await res.json();
-    if (!body?.token) throw httpError('4910 anonymous token missing in response', res.status);
-    token = body.token;
-    return token;
+    for (let attempt = 0; ; attempt++) {
+      let res;
+      try {
+        res = await fetchFn(TOKEN_URL, {
+          headers: { 'User-Agent': USER_AGENT, Accept: 'application/json', Origin: 'https://4910.kr', Referer: 'https://4910.kr/' },
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
+      } catch (err) {
+        if (attempt === MAX_RETRIES) throw httpError(`4910 anonymous token: ${err.name}: ${err.message}`, undefined);
+        await sleep(retryBaseMs * 2 ** attempt);
+        continue;
+      }
+      if (res.ok) {
+        const body = await res.json();
+        if (!body?.token) throw httpError('4910 anonymous token missing in response', res.status);
+        token = body.token;
+        return token;
+      }
+      if (!(res.status === 429 || res.status >= 500) || attempt === MAX_RETRIES) {
+        throw httpError(`4910 anonymous token HTTP ${res.status}`, res.status);
+      }
+      await sleep(retryBaseMs * 2 ** attempt);
+    }
   }
 
   async function listBrandGoods({ brandSno, minPrice = null, maxPrice = null, lastSno = null, limit = PAGE_LIMIT }) {

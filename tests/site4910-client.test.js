@@ -66,6 +66,14 @@ test('toRow uses sale_price when original_price is null and flags closed_reason'
   assert.equal(row.closed, true);
 });
 
+test('toRow gives a null sale_price when SALES_PRICE is missing', () => {
+  const entry = { ...fixtureEntry, logging: { analytics: { ...fixtureEntry.logging.analytics, SALES_PRICE: undefined } } };
+  const row = toRow(entry, brand);
+  assert.equal(row.sale_price, null);
+  assert.equal(row.original_price, 51300);
+  assert.equal(toRow(withRender(entry, { original_price: null }), brand).original_price, null);
+});
+
 test('listBrandGoods fetches a token once and sends the 4910 headers', async () => {
   const { fn, calls } = fakeFetch({ lists: [page(), page()] });
   const client = createClient({ fetchFn: fn, delayMs: 0, retryBaseMs: 0 });
@@ -100,4 +108,32 @@ test('listBrandGoods retries 429/5xx three times then throws with status', async
   await assert.rejects(client.listBrandGoods({ brandSno: 2421 }), (e) => e.status === 503);
   const listCalls = calls.filter((c) => c.url.includes('/goods/'));
   assert.equal(listCalls.length, 4);
+});
+
+test('the token request retries a 5xx or a network error', async () => {
+  let tokenCalls = 0;
+  const fn = async (url) => {
+    if (url.includes('/anonymous/token/')) {
+      tokenCalls++;
+      if (tokenCalls === 1) throw new TypeError('fetch failed');
+      if (tokenCalls === 2) return json(502, {});
+      return json(200, { token: 'tok-3' });
+    }
+    return page();
+  };
+  const client = createClient({ fetchFn: fn, delayMs: 0, retryBaseMs: 0 });
+  const result = await client.listBrandGoods({ brandSno: 2421 });
+  assert.equal(tokenCalls, 3);
+  assert.equal(result.totalCount, 10529);
+});
+
+test('a 403 on the token request fails at once without retrying', async () => {
+  let tokenCalls = 0;
+  const fn = async () => {
+    tokenCalls++;
+    return new Response('<html>blocked</html>', { status: 403 });
+  };
+  const client = createClient({ fetchFn: fn, delayMs: 0, retryBaseMs: 0 });
+  await assert.rejects(client.getToken(), (e) => e.status === 403);
+  assert.equal(tokenCalls, 1);
 });

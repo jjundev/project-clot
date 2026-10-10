@@ -1,5 +1,7 @@
 // 4910 listings in their own SQLite file (data/4910.db), committed alongside prices.db.
-// ~16k listings a day, so history is change-only: price_changes gets a row only for NEW, PRICE, DROPPED, REVIVED.
+// ~16k listings a day, so history is change-only: price_changes gets a row only for NEW, PRICE, DROPPED, REVIVED,
+// and a goods row is rewritten only when something in it changed — an unchanged listing keeps its bytes, so the
+// daily git commit of this file stays a small delta. (No last_seen_date for that reason: misses track absence.)
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +11,9 @@ const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 // Same threshold as discovery (src/discovery.js DISCOVERY_DROP_AFTER_MISSES).
 export const DROP_AFTER_MISSES_4910 = 2;
 export const DROP_ALERT_RATE = 0.1;
+
+// Row fields copied into goods on every sighting; a row is rewritten only when one of them differs.
+const UPDATABLE = ['brand_sno', 'brand', 'name', 'market_sno', 'market_name', 'category', 'url', 'image_url', 'sale_price', 'original_price', 'discount_rate'];
 
 export class Store4910 {
   // The env var is read here, not at module load, so tests can set it after import.
@@ -22,7 +27,7 @@ export class Store4910 {
         sno INTEGER PRIMARY KEY, brand_sno INTEGER NOT NULL, brand TEXT, name TEXT NOT NULL,
         market_sno INTEGER, market_name TEXT, category TEXT, url TEXT NOT NULL, image_url TEXT,
         status TEXT NOT NULL DEFAULT 'ACTIVE', sale_price INTEGER, original_price INTEGER, discount_rate INTEGER,
-        lowest_price INTEGER, lowest_price_date TEXT, first_seen_date TEXT NOT NULL, last_seen_date TEXT,
+        lowest_price INTEGER, lowest_price_date TEXT, first_seen_date TEXT NOT NULL,
         misses INTEGER NOT NULL DEFAULT 0, last_miss_date TEXT
       );
       CREATE TABLE IF NOT EXISTS price_changes (
@@ -47,7 +52,7 @@ export class Store4910 {
     this.db.exec('BEGIN');
     try {
       const existing = new Map();
-      for (const g of this.db.prepare('SELECT sno, status, sale_price, original_price, lowest_price FROM goods').all()) {
+      for (const g of this.db.prepare('SELECT * FROM goods').all()) {
         existing.set(g.sno, g);
       }
       diff.initial = existing.size === 0;
@@ -57,31 +62,39 @@ export class Store4910 {
       );
       const insert = this.db.prepare(`
         INSERT INTO goods (sno, brand_sno, brand, name, market_sno, market_name, category, url, image_url,
-          sale_price, original_price, discount_rate, lowest_price, lowest_price_date, first_seen_date, last_seen_date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          sale_price, original_price, discount_rate, lowest_price, lowest_price_date, first_seen_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const update = this.db.prepare(`
         UPDATE goods SET brand_sno = ?, brand = ?, name = ?, market_sno = ?, market_name = ?, category = ?, url = ?,
           image_url = ?, status = 'ACTIVE', sale_price = ?, original_price = ?, discount_rate = ?,
           lowest_price = ?, lowest_price_date = COALESCE(?, lowest_price_date),
-          last_seen_date = ?, misses = 0, last_miss_date = NULL
+          misses = 0, last_miss_date = NULL
         WHERE sno = ?
       `);
 
-      for (const r of rows) {
-        const prev = existing.get(r.sno);
+      for (const scanned of rows) {
+        const prev = existing.get(scanned.sno);
+        // A listing shown without a price is still seen (no miss) but keeps its last known price, so it logs nothing.
+        const r = scanned.sale_price == null && prev
+          ? { ...scanned, sale_price: prev.sale_price, original_price: prev.original_price }
+          : scanned;
         if (!prev) {
           insert.run(r.sno, r.brand_sno, r.brand, r.name, r.market_sno, r.market_name, r.category, r.url, r.image_url,
-            r.sale_price, r.original_price, r.discount_rate, r.sale_price, date, date, date);
+            r.sale_price, r.original_price, r.discount_rate, r.sale_price, r.sale_price == null ? null : date, date);
           logChange.run(r.sno, date, r.sale_price, r.original_price, 'NEW');
           diff.added.push(r);
           continue;
         }
 
-        const isNewLowest = prev.lowest_price == null || r.sale_price < prev.lowest_price;
+        const isNewLowest = r.sale_price != null && (prev.lowest_price == null || r.sale_price < prev.lowest_price);
+        const unchanged =
+          prev.status === 'ACTIVE' && prev.misses === 0 && !isNewLowest &&
+          UPDATABLE.every((col) => prev[col] === (r[col] ?? null));
+        if (unchanged) continue;
         update.run(r.brand_sno, r.brand, r.name, r.market_sno, r.market_name, r.category, r.url, r.image_url,
           r.sale_price, r.original_price, r.discount_rate,
-          isNewLowest ? r.sale_price : prev.lowest_price, isNewLowest ? date : null, date, r.sno);
+          isNewLowest ? r.sale_price : prev.lowest_price, isNewLowest ? date : null, r.sno);
 
         if (prev.status === 'DROPPED') {
           logChange.run(r.sno, date, r.sale_price, r.original_price, 'REVIVED');

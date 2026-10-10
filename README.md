@@ -44,6 +44,8 @@
    - 이력은 **바뀔 때만** 남깁니다(신규·가격변동·종료·재등장). 완전한 스캔에서 2회 연속 보이지 않은 판매글은 종료(`DROPPED`)로 처리하고, 다시 보이면 재등장으로 되살립니다.
    - 텔레그램으로 하루 1통, 브랜드별 스캔 수와 직전 기록가 대비 **10% 이상 하락한 상위 10개**를 보냅니다.
    - 4910 수집이 실패해도 무신사 수집·커밋은 그대로 진행됩니다(`⚠️ [4910] 수집 실패` 로그만 남음).
+   - `daily` 안에서 자동으로 돌고(`--skip-4910`으로 제외), 단독 실행은 `track-4910 [--brand uniqlo|gu] [--dry-run]`입니다.
+   - ⚠️ **로컬(Mac)에서는 `--dry-run`으로만 실행하세요.** `data/4910.db`는 GitHub Actions가 매일 커밋하는 파일이라, 로컬에서 쓰면 다음 `git pull`이 덮어쓰기를 거부하고 텔레그램 요약도 한 통 더 갑니다. 로컬에 따로 쌓고 싶다면 `CLOT_4910_DB_PATH=/tmp/4910.db node src/cli.js track-4910`처럼 경로를 바꾸세요.
 
 ---
 
@@ -94,11 +96,9 @@ node src/cli.js watch https://www.musinsa.com/products/3074360
 # 수동 관심 상품 추적 해제
 node src/cli.js unwatch 3074360
 
-# 4910 유니클로·GU만 따로 스캔 (daily에 포함됨, --skip-4910으로 daily에서 제외)
-node src/cli.js track-4910
-# 한 브랜드만, 또는 DB에 쓰지 않고 스캔 결과만 확인
-node src/cli.js track-4910 --brand gu
+# 4910 유니클로·GU 스캔 결과만 확인 (DB에 쓰지 않음, 텔레그램 없음)
 node src/cli.js track-4910 --dry-run
+node src/cli.js track-4910 --brand gu --dry-run
 
 # 오늘(또는 특정 날짜) 가격 조사 즉시 중단 및 생략 처리 (진행 중인 프로세스 자동 종료)
 node src/cli.js skip
