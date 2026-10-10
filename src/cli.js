@@ -516,7 +516,7 @@ export async function run4910Step({
     try {
       if (!dryRun) store = openStore();
       client = makeClient();
-      result = await trackFn({ client, store, date: today, brands, dryRun, log });
+      result = await trackFn({ client, makeClient, store, date: today, brands, dryRun, log });
     } catch (err) {
       scanError = err;
       log(`⚠️ [4910] 수집 실패 (${err.message})`);

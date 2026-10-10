@@ -1,41 +1,112 @@
-// Daily 4910 run: scan every brand, apply one diff to the store, and the GitHub-runner reachability probe.
+// Daily 4910 run: scan the top brands concurrently, keep the qualified sellers' listings, apply them per brand,
+// price them with today's coupons; plus the GitHub-runner reachability probe.
 import { BRANDS_4910, scanBrand } from './client.js';
 import { tokenExpiry } from './liked.js';
+import { resolveBrands } from './brands.js';
+import { refreshMarkets } from './sellers.js';
+import { learnMarketCoupons, applyCouponPrices } from './coupons.js';
+import { mapConcurrent } from '../pool.js';
 
-// Keeps a degraded (slow, not dead) API from running the Actions job into its 30-minute timeout before the
-// Musinsa commit; brands not finished by then count as incomplete, so their listings take no misses.
-export const BUDGET_MS_4910 = 8 * 60_000;
+// Keeps a degraded (slow, not dead) API from running the Actions job into its timeout; brands not finished by
+// then count as incomplete, so their listings take no misses.
+export const BUDGET_MS_4910 = 25 * 60_000;
 
-export async function track4910({ client, store, date, brands = BRANDS_4910, dryRun = false, budgetMs = BUDGET_MS_4910, log = console.log }) {
+// Hands each concurrent worker a client of its own (each client keeps its own request spacing). A client is
+// made only when none is free, so at most `concurrency` clients ever exist.
+function clientPool(makeClient) {
+  const idle = [];
+  return async (fn) => {
+    const client = idle.pop() ?? makeClient();
+    try {
+      return await fn(client);
+    } finally {
+      idle.push(client);
+    }
+  };
+}
+
+async function scanOne(client, brand, deadline) {
+  try {
+    return await scanBrand(client, brand, { deadline });
+  } catch (err) {
+    return { brandTotal: null, rows: new Map(), complete: false, problems: [`scan: ${err.message}`] };
+  }
+}
+
+function mergeDiffs(diffs, initial) {
+  const merged = { initial, added: [], priceChanged: 0, drops: [], revived: [], dropped: [] };
+  for (const d of diffs) {
+    merged.added.push(...d.added);
+    merged.priceChanged += d.priceChanged;
+    merged.drops.push(...d.drops);
+    merged.revived.push(...d.revived);
+    merged.dropped.push(...d.dropped);
+  }
+  merged.drops.sort((a, b) => b.dropRate - a.dropRate);
+  return merged;
+}
+
+/**
+ * Order: brand list → concurrent scan → seller verdicts → OUT_OF_SCOPE → per-brand applyScan of the qualified
+ * sellers' rows → coupons → coupon prices → scan_runs. OUT_OF_SCOPE comes before applyScan so a seller that just
+ * failed takes no misses (applyScan counts misses only for ACTIVE rows). A dry run stops after the scan and
+ * writes nothing (no seller calls either).
+ */
+export async function track4910({
+  makeClient, store, date, brands = null, concurrency = 3, dryRun = false, memberToken = null,
+  budgetMs = BUDGET_MS_4910, now = new Date(), log = console.log,
+}) {
   const started = Date.now();
   const deadline = started + budgetMs;
-  const brandCounts = [];
-  const allRows = [];
-  const completeBrands = [];
+  const withClient = clientPool(makeClient);
+  const initial = dryRun ? false : store.isEmpty();
 
-  for (const brand of brands) {
-    let scan;
-    try {
-      scan = await scanBrand(client, brand, { deadline });
-    } catch (err) {
-      scan = { brandTotal: null, rows: new Map(), complete: false, problems: [`scan: ${err.message}`] };
-    }
-    brandCounts.push({
-      sno: brand.sno, name: brand.name, total: scan.brandTotal, scanned: scan.rows.size, complete: scan.complete, problems: scan.problems,
-    });
-    allRows.push(...scan.rows.values());
-    if (scan.complete) completeBrands.push(brand.sno);
+  const brandList = brands ?? (await withClient((client) => resolveBrands({ client, store: dryRun ? null : store, date, now, log }))).brands;
+  const scans = await mapConcurrent(brandList, concurrency, (brand) => withClient(async (client) => {
+    const scan = await scanOne(client, brand, deadline);
     log(`[4910] ${brand.name}: ${scan.rows.size}/${scan.brandTotal ?? '?'} 스캔${scan.complete ? '' : ` (불완전: ${scan.problems.slice(0, 3).join('; ')})`}`);
-  }
+    return scan;
+  }));
+  const brandCounts = brandList.map((brand, i) => ({
+    sno: brand.sno, name: brand.name, total: scans[i].brandTotal, scanned: scans[i].rows.size, complete: scans[i].complete, problems: scans[i].problems,
+  }));
 
   // Nothing reached 4910 at all (blocked runner, token endpoint down): a failure, not an empty scan.
   if (brandCounts.every((b) => b.total === null)) {
     throw new Error(brandCounts[0]?.problems[0] ?? 'no brand reachable');
   }
 
-  if (dryRun) return { date, brandCounts, diff: null, durationMs: Date.now() - started };
+  const marketSnos = [...new Set(scans.flatMap((s) => [...s.rows.values()].map((r) => r.market_sno)).filter((m) => m != null).map(Number))];
+  if (dryRun) {
+    return {
+      date, brandCounts, diff: null, sellers: { seen: marketSnos.length, qualified: null, checked: 0 }, coupons: null, outOfScope: 0,
+      durationMs: Date.now() - started,
+    };
+  }
 
-  const diff = store.applyScan(date, allRows, { completeBrands });
+  const { qualified, checked } = await withClient((client) => refreshMarkets({ client, store, date, marketSnos, log }));
+  // Every stored qualified seller, not only today's: an incomplete brand's unseen listings must stay as they are.
+  const qualifiedMarketSnos = [...store.getMarkets().values()].filter((m) => m.qualified).map((m) => m.sno);
+  const outOfScope = store.markOutOfScope({ activeBrandSnos: brandList.map((b) => b.sno), qualifiedMarketSnos });
+
+  const diffs = brandList.map((brand, i) => {
+    const rows = [...scans[i].rows.values()].filter((r) => qualified.has(Number(r.market_sno)));
+    brandCounts[i].qualifiedRows = rows.length;
+    return store.applyScan(date, rows, { completeBrands: scans[i].complete ? [brand.sno] : [] });
+  });
+  const diff = mergeDiffs(diffs, initial);
+
+  let learned;
+  try {
+    learned = await withClient((client) => learnMarketCoupons({ client, store, date, marketSnos: [...qualified], memberToken, log }));
+  } catch (err) {
+    // The client never puts the member token in an error message.
+    log(`⚠️ [4910] 쿠폰 학습 실패 (${err.status ?? err.name}: ${err.message})`);
+    learned = { memberStatus: 'error', wallet: 0, walletChanges: { added: [], removed: [] }, emoney: null, eligible: 0, mismatched: 0 };
+  }
+  // Also without a token: listings with no coupon result today get NULL rather than yesterday's price.
+  const { priced } = applyCouponPrices({ store, date });
+
   const durationMs = Date.now() - started;
   store.recordScanRun({
     date,
@@ -46,7 +117,10 @@ export async function track4910({ client, store, date, brands = BRANDS_4910, dry
     dropped: diff.dropped.length,
     durationMs,
   });
-  return { date, brandCounts, diff, durationMs };
+  return {
+    date, brandCounts, diff, sellers: { seen: marketSnos.length, qualified: qualified.size, checked },
+    coupons: { ...learned, priced }, outOfScope, durationMs,
+  };
 }
 
 const failDetail = (err) => `${err.status ?? err.name}: ${err.message}`;
@@ -63,9 +137,31 @@ async function probeMemberLogin(client, memberToken) {
   }
 }
 
+// The wallet answers: only the coupon count goes out, never coupon names (or the token).
+async function probeMemberCoupons(client, memberToken) {
+  try {
+    const coupons = await client.getMyCoupons({ memberToken });
+    return { name: '4910 member coupons', ok: true, detail: `${coupons.length} coupons, ${coupons.filter((c) => c.usable).length} usable` };
+  } catch (err) {
+    return { name: '4910 member coupons', ok: false, detail: failDetail(err) };
+  }
+}
+
+// Runs one anonymous check; a failure is reported, never thrown, so the next check still runs.
+async function probeCheck(name, fn) {
+  try {
+    return { name, ...(await fn()) };
+  } catch (err) {
+    return { name, ok: false, detail: failDetail(err) };
+  }
+}
+
+const PROBE_MARKET_SNO = 56293;
+
 /**
- * Read-only: can this machine get an anonymous token and one Uniqlo listing page, and (given a member token)
- * is that token still accepted by the liked list? Never prints either token.
+ * Read-only: can this machine get an anonymous token, one Uniqlo listing page, one brand ranking page and one
+ * seller profile, and (given a member token) is that token still accepted by the liked list and the coupon wallet?
+ * Never prints either token.
  */
 export async function probe4910({ client, memberToken = null }) {
   const checks = [];
@@ -77,17 +173,28 @@ export async function probe4910({ client, memberToken = null }) {
   } catch (err) {
     checks.push({ name: '4910 anonymous token', ok: false, detail: failDetail(err) });
   }
-  if (!tokenOk) {
-    checks.push({ name: '4910 uniqlo listing', ok: false, detail: 'skipped (no token)' });
-    if (memberToken) checks.push(await probeMemberLogin(client, memberToken));
-    return checks;
+
+  const anonymous = [
+    ['4910 uniqlo listing', async () => {
+      const { totalCount } = await client.listBrandGoods({ brandSno: BRANDS_4910[0].sno, limit: 1 });
+      return { ok: totalCount > 0, detail: `total_count=${totalCount}` };
+    }],
+    ['4910 brand ranking', async () => {
+      const { brands } = await client.listTopBrands({ limit: 1 });
+      return { ok: brands.length > 0, detail: brands.length ? `top brand sno=${brands[0].sno}` : 'empty ranking' };
+    }],
+    ['4910 seller', async () => {
+      const m = await client.getMarket(PROBE_MARKET_SNO);
+      return { ok: m.satisfaction != null, detail: `market ${PROBE_MARKET_SNO}: satisfaction=${m.satisfaction}, reviews=${m.reviewsCount}` };
+    }],
+  ];
+  for (const [name, fn] of anonymous) {
+    checks.push(tokenOk ? await probeCheck(name, fn) : { name, ok: false, detail: 'skipped (no token)' });
   }
-  try {
-    const { totalCount } = await client.listBrandGoods({ brandSno: BRANDS_4910[0].sno, limit: 1 });
-    checks.push({ name: '4910 uniqlo listing', ok: totalCount > 0, detail: `total_count=${totalCount}` });
-  } catch (err) {
-    checks.push({ name: '4910 uniqlo listing', ok: false, detail: failDetail(err) });
+
+  if (memberToken) {
+    checks.push(await probeMemberLogin(client, memberToken));
+    checks.push(await probeMemberCoupons(client, memberToken));
   }
-  if (memberToken) checks.push(await probeMemberLogin(client, memberToken));
   return checks;
 }
