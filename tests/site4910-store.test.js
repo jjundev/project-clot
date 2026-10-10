@@ -160,3 +160,59 @@ test('recordScanRun replaces the row for the same date', () => {
   assert.equal(runs[0].duration_ms, 20);
   assert.deepEqual(JSON.parse(runs[0].brand_counts_json), base.brandCounts);
 });
+
+const liked = (sno) => ({
+  sno, brand: '유니클로', name: `liked ${sno}`, market_name: 'seller', category: 'cat',
+  url: `https://4910.kr/goods/${sno}`, image_url: null,
+  // extra fields from the client's toRow() must be ignored
+  brand_sno: 2421, sale_price: 1000, closed: false,
+});
+const likedRow = (sno) => s.db.prepare('SELECT * FROM liked_goods WHERE sno = ?').get(sno);
+
+test('syncLiked inserts ACTIVE rows with first_liked_date and last_seen_date', () => {
+  assert.deepEqual(s.syncLiked([liked(1), liked(2)], '2026-10-11'), { added: 2, unliked: 0, active: 2 });
+  const a = likedRow(1);
+  assert.equal(a.status, 'ACTIVE');
+  assert.equal(a.first_liked_date, '2026-10-11');
+  assert.equal(a.last_seen_date, '2026-10-11');
+  assert.equal(a.name, 'liked 1');
+});
+
+test('a sno missing from the next sync becomes UNLIKED and returns ACTIVE when liked again', () => {
+  s.syncLiked([liked(1), liked(2)], '2026-10-11');
+  assert.deepEqual(s.syncLiked([liked(1)], '2026-10-12'), { added: 0, unliked: 1, active: 1 });
+  assert.equal(likedRow(2).status, 'UNLIKED');
+  assert.deepEqual(s.syncLiked([liked(1), liked(2)], '2026-10-13'), { added: 0, unliked: 0, active: 2 });
+  const b = likedRow(2);
+  assert.equal(b.status, 'ACTIVE');
+  assert.equal(b.first_liked_date, '2026-10-11');
+  assert.equal(b.last_seen_date, '2026-10-13');
+});
+
+test('an empty liked list unlikes nothing', () => {
+  s.syncLiked([liked(1), liked(2)], '2026-10-11');
+  assert.deepEqual(s.syncLiked([], '2026-10-12'), { added: 0, unliked: 0, active: 2 });
+});
+
+test('getActiveLiked returns ACTIVE rows ordered by sno', () => {
+  s.syncLiked([liked(3), liked(1), liked(2)], '2026-10-11');
+  s.syncLiked([liked(3), liked(1)], '2026-10-12');
+  assert.deepEqual(s.getActiveLiked().map((g) => g.sno), [1, 3]);
+});
+
+test('logLikedPrice keeps one row per sno and date', () => {
+  const base = { sno: 1, date: '2026-10-11', list_price: 5000, original_price: 9000, coupon_price: null, member_price: 4000, is_soldout: 0 };
+  s.logLikedPrice(base);
+  s.logLikedPrice({ ...base, member_price: 3500 });
+  const rows = s.db.prepare('SELECT * FROM liked_price_logs WHERE sno = 1').all();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].member_price, 3500);
+});
+
+test('getPrevLikedPrice returns the latest row before the date', () => {
+  const log = (date, member_price) => s.logLikedPrice({ sno: 1, date, list_price: 5000, original_price: 9000, coupon_price: null, member_price, is_soldout: 0 });
+  log('2026-10-09', 4500);
+  log('2026-10-10', 4000);
+  assert.equal(s.getPrevLikedPrice(1, '2026-10-11').date, '2026-10-10');
+  assert.equal(s.getPrevLikedPrice(1, '2026-10-09'), undefined);
+});

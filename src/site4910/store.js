@@ -40,6 +40,16 @@ export class Store4910 {
         date TEXT PRIMARY KEY, brand_counts_json TEXT, complete INTEGER, changed INTEGER,
         added INTEGER, dropped INTEGER, duration_ms INTEGER, completed_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS liked_goods (
+        sno INTEGER PRIMARY KEY, name TEXT NOT NULL, brand TEXT, market_name TEXT, category TEXT,
+        url TEXT NOT NULL, image_url TEXT, status TEXT NOT NULL DEFAULT 'ACTIVE',
+        first_liked_date TEXT NOT NULL, last_seen_date TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS liked_price_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, sno INTEGER NOT NULL, date TEXT NOT NULL,
+        list_price INTEGER, original_price INTEGER, coupon_price INTEGER, member_price INTEGER,
+        is_soldout INTEGER NOT NULL DEFAULT 0, UNIQUE (sno, date)
+      );
     `);
   }
 
@@ -148,6 +158,65 @@ export class Store4910 {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(date, JSON.stringify(brandCounts), complete ? 1 : 0, changed, added, dropped, durationMs, new Date().toISOString());
+  }
+
+  /**
+   * Mirrors the member's liked list: every row becomes (or stays) ACTIVE, and ACTIVE rows absent from it become
+   * UNLIKED. An empty list unlikes nothing — it is indistinguishable from a failed fetch, so it is never trusted.
+   */
+  syncLiked(rows, date) {
+    this.db.exec('BEGIN');
+    try {
+      const exists = this.db.prepare('SELECT 1 FROM liked_goods WHERE sno = ?');
+      const upsert = this.db.prepare(`
+        INSERT INTO liked_goods (sno, name, brand, market_name, category, url, image_url, status, first_liked_date, last_seen_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)
+        ON CONFLICT (sno) DO UPDATE SET name = excluded.name, brand = excluded.brand, market_name = excluded.market_name,
+          category = excluded.category, url = excluded.url, image_url = excluded.image_url,
+          status = 'ACTIVE', last_seen_date = excluded.last_seen_date
+      `);
+      let added = 0;
+      for (const r of rows) {
+        if (!exists.get(r.sno)) added++;
+        upsert.run(r.sno, r.name, r.brand ?? null, r.market_name ?? null, r.category ?? null, r.url, r.image_url ?? null, date, date);
+      }
+      let unliked = 0;
+      if (rows.length) {
+        unliked = Number(
+          this.db
+            .prepare(`
+              UPDATE liked_goods SET status = 'UNLIKED'
+              WHERE status = 'ACTIVE' AND sno NOT IN (SELECT value FROM json_each(?))
+            `)
+            .run(JSON.stringify(rows.map((r) => r.sno))).changes
+        );
+      }
+      const active = this.db.prepare(`SELECT COUNT(*) AS n FROM liked_goods WHERE status = 'ACTIVE'`).get().n;
+      this.db.exec('COMMIT');
+      return { added, unliked, active };
+    } catch (e) {
+      this.db.exec('ROLLBACK');
+      throw e;
+    }
+  }
+
+  logLikedPrice({ sno, date, list_price, original_price, coupon_price, member_price, is_soldout }) {
+    this.db
+      .prepare(`
+        INSERT OR REPLACE INTO liked_price_logs (sno, date, list_price, original_price, coupon_price, member_price, is_soldout)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(sno, date, list_price ?? null, original_price ?? null, coupon_price ?? null, member_price ?? null, is_soldout ? 1 : 0);
+  }
+
+  getActiveLiked() {
+    return this.db.prepare(`SELECT * FROM liked_goods WHERE status = 'ACTIVE' ORDER BY sno`).all();
+  }
+
+  getPrevLikedPrice(sno, date) {
+    return this.db
+      .prepare('SELECT * FROM liked_price_logs WHERE sno = ? AND date < ? ORDER BY date DESC LIMIT 1')
+      .get(Number(sno), date);
   }
 
   getGoods(sno) {
