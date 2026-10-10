@@ -17,6 +17,14 @@ const LIST_BASE = 'https://api.a-bly.com/aglo/api/brands';
 const DETAIL_BASE = 'https://api.a-bly.com/api/v2/goods';
 const LIKED_URL = 'https://api.a-bly.com/aglo/api/members/me/liked-goods/';
 const LIKED_PAGE_LIMIT = 100;
+const RANKING_URL = 'https://api.a-bly.com/aglo/api/brands/ranking/';
+const MARKET_BASE = 'https://api.a-bly.com/api/v2/markets';
+const ME_URL = 'https://api.a-bly.com/aglo/api/members/me/';
+const MY_COUPONS_URL = 'https://api.a-bly.com/aglo/api/members/me/coupons/';
+const BEST_COUPON_URL = 'https://api.a-bly.com/aglo/api/coupons/best-coupon';
+const RANKING_PAGE_LIMIT = 100;
+// Wallet and best-coupon endpoints answer only to the web app's identity headers.
+const AGLO_HEADERS = { 'X-App-Type': 'AGLO', 'X-App-Version': '0.1.0', 'X-Device-Type': 'PCWeb' };
 const COUPON_LABEL = '쿠폰적용가';
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_RETRIES = 3;
@@ -40,6 +48,7 @@ export function toRow(entry, brand) {
     brand: brand.name,
     name: entry.item.name,
     market_sno: entry.item.market_sno ?? null,
+    market_type_sno: Number(a.MARKET_TYPE_SNO) || null,
     market_name: a.MARKET_NAME ?? null,
     category: a.STANDARD_CATEGORY_NAME ?? null,
     sale_price: salePrice,
@@ -98,8 +107,8 @@ export function createClient({ fetchFn = fetch, delayMs = 300, retryBaseMs = 100
 
   // One GET with the shared spacing, timeout and retry (network errors, 429, 5xx). Anonymous calls send the
   // anonymous token and refresh it once on 401; member calls send only `Authorization: JWT` (never the token
-  // value in a message) and fail at once with code MEMBER_AUTH on 401/403.
-  async function getJson(url, { memberToken = null, label }) {
+  // value in a message) and fail at once with code MEMBER_AUTH on 401/403. `aglo` adds the web app identity headers.
+  async function getJson(url, { memberToken = null, label, aglo = false }) {
     let refreshed = false;
     let lastStatus;
     let lastMessage = 'unknown error';
@@ -113,6 +122,7 @@ export function createClient({ fetchFn = fetch, delayMs = 300, retryBaseMs = 100
         res = await fetchFn(url, {
           headers: {
             'User-Agent': USER_AGENT,
+            ...(aglo ? AGLO_HEADERS : {}),
             ...(memberToken ? { Authorization: `JWT ${memberToken}` } : { 'X-Anonymous-Token': token }),
             Origin: 'https://4910.kr',
             Referer: 'https://4910.kr/',
@@ -170,6 +180,7 @@ export function createClient({ fetchFn = fetch, delayMs = 300, retryBaseMs = 100
       couponPrice: g.price_description?.text === COUPON_LABEL ? price : null,
       listPrice: parsePrice(g.first_page_rendering?.price),
       originalPrice: parsePrice(g.linked_option?.original_price),
+      optionSno: g.linked_option?.sno ?? null,
       isSoldout: Boolean(g.is_soldout),
       isOpen: Boolean(g.is_open),
     };
@@ -186,10 +197,73 @@ export function createClient({ fetchFn = fetch, delayMs = 300, retryBaseMs = 100
     };
   }
 
+  // One page of the brand ranking (anonymous); lastSno is the cursor for the next page.
+  async function listTopBrands({ limit = RANKING_PAGE_LIMIT, lastSno = null } = {}) {
+    let url = `${RANKING_URL}?limit=${limit}`;
+    if (lastSno != null) url += `&last_sno=${lastSno}`;
+    const body = await getJson(url, { label: 'brand ranking' });
+    return {
+      brands: (Array.isArray(body.brand_list) ? body.brand_list : []).map((b) => ({ sno: Number(b.sno), name: b.name })),
+      lastSno: body.last_sno ?? null,
+    };
+  }
+
+  // A seller's (market's) public profile; satisfaction is a percentage, reviewsCount is null when Ably omits it.
+  async function getMarket(sno) {
+    const body = await getJson(`${MARKET_BASE}/${sno}/`, { label: `market ${sno}` });
+    const m = body?.market ?? {};
+    return {
+      sno: Number(m.sno ?? sno),
+      name: m.name ?? null,
+      satisfaction: m.purchasing_satisfaction_ratio ?? null,
+      reviewsCount: m.reviews_count ?? null,
+      isOfficial: Boolean(m.is_official),
+    };
+  }
+
+  // The member's coupon wallet. min comes from the human-readable condition text ("10,000원 이상 구매 시 ...").
+  async function getMyCoupons({ memberToken }) {
+    const body = await getJson(MY_COUPONS_URL, { memberToken, aglo: true, label: 'my coupons' });
+    return (Array.isArray(body.coupon_apply_list) ? body.coupon_apply_list : []).map((c) => ({
+      couponSno: c.coupon_sno,
+      name: c.coupon_name ?? null,
+      type: c.discount_type === 'PERCENT' ? 'PERCENT' : 'PRICE',
+      percent: c.discount_percent ?? null,
+      price: c.discount_price ?? null,
+      max: c.max_discount_price ?? Infinity,
+      min: parsePrice(String(c.conditions?.[1] ?? '').match(/([\d,]+)원 이상/)?.[1]) ?? 0,
+      finishedAt: c.finished_at ?? null,
+      usable: Boolean(c.is_usable && c.is_in_available_period),
+    }));
+  }
+
+  // Only the e-money balance; the rest of the profile is personal data we never keep.
+  async function getMe({ memberToken }) {
+    const body = await getJson(ME_URL, { memberToken, aglo: true, label: 'member profile' });
+    return { emoney: Number(body.emoney) || 0 };
+  }
+
+  // The coupon Ably would apply to one option (quantity 1), or null when none applies.
+  async function getBestCoupon(optionSno, { memberToken }) {
+    const options = encodeURIComponent(JSON.stringify([{ sno: Number(optionSno), ea: 1 }]));
+    const body = await getJson(`${BEST_COUPON_URL}?options=${options}`, { memberToken, aglo: true, label: `best coupon ${optionSno}` });
+    const c = body?.best_coupon;
+    if (!c) return null;
+    return {
+      couponSno: c.sno,
+      name: c.name ?? null,
+      discount: c.coupon_discount,
+      percent: c.discount_percent ?? null,
+      price: c.discount_price ?? null,
+      max: c.max_discount_price ?? Infinity,
+      min: c.minimum_price ?? 0,
+    };
+  }
+
   // Returns the cached anonymous token, fetching one first if needed (the runner probe checks this step alone).
   const getToken = async () => token ?? fetchToken();
 
-  return { listBrandGoods, getToken, getGoodsDetail, listLikedGoods };
+  return { listBrandGoods, getToken, getGoodsDetail, listLikedGoods, listTopBrands, getMarket, getMyCoupons, getMe, getBestCoupon };
 }
 
 const sliceLabel = (lo, hi) => `${lo}-${hi ?? '∞'}`;
