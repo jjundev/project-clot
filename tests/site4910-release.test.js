@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { DatabaseSync } from 'node:sqlite';
-import { pullDb, pushDb, RELEASE_TAG_4910, ASSET_4910, PREV_ASSET_4910 } from '../src/site4910/release.js';
+import { pullDb, pushDb, RELEASE_TAG_4910, ASSET_4910, PREV_ASSET_4910, DATED_KEEP_4910 } from '../src/site4910/release.js';
 import { Store4910 } from '../src/site4910/store.js';
 
 function scratch(t) {
@@ -66,7 +66,7 @@ test('pullDb leaves dest untouched when gh fails', (t) => {
   const dest = path.join(dir, '4910.db');
   fs.writeFileSync(dest, 'precious');
   const run = fakeRun(() => ({ status: 1, stderr: 'release not found\n' }));
-  assert.throws(() => pullDb({ dest, run, tmpDir: dir }), /release download failed.*release not found/);
+  assert.throws(() => pullDb({ dest, run, tmpDir: dir }), /release download 4910\.db\.gz failed.*release not found; fallback 4910\.db\.prev\.gz: .*failed/);
   assert.equal(fs.readFileSync(dest, 'utf8'), 'precious');
 });
 
@@ -77,6 +77,30 @@ test('pullDb leaves dest untouched when the asset is missing', (t) => {
   const run = fakeRun(); // gh exits 0 but downloads nothing
   assert.throws(() => pullDb({ dest, run, tmpDir: dir }), /no 4910\.db\.gz asset/);
   assert.equal(fs.readFileSync(dest, 'utf8'), 'precious');
+});
+
+test('pullDb falls back to the prev asset when 4910.db.gz cannot be downloaded', (t) => {
+  const dir = scratch(t);
+  const dest = path.join(dir, '4910.db');
+  const payload = Buffer.from('day-before database');
+  const run = fakeRun((args) => {
+    if (args[4] === ASSET_4910) return { status: 1, stderr: 'no assets match the file pattern' };
+    fs.writeFileSync(path.join(args[args.indexOf('-D') + 1], PREV_ASSET_4910), zlib.gzipSync(payload));
+    return undefined;
+  });
+  const res = pullDb({ dest, run, tmpDir: path.join(dir, 'tmp') });
+  assert.deepEqual(res, { bytes: payload.length, source: 'prev' });
+  assert.deepEqual(fs.readFileSync(dest), payload);
+  assert.deepEqual(run.calls.map((c) => c.args[4]), [ASSET_4910, PREV_ASSET_4910]);
+});
+
+test('pullDb reports source latest and never asks for prev when 4910.db.gz is there', (t) => {
+  const dir = scratch(t);
+  const run = fakeRun((args) => {
+    fs.writeFileSync(path.join(args[args.indexOf('-D') + 1], ASSET_4910), zlib.gzipSync(Buffer.from('x')));
+  });
+  assert.deepEqual(pullDb({ dest: path.join(dir, '4910.db'), run, tmpDir: path.join(dir, 'tmp') }), { bytes: 1, source: 'latest' });
+  assert.equal(run.calls.length, 1);
 });
 
 test('pullDb leaves dest untouched on a corrupt gzip', (t) => {
@@ -94,69 +118,123 @@ test('pullDb leaves dest untouched on a corrupt gzip', (t) => {
 
 // ---- pushDb ----
 
-function releaseState({ exists = true, prev = Buffer.from('previous gz') } = {}) {
-  return fakeRun((args) => {
-    if (args[1] === 'view') return exists ? undefined : { status: 1, stderr: 'release not found' };
-    if (args[1] === 'download') {
+const DATE = '2026-10-11';
+const DATED = `4910.db.${DATE}.gz`;
+
+// A fake Release: `assets` are the names `release view --json assets` lists; `prev` is the current 4910.db.gz
+// (null = none). Every uploaded file's bytes are kept by asset name.
+function releaseState({ exists = true, prev = Buffer.from('previous gz'), assets = [], fail = {} } = {}) {
+  const run = fakeRun((args) => {
+    const step = args[1] === 'upload' ? `upload ${path.basename(args[3])}` : args[1] === 'view' && args.includes('--json') ? 'list' : args[1];
+    if (fail[step]) return fail[step];
+    if (step === 'view') return exists ? undefined : { status: 1, stderr: 'release not found' };
+    if (step === 'list') return { stdout: JSON.stringify({ assets: assets.map((name) => ({ name, size: 1 })) }) };
+    if (step === 'download') {
       if (!prev) return { status: 1, stderr: 'no assets match' };
       const d = args[args.indexOf('-D') + 1];
       fs.mkdirSync(d, { recursive: true });
       fs.writeFileSync(path.join(d, ASSET_4910), prev);
     }
+    if (args[1] === 'upload') run.uploaded[path.basename(args[3])] = fs.readFileSync(args[3]);
     return undefined;
   });
+  run.uploaded = {};
+  return run;
 }
+const steps = (run) => run.calls.map((c) => (c.args[1] === 'upload' ? `upload ${path.basename(c.args[3])}` : c.args.slice(0, 2).join(' ') + (c.args.includes('--json') ? ' --json' : '')));
 
-test('pushDb keeps the previous asset as prev and uploads both', (t) => {
+test('pushDb uploads prev first, then the dated copy, then latest, each as its own call', (t) => {
   const dir = scratch(t);
   const src = path.join(dir, '4910.db');
   makeDb(src);
   const run = releaseState();
-  const tmpDir = path.join(dir, 'tmp');
-  fs.mkdirSync(tmpDir);
-  const uploaded = {};
-  const orig = run;
-  const spy = (cmd, args) => {
-    if (args[1] === 'upload') for (const f of args.filter((a) => a.endsWith('.gz'))) uploaded[path.basename(f)] = fs.readFileSync(f);
-    return orig(cmd, args);
-  };
-  spy.calls = orig.calls;
+  const res = pushDb({ src, run, tmpDir: path.join(dir, 'tmp'), date: DATE, log: () => {} });
 
-  const res = pushDb({ src, run: spy, tmpDir });
-  assert.deepEqual(orig.calls.map((c) => c.args.slice(0, 2).join(' ')), ['release view', 'release download', 'release upload']);
-  assert.equal(orig.calls.every((c) => c.cmd === 'gh'), true);
-  assert.deepEqual(orig.calls[1].args.slice(0, 5), ['release', 'download', RELEASE_TAG_4910, '-p', ASSET_4910]);
-  const up = orig.calls[2].args;
-  assert.deepEqual(up.slice(0, 3), ['release', 'upload', RELEASE_TAG_4910]);
-  assert.deepEqual(up.slice(3, 5).map((f) => path.basename(f)), [ASSET_4910, PREV_ASSET_4910]);
-  assert.equal(up.at(-1), '--clobber');
-  assert.equal(uploaded[PREV_ASSET_4910].toString(), 'previous gz');
-  assert.equal(res.bytes, uploaded[ASSET_4910].length);
+  assert.deepEqual(steps(run), [
+    'release view', 'release download', `upload ${PREV_ASSET_4910}`, `upload ${DATED}`, `upload ${ASSET_4910}`, 'release view --json',
+  ]);
+  assert.equal(run.calls.every((c) => c.cmd === 'gh'), true);
+  assert.deepEqual(run.calls[1].args.slice(0, 5), ['release', 'download', RELEASE_TAG_4910, '-p', ASSET_4910]);
+  for (const c of run.calls.filter((c) => c.args[1] === 'upload')) {
+    assert.deepEqual(c.args.slice(0, 3), ['release', 'upload', RELEASE_TAG_4910]);
+    assert.equal(c.args.length, 5);
+    assert.equal(c.args.at(-1), '--clobber');
+  }
+  assert.equal(run.uploaded[PREV_ASSET_4910].toString(), 'previous gz');
+  assert.deepEqual(run.uploaded[DATED], run.uploaded[ASSET_4910]);
+  assert.equal(res.bytes, run.uploaded[ASSET_4910].length);
+  assert.deepEqual(res.pruned, []);
   // The uploaded gzip is a whole, openable database.
   const restored = path.join(dir, 'restored.db');
-  fs.writeFileSync(restored, zlib.gunzipSync(uploaded[ASSET_4910]));
+  fs.writeFileSync(restored, zlib.gunzipSync(run.uploaded[ASSET_4910]));
   const check = new DatabaseSync(restored);
   assert.equal(check.prepare('SELECT COUNT(*) AS n FROM goods').get().n, 2);
   check.close();
 });
 
-test('pushDb uploads only the new asset when there is no previous one', (t) => {
+test('pushDb skips the prev upload when there is no previous asset', (t) => {
   const dir = scratch(t);
   const src = path.join(dir, '4910.db');
   makeDb(src);
   const run = releaseState({ prev: null });
-  pushDb({ src, run, tmpDir: path.join(dir, 'tmp') });
-  const up = run.calls.at(-1).args;
-  assert.deepEqual(up.filter((a) => a.endsWith('.gz')).map((f) => path.basename(f)), [ASSET_4910]);
+  pushDb({ src, run, tmpDir: path.join(dir, 'tmp'), date: DATE, log: () => {} });
+  assert.deepEqual(Object.keys(run.uploaded), [DATED, ASSET_4910]);
+});
+
+test('a failed prev upload stops the push before latest is touched', (t) => {
+  const dir = scratch(t);
+  const src = path.join(dir, '4910.db');
+  makeDb(src);
+  const run = releaseState({ fail: { [`upload ${PREV_ASSET_4910}`]: { status: 1, stderr: 'HTTP 502' } } });
+  assert.throws(() => pushDb({ src, run, tmpDir: path.join(dir, 'tmp'), date: DATE, log: () => {} }), /upload 4910\.db\.prev\.gz failed.*HTTP 502/);
+  assert.deepEqual(Object.keys(run.uploaded), []);
+});
+
+test('a failed latest upload throws but leaves prev and the dated copy uploaded', (t) => {
+  const dir = scratch(t);
+  const src = path.join(dir, '4910.db');
+  makeDb(src);
+  const run = releaseState({ fail: { [`upload ${ASSET_4910}`]: { status: 1, stderr: 'HTTP 502' } } });
+  assert.throws(() => pushDb({ src, run, tmpDir: path.join(dir, 'tmp'), date: DATE, log: () => {} }), /upload 4910\.db\.gz failed.*HTTP 502/);
+  assert.deepEqual(Object.keys(run.uploaded), [PREV_ASSET_4910, DATED]);
+  assert.equal(steps(run).includes('release view --json'), false);
+});
+
+test('pushDb deletes dated copies beyond the newest 7 and leaves other assets alone', (t) => {
+  const dir = scratch(t);
+  const src = path.join(dir, '4910.db');
+  makeDb(src);
+  const dated = Array.from({ length: 9 }, (_, i) => `4910.db.2026-10-0${i + 1}.gz`).concat(DATED); // 10 dated copies
+  const run = releaseState({ assets: [ASSET_4910, PREV_ASSET_4910, ...dated, 'notes.txt'] });
+  const res = pushDb({ src, run, tmpDir: path.join(dir, 'tmp'), date: DATE, log: () => {} });
+  assert.equal(DATED_KEEP_4910, 7);
+  assert.deepEqual(res.pruned, ['4910.db.2026-10-03.gz', '4910.db.2026-10-02.gz', '4910.db.2026-10-01.gz']);
+  const deletes = run.calls.filter((c) => c.args[1] === 'delete-asset').map((c) => c.args);
+  assert.deepEqual(deletes, res.pruned.map((n) => ['release', 'delete-asset', RELEASE_TAG_4910, n, '--yes']));
+});
+
+test('a failed prune only warns', (t) => {
+  const dir = scratch(t);
+  const src = path.join(dir, '4910.db');
+  makeDb(src);
+  const lines = [];
+  const listFails = releaseState({ fail: { list: { status: 1, stderr: 'HTTP 500' } } });
+  assert.deepEqual(pushDb({ src, run: listFails, tmpDir: path.join(dir, 'tmp'), date: DATE, log: (l) => lines.push(l) }).pruned, []);
+  assert.match(lines.join('\n'), /⚠️.*could not list release assets.*HTTP 500/);
+
+  const many = Array.from({ length: 8 }, (_, i) => `4910.db.2026-10-0${i + 1}.gz`);
+  const deleteFails = releaseState({ assets: many, fail: { 'delete-asset': { status: 1, stderr: 'HTTP 403' } } });
+  assert.deepEqual(pushDb({ src, run: deleteFails, tmpDir: path.join(dir, 'tmp'), date: DATE, log: (l) => lines.push(l) }).pruned, []);
+  assert.match(lines.join('\n'), /⚠️.*could not delete old asset 4910\.db\.2026-10-01\.gz.*HTTP 403/);
 });
 
 test('pushDb creates the release when it does not exist', (t) => {
   const dir = scratch(t);
   const src = path.join(dir, '4910.db');
   makeDb(src);
-  const run = releaseState({ exists: false });
-  pushDb({ src, run, tmpDir: path.join(dir, 'tmp') });
-  assert.deepEqual(run.calls.map((c) => c.args.slice(0, 2).join(' ')), ['release view', 'release create', 'release download', 'release upload']);
+  const run = releaseState({ exists: false, prev: null });
+  pushDb({ src, run, tmpDir: path.join(dir, 'tmp'), date: DATE, log: () => {} });
+  assert.deepEqual(steps(run), ['release view', 'release create', 'release download', `upload ${DATED}`, `upload ${ASSET_4910}`, 'release view --json']);
   assert.deepEqual(run.calls[1].args, [
     'release', 'create', 'data-4910', '--prerelease', '--title', '4910 data', '--notes', 'Daily 4910 DB (managed by .github/workflows/4910.yml)',
   ]);
@@ -167,7 +245,7 @@ test('pushDb throws with gh stderr when the upload fails', (t) => {
   const src = path.join(dir, '4910.db');
   makeDb(src);
   const run = fakeRun((args) => (args[1] === 'upload' ? { status: 1, stderr: ' HTTP 502 \n' } : undefined));
-  assert.throws(() => pushDb({ src, run, tmpDir: path.join(dir, 'tmp') }), /release upload failed.*HTTP 502$/);
+  assert.throws(() => pushDb({ src, run, tmpDir: path.join(dir, 'tmp'), date: DATE }), /release upload \S+ failed.*HTTP 502$/);
 });
 
 test('pushDb throws when the release cannot be created', (t) => {
@@ -199,10 +277,9 @@ test('pushDb folds the WAL into the pushed file', (t) => {
   store.db.prepare('INSERT INTO scan_runs (date, completed_at) VALUES (?, ?)').run('2026-10-02', 'x');
   store.db.prepare("INSERT INTO goods (sno, brand_sno, name, url, first_seen_date) VALUES (7, 1, 'g', 'u', '2026-10-10')").run();
   let uploaded;
-  const run = fakeRun((args) => {
-    if (args[1] === 'upload') uploaded = fs.readFileSync(args.find((a) => a.endsWith(ASSET_4910)));
-  });
-  pushDb({ src, run, tmpDir: path.join(dir, 'tmp') });
+  const run = releaseState({ prev: null });
+  pushDb({ src, run, tmpDir: path.join(dir, 'tmp'), date: DATE });
+  uploaded = run.uploaded[ASSET_4910];
   store.close();
   const restored = path.join(dir, 'restored.db');
   fs.writeFileSync(restored, zlib.gunzipSync(uploaded));
@@ -219,8 +296,8 @@ test('pushDb refuses a one-day DB (a skipped pull) with zero gh calls, unless al
   assert.throws(() => pushDb({ src, run, tmpDir: path.join(dir, 'tmp') }), /1 scan day.*pull.*--allow-fresh/s);
   assert.equal(run.calls.length, 0);
 
-  pushDb({ src, run, tmpDir: path.join(dir, 'tmp'), allowFresh: true });
-  assert.equal(run.calls.at(-1).args[1], 'upload');
+  pushDb({ src, run, tmpDir: path.join(dir, 'tmp'), allowFresh: true, date: DATE });
+  assert.ok(run.uploaded[ASSET_4910]);
 });
 
 test('pushDb refuses a DB with no scan days, and still refuses an empty DB under allowFresh', (t) => {
@@ -240,6 +317,6 @@ test('pushDb uploads a two-day DB without allowFresh', (t) => {
   const src = path.join(dir, '4910.db');
   makeDb(src, 2, 2);
   const run = releaseState();
-  pushDb({ src, run, tmpDir: path.join(dir, 'tmp') });
-  assert.equal(run.calls.at(-1).args[1], 'upload');
+  pushDb({ src, run, tmpDir: path.join(dir, 'tmp'), date: DATE });
+  assert.ok(run.uploaded[ASSET_4910]);
 });

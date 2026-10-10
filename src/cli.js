@@ -602,8 +602,10 @@ export function run4910Db({ sub, allowFresh = false, dbPath = default4910DbPath(
     return { ok: false };
   }
   try {
-    const { bytes } = sub === 'pull' ? pullFn({ dest: dbPath }) : pushFn({ src: dbPath, allowFresh });
+    const { bytes, source } = sub === 'pull' ? pullFn({ dest: dbPath }) : pushFn({ src: dbPath, allowFresh });
     log(sub === 'pull' ? `⬇️ [4910-db] pulled ${bytes.toLocaleString('en-US')} bytes into ${dbPath}` : `⬆️ [4910-db] pushed ${bytes.toLocaleString('en-US')} gzipped bytes from ${dbPath}`);
+    // 4910.db.gz was missing (an upload that died after gh deleted it): today runs on the day-before DB.
+    if (source === 'prev') log('⚠️ [4910-db] 4910.db.gz 없음 — 직전본 4910.db.prev.gz를 받음 (Release 확인 필요)');
     return { ok: true, bytes };
   } catch (err) {
     log(`⚠️ [4910-db] ${sub} failed: ${err.message}`);

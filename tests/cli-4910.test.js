@@ -231,6 +231,17 @@ test('run4910Db passes the DB path through and reports the byte count', () => {
   assert.deepEqual(parseArgs(['4910-db', 'push', '--allow-fresh']), { command: '4910-db', flags: { 'allow-fresh': true }, positional: ['push'] });
 });
 
+test('run4910Db warns when the pull fell back to the prev asset', () => {
+  const log = logSpy();
+  const res = run4910Db({ sub: 'pull', dbPath: '/x/4910.db', pullFn: () => ({ bytes: 10, source: 'prev' }), log });
+  assert.equal(res.ok, true);
+  assert.match(log.lines[1], /^⚠️ \[4910-db\] .*4910\.db\.prev\.gz/);
+
+  const latest = logSpy();
+  run4910Db({ sub: 'pull', dbPath: '/x/4910.db', pullFn: () => ({ bytes: 10, source: 'latest' }), log: latest });
+  assert.equal(latest.lines.length, 1);
+});
+
 test('run4910Db turns a failure into a warning, not a throw', () => {
   const log = logSpy();
   const res = run4910Db({ sub: 'push', dbPath: '/x/4910.db', pushFn: () => { throw new Error('gh release upload failed (exit 1): HTTP 502'); }, log });
