@@ -68,6 +68,12 @@ function couponSetOf(snos, rows, date, listedGoods) {
   return (goodsSno) => [...always, ...listed.filter((l) => l.goods.has(goodsSno)).map((l) => l.coupon)];
 }
 
+// Why couponSetOf hid a seller: a category-scoped, unclassified or unseen seller-only coupon reads as 'scope' before 'naver'.
+function hiddenReason(snos, rows, date, walletSnos) {
+  const scopes = snos.filter((sno) => !walletSnos.has(sno)).map((sno) => sellerCouponSeen(rows, sno, date)[0]?.scope ?? null);
+  return scopes.some((s) => s === 'category' || s == null) || !scopes.includes('naver') ? 'scope' : 'naver';
+}
+
 // Each listed coupon's goods are read from the store once per run.
 function listedGoodsOf(store, date) {
   const cache = new Map();
@@ -139,7 +145,7 @@ function samplesOf(store, marketSno) {
  * is sampled: the sellers not reached get no market_coupons row today, so their listings' coupon price is NULL.
  */
 export async function learnMarketCoupons({ client, store, date, marketSnos, memberToken, deadline = Infinity, log = console.log }) {
-  const result = { memberStatus: 'none', wallet: 0, walletChanges: { added: [], removed: [] }, emoney: null, eligible: 0, mismatched: 0 };
+  const result = { memberStatus: 'none', wallet: 0, walletChanges: { added: [], removed: [] }, emoney: null, eligible: 0, mismatched: 0, hidden: { scope: 0, naver: 0, mismatch: 0 } };
   if (!memberToken) return result;
   const expired = () => {
     log('⚠️ [4910] 회원 토큰 만료 — 쿠폰 학습 중단');
@@ -212,7 +218,8 @@ export async function learnMarketCoupons({ client, store, date, marketSnos, memb
     if (!answers.length) continue;
 
     const snos = [...new Set(answers.map((a) => a.best?.couponSno).filter((sno) => sno != null))];
-    const setFor = couponSetOf(snos, store.getWallet(), date, listedGoods);
+    const rows = store.getWallet();
+    const setFor = couponSetOf(snos, rows, date, listedGoods);
     let mismatch = setFor == null;
     for (const { sno, L, best } of answers) {
       if (setFor && Math.abs(L - (best?.discount ?? 0) - couponPrice(L, setFor(sno))) > 10) mismatch = true;
@@ -233,7 +240,10 @@ export async function learnMarketCoupons({ client, store, date, marketSnos, memb
       mismatch,
     });
     if (first.best) result.eligible++;
-    if (mismatch) result.mismatched++;
+    if (mismatch) {
+      result.mismatched++;
+      result.hidden[setFor ? 'mismatch' : hiddenReason(snos, rows, date, walletSnos)]++;
+    }
   }
   return result;
 }

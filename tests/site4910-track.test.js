@@ -226,7 +226,7 @@ test('with a member token the qualified sellers get coupon prices', async () => 
     makeClient: fakeClients(CATALOG, { member }), store, date: '2026-10-10', brands: BRANDS, memberToken: 'T', log: quiet,
   });
   const { walletChanges, ...coupons } = res.coupons;
-  assert.deepEqual(coupons, { memberStatus: 'ok', wallet: 1, emoney: 1200, eligible: 1, mismatched: 0, priced: 5 });
+  assert.deepEqual(coupons, { memberStatus: 'ok', wallet: 1, emoney: 1200, eligible: 1, mismatched: 0, hidden: { scope: 0, naver: 0, mismatch: 0 }, priced: 5 });
   assert.deepEqual(walletChanges.added, ['10% 쿠폰']);
   assert.equal(store.getGoods(1).coupon_price, 45000);
   assert.equal(store.getGoods(11).coupon_price, 17910);

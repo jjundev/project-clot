@@ -112,7 +112,7 @@ export async function track4910({
   } catch (err) {
     // The client never puts the member token in an error message.
     log(`⚠️ [4910] 쿠폰 학습 실패 (${err.status ?? err.name}: ${err.message})`);
-    learned = { memberStatus: 'error', wallet: 0, walletChanges: { added: [], removed: [] }, emoney: null, eligible: 0, mismatched: 0 };
+    learned = { memberStatus: 'error', wallet: 0, walletChanges: { added: [], removed: [] }, emoney: null, eligible: 0, mismatched: 0, hidden: { scope: 0, naver: 0, mismatch: 0 } };
   }
   // Also without a token: listings with no coupon result today get NULL rather than yesterday's price.
   const { priced } = applyCouponPrices({ store, date });
