@@ -68,13 +68,19 @@ export class Store4910 {
         checked_date TEXT, qualified INTEGER NOT NULL DEFAULT 0
       );
       -- market_sno is set only for a seller's own coupon; a coupon from the member's wallet leaves it NULL.
+      -- scope (seller-only coupons): 'seller' | 'listed' | 'category' | 'naver'; NULL for wallet rows.
       CREATE TABLE IF NOT EXISTS wallet_coupons (
         coupon_sno INTEGER PRIMARY KEY, name TEXT, type TEXT, percent INTEGER, price INTEGER, max INTEGER, min INTEGER,
-        finished_at TEXT, market_sno INTEGER, seen_date TEXT
+        finished_at TEXT, market_sno INTEGER, seen_date TEXT, scope TEXT
       );
+      -- The goods a 'listed' seller-only coupon is limited to, as fetched on date.
+      CREATE TABLE IF NOT EXISTS coupon_goods (
+        coupon_sno INTEGER NOT NULL, goods_sno INTEGER NOT NULL, date TEXT NOT NULL, PRIMARY KEY (coupon_sno, goods_sno)
+      );
+      -- coupon_sno/coupon_name: the first answered sample's best; coupon_snos: JSON array of every sample's best.
       CREATE TABLE IF NOT EXISTS market_coupons (
         market_sno INTEGER, date TEXT, coupon_sno INTEGER, coupon_name TEXT, checked_price INTEGER,
-        coupon_discount INTEGER, mismatch INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (market_sno, date)
+        coupon_discount INTEGER, mismatch INTEGER NOT NULL DEFAULT 0, coupon_snos TEXT, PRIMARY KEY (market_sno, date)
       );
     `);
     // CREATE TABLE IF NOT EXISTS leaves a 4910.db from before these columns as it was, so add them in place.
@@ -82,6 +88,10 @@ export class Store4910 {
     for (const col of ['market_type_sno', 'coupon_price']) {
       if (!goodsCols.has(col)) this.db.exec(`ALTER TABLE goods ADD COLUMN ${col} INTEGER`);
     }
+    const marketCouponCols = new Set(this.db.prepare('PRAGMA table_info(market_coupons)').all().map((c) => c.name));
+    if (!marketCouponCols.has('coupon_snos')) this.db.exec('ALTER TABLE market_coupons ADD COLUMN coupon_snos TEXT');
+    const walletCols = new Set(this.db.prepare('PRAGMA table_info(wallet_coupons)').all().map((c) => c.name));
+    if (!walletCols.has('scope')) this.db.exec('ALTER TABLE wallet_coupons ADD COLUMN scope TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_goods_market ON goods (market_sno)');
   }
 
@@ -314,11 +324,32 @@ export class Store4910 {
   #putCoupon(c, marketSno, date) {
     this.db
       .prepare(`
-        INSERT OR REPLACE INTO wallet_coupons (coupon_sno, name, type, percent, price, max, min, finished_at, market_sno, seen_date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO wallet_coupons (coupon_sno, name, type, percent, price, max, min, finished_at, market_sno, seen_date, scope)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(c.couponSno, c.name ?? null, c.type ?? null, c.percent ?? null, c.price ?? null,
-        Number.isFinite(c.max) ? c.max : null, c.min ?? null, c.finishedAt ?? null, marketSno, date);
+        Number.isFinite(c.max) ? c.max : null, c.min ?? null, c.finishedAt ?? null, marketSno, date, c.scope ?? null);
+  }
+
+  // Replaces a coupon's goods list in one transaction (a list runs to a few thousand rows).
+  setCouponGoods(couponSno, date, snos) {
+    this.db.exec('BEGIN');
+    try {
+      this.db.prepare('DELETE FROM coupon_goods WHERE coupon_sno = ?').run(Number(couponSno));
+      const insert = this.db.prepare('INSERT OR IGNORE INTO coupon_goods (coupon_sno, goods_sno, date) VALUES (?, ?, ?)');
+      for (const sno of snos) insert.run(Number(couponSno), Number(sno), date);
+      this.db.exec('COMMIT');
+    } catch (e) {
+      this.db.exec('ROLLBACK');
+      throw e;
+    }
+  }
+
+  // Empty unless the list was fetched on `date`.
+  getCouponGoods(couponSno, date) {
+    return new Set(
+      this.db.prepare('SELECT goods_sno FROM coupon_goods WHERE coupon_sno = ? AND date = ?').all(Number(couponSno), date).map((r) => r.goods_sno)
+    );
   }
 
   // Rows as stored, except max: null means uncapped.
@@ -326,17 +357,25 @@ export class Store4910 {
     return this.db.prepare('SELECT * FROM wallet_coupons ORDER BY coupon_sno').all();
   }
 
-  recordMarketCoupon({ market_sno, date, coupon_sno, coupon_name, checked_price, coupon_discount, mismatch }) {
+  // coupon_snos is an array of coupon snos; left out, it is stored NULL (a row from before the column existed).
+  recordMarketCoupon({ market_sno, date, coupon_sno, coupon_snos, coupon_name, checked_price, coupon_discount, mismatch }) {
     this.db
       .prepare(`
-        INSERT OR REPLACE INTO market_coupons (market_sno, date, coupon_sno, coupon_name, checked_price, coupon_discount, mismatch)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO market_coupons (market_sno, date, coupon_sno, coupon_snos, coupon_name, checked_price, coupon_discount, mismatch)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `)
-      .run(market_sno, date, coupon_sno ?? null, coupon_name ?? null, checked_price ?? null, coupon_discount ?? null, mismatch ? 1 : 0);
+      .run(market_sno, date, coupon_sno ?? null, coupon_snos == null ? null : JSON.stringify(coupon_snos), coupon_name ?? null,
+        checked_price ?? null, coupon_discount ?? null, mismatch ? 1 : 0);
   }
 
+  // Rows as stored, except coupon_snos: parsed back into an array (null stays null).
   getMarketCoupons(date) {
-    return new Map(this.db.prepare('SELECT * FROM market_coupons WHERE date = ?').all(date).map((r) => [r.market_sno, r]));
+    return new Map(
+      this.db
+        .prepare('SELECT * FROM market_coupons WHERE date = ?')
+        .all(date)
+        .map((r) => [r.market_sno, { ...r, coupon_snos: r.coupon_snos == null ? null : JSON.parse(r.coupon_snos) }])
+    );
   }
 
   // One transaction: ~16k writes would otherwise each be their own commit.

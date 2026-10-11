@@ -39,8 +39,12 @@ const httpErr = (status) => Object.assign(new Error(`HTTP ${status}`), { status 
 const authErr = () => Object.assign(new Error('member token rejected'), { code: 'MEMBER_AUTH', status: 401 });
 
 // details: goods sno -> { optionSno } | Error; best: optionSno -> best coupon | null | Error.
-function fakeClient({ wallet = W, me = { emoney: 1200 }, details = {}, best = {} } = {}) {
-  const calls = { coupons: 0, me: 0, detail: [], best: [] };
+// couponGoods: coupon sno -> { total, pages: [[goods sno, ...], ...] } | Error; couponCats: coupon sno -> names | Error.
+// A coupon in neither is seller-wide: a large list in many categories.
+const SELLER_WIDE = { total: 100000, pages: [[90001]] };
+const MANY_CATS = ['상의', '신발', '아우터', '가방', '바지', '패션잡화', '스포츠/레저'];
+function fakeClient({ wallet = W, me = { emoney: 1200 }, details = {}, best = {}, couponGoods = {}, couponCats = {} } = {}) {
+  const calls = { coupons: 0, me: 0, detail: [], best: [], goodsPages: [], cats: [] };
   return {
     calls,
     async getMyCoupons({ memberToken }) {
@@ -69,6 +73,22 @@ function fakeClient({ wallet = W, me = { emoney: 1200 }, details = {}, best = {}
       const b = best[optionSno];
       if (b instanceof Error) throw b;
       return b ?? null;
+    },
+    async getCouponGoodsPage(couponSno, { memberToken, lastSno = null, limit = 500 }) {
+      assert.equal(memberToken, SECRET);
+      calls.goodsPages.push({ couponSno, lastSno, limit });
+      const g = couponGoods[couponSno] ?? SELLER_WIDE;
+      if (g instanceof Error) throw g;
+      const i = lastSno ?? 0;
+      const snos = (g.pages[i] ?? []).slice(0, limit);
+      return { totalCount: g.total, snos, lastSno: i + 1 < g.pages.length ? i + 1 : null };
+    },
+    async getCouponCategories(couponSno, { memberToken }) {
+      assert.equal(memberToken, SECRET);
+      calls.cats.push(couponSno);
+      const c = couponCats[couponSno] ?? MANY_CATS;
+      if (c instanceof Error) throw c;
+      return c;
     },
   };
 }
@@ -112,8 +132,8 @@ test('a seller without a coupon keeps the list price; a mismatched seller gets n
 test('applyCouponPrices uses only seller-only coupons seen today', () => {
   store.replaceWallet(DATE, W);
   seed(goods(1, 10, 50150));
-  store.addMarketCoupon('2026-10-10', 10, pct(998, 30, Infinity, { min: 0 }));
-  store.addMarketCoupon(DATE, 10, pct(999, 5, Infinity, { min: 0 }));
+  store.addMarketCoupon('2026-10-10', 10, pct(998, 30, Infinity, { min: 0, scope: 'seller' }));
+  store.addMarketCoupon(DATE, 10, pct(999, 5, Infinity, { min: 0, scope: 'seller' }));
   store.recordMarketCoupon({ market_sno: 10, date: DATE, coupon_sno: 999, coupon_name: 'TNGT', checked_price: 50150, coupon_discount: 2508, mismatch: false });
   applyCouponPrices({ store, date: DATE });
   assert.equal(store.getGoods(1).coupon_price, 47650);
@@ -122,7 +142,7 @@ test('applyCouponPrices uses only seller-only coupons seen today', () => {
 test('a seller-only coupon row that is missing or not seen today prices the seller NULL', () => {
   store.replaceWallet(DATE, W);
   seed(goods(1, 10, 50150), goods(2, 20, 50150));
-  store.addMarketCoupon('2026-10-10', 10, pct(998, 5, Infinity, { min: 0 }));
+  store.addMarketCoupon('2026-10-10', 10, pct(998, 5, Infinity, { min: 0, scope: 'seller' }));
   store.recordMarketCoupon({ market_sno: 10, date: DATE, coupon_sno: 998, coupon_name: 'stale', checked_price: 50150, coupon_discount: 2508, mismatch: false });
   store.recordMarketCoupon({ market_sno: 20, date: DATE, coupon_sno: 997, coupon_name: 'gone', checked_price: 50150, coupon_discount: 2508, mismatch: false });
   assert.deepEqual(applyCouponPrices({ store, date: DATE }), { priced: 0, nulled: 2 });
@@ -133,7 +153,11 @@ test('a seller-only coupon row that is missing or not seen today prices the sell
 test('two sellers whose best is the same seller-only coupon both get the discounted price', async () => {
   seed(goods(1, 10, 50150), goods(2, 20, 50150));
   const shared = { couponSno: 999, name: '[4910] 공동 5% 쿠폰', discount: 2507, percent: 5, price: null, max: Infinity, min: 0 };
-  const res = await learn(fakeClient({ best: { 10: shared, 20: shared } }), [10, 20]);
+  const client = fakeClient({ best: { 10: shared, 20: shared } });
+  const res = await learn(client, [10, 20]);
+  // the coupon's scope is looked up once per run
+  assert.deepEqual(client.calls.goodsPages, [{ couponSno: 999, lastSno: null, limit: 1 }]);
+  assert.deepEqual(client.calls.cats, [999]);
   assert.equal(res.eligible, 2);
   assert.equal(res.mismatched, 0);
   assert.deepEqual(applyCouponPrices({ store, date: DATE }), { priced: 2, nulled: 0 });
@@ -338,4 +362,227 @@ test('past the deadline the wallet is still read but no seller is sampled', asyn
   assert.doesNotMatch(logs.join('\n'), new RegExp(SECRET));
   applyCouponPrices({ store, date: DATE });
   assert.equal(store.getGoods(1).coupon_price, null);
+});
+
+// 4910's "인기 스포츠 20%": seller-only, max 70,000, min 50,000 — it reaches the dear listings of a seller only.
+const sports20 = (discount) => ({ couponSno: 777, name: '[4910] 인기 스포츠 20%', discount, percent: 20, price: null, max: 70000, min: 50000 });
+const wallet18 = (discount) => ({ couponSno: 2, name: '18% 쿠폰', discount, percent: 18, price: null, max: 100000, min: 10000 });
+const W18 = [pct(2, 18, 100000), pct(3, 15, 130000)];
+const range = (from, n) => Array.from({ length: n }, (_, i) => from + i);
+
+test('a seller with a seller-only coupon above its min and wallet coupons below gets the union', async () => {
+  seed(goods(1, 10, 199000), goods(2, 10, 30000), goods(3, 10, 120000));
+  // high 199,000 → the seller-only 20% (39,800); low 30,000 is under its min → the wallet 18% (5,400)
+  const res = await learn(fakeClient({ wallet: W18, best: { 10: sports20(39800), 20: wallet18(5400) } }), [10]);
+  assert.equal(res.eligible, 1);
+  assert.equal(res.mismatched, 0);
+  const mc = store.getMarketCoupons(DATE).get(10);
+  assert.equal(mc.mismatch, 0);
+  assert.equal(mc.coupon_sno, 777);
+  assert.deepEqual(mc.coupon_snos, [777, 2]);
+  assert.deepEqual(applyCouponPrices({ store, date: DATE }), { priced: 3, nulled: 0 });
+  assert.equal(store.getGoods(1).coupon_price, 159200);
+  assert.equal(store.getGoods(2).coupon_price, 24600); // wallet 18%
+  assert.equal(store.getGoods(3).coupon_price, 96000); // max(20% = 24,000, wallet 18% = 21,600)
+});
+
+test('TNGT-style seller-only coupon alone still prices 50150 → 47650', async () => {
+  seed(goods(1, 10, 50150), goods(2, 10, 12000));
+  const tngt = (discount) => ({ couponSno: 999, name: '[4910] TNGT 5% 쿠폰', discount, percent: 5, price: null, max: Infinity, min: 0 });
+  const res = await learn(fakeClient({ best: { 10: tngt(2507), 20: tngt(600) } }), [10]);
+  assert.equal(res.mismatched, 0);
+  assert.deepEqual(store.getMarketCoupons(DATE).get(10).coupon_snos, [999]);
+  applyCouponPrices({ store, date: DATE });
+  assert.equal(store.getGoods(1).coupon_price, 47650);
+  assert.equal(store.getGoods(2).coupon_price, 11400); // the wallet's 20% (9,600) does not reach this seller
+});
+
+test('self-check uses the detail price, not the listing sale_price', async () => {
+  seed(goods(1, 10, 81200));
+  // YOSEMITE: listed 81,200, but best-coupon's 14,640 is 20% of the detail price 73,200
+  const client = fakeClient({ details: { 1: { optionSno: 10, listPrice: 73200 } }, best: { 10: wallet20(14640) } });
+  const res = await learn(client, [10]);
+  assert.equal(res.mismatched, 0);
+  const mc = store.getMarketCoupons(DATE).get(10);
+  assert.equal(mc.mismatch, 0);
+  assert.equal(mc.checked_price, 73200);
+  applyCouponPrices({ store, date: DATE });
+  assert.equal(store.getGoods(1).coupon_price, 64960);
+});
+
+test('a sample whose discount disagrees with the union set still flags mismatch', async () => {
+  seed(goods(1, 10, 199000), goods(2, 10, 30000), goods(3, 20, 199000), goods(4, 20, 30000));
+  // seller 10: the low sample's seller-only 20% (no min) would beat the high sample's reported wallet 18% (35,820 < 39,800)
+  const open20 = (discount) => ({ ...sports20(discount), min: 0 });
+  // seller 20: the union fits the high sample, but the low one's wallet discount is 80 won off
+  const client = fakeClient({ wallet: W18, best: { 10: wallet18(35820), 20: open20(6000), 30: sports20(39800), 40: wallet18(5320) } });
+  const res = await learn(client, [10, 20]);
+  assert.equal(res.mismatched, 2);
+  const mc = store.getMarketCoupons(DATE);
+  assert.equal(mc.get(10).mismatch, 1);
+  assert.equal(mc.get(20).mismatch, 1);
+  assert.deepEqual(applyCouponPrices({ store, date: DATE }), { priced: 0, nulled: 4 });
+});
+
+test('coupon_snos is stored and an old row without it falls back to coupon_sno', () => {
+  store.replaceWallet(DATE, W);
+  seed(goods(1, 10, 120000), goods(2, 20, 85400), goods(3, 30, 85400), goods(4, 40, 85400));
+  store.addMarketCoupon(DATE, 10, { ...sports20(0), type: 'PERCENT', scope: 'seller' });
+  store.recordMarketCoupon({ market_sno: 10, date: DATE, coupon_sno: 777, coupon_snos: [777, 1], coupon_name: 'S', checked_price: 120000, coupon_discount: 24000, mismatch: false });
+  store.recordMarketCoupon({ market_sno: 20, date: DATE, coupon_sno: 1, coupon_name: 'A', checked_price: 85400, coupon_discount: 17080, mismatch: false });
+  store.recordMarketCoupon({ market_sno: 30, date: DATE, coupon_sno: null, coupon_name: null, checked_price: 85400, coupon_discount: null, mismatch: false });
+  store.recordMarketCoupon({ market_sno: 40, date: DATE, coupon_sno: null, coupon_snos: [], coupon_name: null, checked_price: 85400, coupon_discount: null, mismatch: false });
+  const mc = store.getMarketCoupons(DATE);
+  assert.deepEqual(mc.get(10).coupon_snos, [777, 1]);
+  assert.equal(mc.get(20).coupon_snos, null);
+  assert.equal(mc.get(30).coupon_snos, null);
+  assert.deepEqual(mc.get(40).coupon_snos, []);
+  assert.deepEqual(applyCouponPrices({ store, date: DATE }), { priced: 4, nulled: 0 });
+  assert.equal(store.getGoods(1).coupon_price, 96000); // seller-only 20% (24,000) beats the wallet's best (21,600)
+  assert.equal(store.getGoods(2).coupon_price, 68320); // [coupon_sno] → the whole wallet
+  assert.equal(store.getGoods(3).coupon_price, 85400); // coupon_sno NULL → []
+  assert.equal(store.getGoods(4).coupon_price, 85400);
+});
+
+test('a seller-wide coupon (≥4 categories, large) keeps the union behavior', async () => {
+  seed(goods(1, 10, 199000), goods(2, 10, 30000), goods(3, 10, 120000));
+  const client = fakeClient({
+    wallet: W18, best: { 10: sports20(39800), 20: wallet18(5400) },
+    couponGoods: { 777: { total: 121000, pages: [[90001]] } }, couponCats: { 777: MANY_CATS },
+  });
+  const logs = [];
+  const res = await learn(client, [10], logs);
+  assert.equal(res.mismatched, 0);
+  assert.equal(store.getWallet().find((c) => c.coupon_sno === 777).scope, 'seller');
+  assert.deepEqual(client.calls.goodsPages, [{ couponSno: 777, lastSno: null, limit: 1 }]); // large: no list fetched
+  assert.equal(logs.filter((l) => l.includes('쿠폰 범위')).length, 0);
+  applyCouponPrices({ store, date: DATE });
+  assert.equal(store.getGoods(2).coupon_price, 24600);
+  assert.equal(store.getGoods(3).coupon_price, 96000);
+});
+
+// 4910's "[아우터페스타] 해외 브랜드 20%": seller-only, but only for outerwear and sports.
+const outer20 = (discount) => ({ couponSno: 51345873, name: '[아우터페스타] 해외 브랜드 20%', discount, percent: 20, price: null, max: 100000, min: 10000 });
+
+test('a category-scoped seller-only coupon hides that seller', async () => {
+  seed(goods(1, 10, 199000), goods(2, 10, 85400), goods(3, 20, 85400));
+  const client = fakeClient({
+    best: { 10: outer20(39800), 20: wallet20(17080), 30: wallet20(17080) },
+    couponGoods: { 51345873: { total: 121000, pages: [[1]] } }, couponCats: { 51345873: ['아우터', '스포츠/레저'] },
+  });
+  const logs = [];
+  const res = await learn(client, [10, 20], logs);
+  assert.equal(res.eligible, 2);
+  assert.equal(res.mismatched, 1);
+  assert.equal(store.getMarketCoupons(DATE).get(10).mismatch, 1);
+  assert.equal(store.getMarketCoupons(DATE).get(20).mismatch, 0);
+  assert.equal(store.getWallet().find((c) => c.coupon_sno === 51345873).scope, 'category');
+  assert.ok(logs.includes('[4910] 쿠폰 범위: [아우터페스타] 해외 브랜드 20% → category'));
+  assert.deepEqual(applyCouponPrices({ store, date: DATE }), { priced: 1, nulled: 2 });
+  assert.equal(store.getGoods(1).coupon_price, null);
+  assert.equal(store.getGoods(2).coupon_price, null);
+  assert.equal(store.getGoods(3).coupon_price, 68320);
+});
+
+test('a naver-only best coupon hides that seller', async () => {
+  seed(goods(1, 10, 85400));
+  const naver = { couponSno: 555, name: '[4910][네이버 전용]10% 쿠폰', discount: 8540, percent: 10, price: null, max: Infinity, min: 0 };
+  const client = fakeClient({ best: { 10: naver } });
+  const logs = [];
+  const res = await learn(client, [10], logs);
+  assert.equal(res.mismatched, 1);
+  assert.deepEqual(client.calls.goodsPages, []); // decided by the name alone
+  assert.deepEqual(client.calls.cats, []);
+  assert.equal(store.getWallet().find((c) => c.coupon_sno === 555).scope, 'naver');
+  assert.ok(logs.includes('[4910] 쿠폰 범위: [4910][네이버 전용]10% 쿠폰 → naver'));
+  applyCouponPrices({ store, date: DATE });
+  assert.equal(store.getGoods(1).coupon_price, null);
+});
+
+test('a listed coupon applies only to listings in its goods list', async () => {
+  // 1 and 3 are in the event list; 2 (the low sample) and 4 are not
+  seed(goods(1, 10, 199000), goods(2, 10, 60000), goods(3, 10, 120000), goods(4, 10, 120000));
+  const client = fakeClient({
+    wallet: W18,
+    // the low sample is above the 20%'s minimum, so 20% (12,000) would beat the wallet's 18% (10,800) if it reached it
+    best: { 10: sports20(39800), 20: wallet18(10800) },
+    // 924 goods over two pages: 1 and 500 others, then 3 and 423 others
+    couponGoods: { 777: { total: 924, pages: [[1, ...range(101, 499)], [3, ...range(600, 423)]] } },
+  });
+  const logs = [];
+  const res = await learn(client, [10], logs);
+  assert.equal(res.mismatched, 0);
+  assert.deepEqual(client.calls.goodsPages, [
+    { couponSno: 777, lastSno: null, limit: 1 },
+    { couponSno: 777, lastSno: null, limit: 500 },
+    { couponSno: 777, lastSno: 1, limit: 500 },
+  ]);
+  assert.deepEqual(client.calls.cats, []);
+  const listed = store.getCouponGoods(777, DATE);
+  assert.equal(listed.size, 924);
+  assert.deepEqual([1, 2, 3, 4].map((sno) => listed.has(sno)), [true, false, true, false]);
+  assert.equal(store.getWallet().find((c) => c.coupon_sno === 777).scope, 'listed');
+  assert.ok(logs.includes('[4910] 쿠폰 범위: [4910] 인기 스포츠 20% → listed(924)'));
+  assert.deepEqual(applyCouponPrices({ store, date: DATE }), { priced: 4, nulled: 0 });
+  assert.equal(store.getGoods(1).coupon_price, 159200); // listed: 20%
+  assert.equal(store.getGoods(2).coupon_price, 49200); // not listed: wallet 18%
+  assert.equal(store.getGoods(3).coupon_price, 96000); // listed: 20%
+  assert.equal(store.getGoods(4).coupon_price, 98400); // not listed: wallet 18%
+});
+
+test('scope lookup failure hides the seller', async () => {
+  seed(goods(1, 10, 85400), goods(2, 20, 85400), goods(3, 30, 85400));
+  const own = (couponSno) => ({ couponSno, name: `seller ${couponSno} 5%`, discount: 4270, percent: 5, price: null, max: Infinity, min: 0 });
+  const logs = [];
+  const client = fakeClient({
+    best: { 10: own(601), 20: own(602) },
+    couponGoods: { 601: httpErr(500), 602: { total: 121000, pages: [[1]] } },
+    couponCats: { 602: httpErr(503) },
+  });
+  const res = await learn(client, [10, 20], logs);
+  assert.equal(res.memberStatus, 'ok');
+  assert.equal(res.mismatched, 2);
+  assert.equal(store.getWallet().find((c) => c.coupon_sno === 601).scope, 'category');
+  assert.equal(store.getWallet().find((c) => c.coupon_sno === 602).scope, 'category');
+  assert.ok(logs.some((l) => l.includes('쿠폰 범위') && l.includes('500')));
+  assert.ok(logs.some((l) => l.includes('쿠폰 범위') && l.includes('503')));
+  assert.deepEqual(applyCouponPrices({ store, date: DATE }), { priced: 0, nulled: 3 });
+
+  // a rejected member token while looking up the scope stops learning as expired
+  const authed = await learn(fakeClient({ best: { 30: own(603) }, couponGoods: { 603: authErr() } }), [30], logs);
+  assert.equal(authed.memberStatus, 'expired');
+  assert.equal(store.getMarketCoupons(DATE).has(30), false);
+  assert.ok(logs.every((l) => !String(l).includes(SECRET)));
+});
+
+test('a seller-only row seen today without a scope hides that seller', () => {
+  // e.g. written today by a run before scopes existed, and this rerun did not re-record the seller
+  store.replaceWallet(DATE, W);
+  seed(goods(1, 10, 85400), goods(2, 20, 85400));
+  store.addMarketCoupon(DATE, 10, pct(51345873, 20, 100000, { min: 0 }));
+  store.recordMarketCoupon({ market_sno: 10, date: DATE, coupon_sno: 51345873, coupon_snos: [51345873, 1], coupon_name: '[아우터페스타]', checked_price: 85400, coupon_discount: 17080, mismatch: false });
+  store.recordMarketCoupon({ market_sno: 20, date: DATE, coupon_sno: 1, coupon_snos: [1], coupon_name: 'A', checked_price: 85400, coupon_discount: 17080, mismatch: false });
+  assert.equal(store.getWallet().find((c) => c.coupon_sno === 51345873).scope, null);
+  assert.deepEqual(applyCouponPrices({ store, date: DATE }), { priced: 1, nulled: 1 });
+  assert.equal(store.getGoods(1).coupon_price, null);
+  assert.equal(store.getGoods(2).coupon_price, 68320);
+});
+
+test('a listed coupon whose list is cut short hides the seller', async () => {
+  seed(goods(1, 10, 199000), goods(2, 10, 60000));
+  // the cursor never advances (always 7), so the same 3 of 924 goods come back twice
+  const stuck = { total: 924, pages: [[1, 101, 102]] };
+  const client = fakeClient({ wallet: W18, best: { 10: sports20(39800), 20: wallet18(10800) }, couponGoods: { 777: stuck } });
+  client.getCouponGoodsPage = async (couponSno, { lastSno = null, limit = 500 }) => {
+    client.calls.goodsPages.push({ couponSno, lastSno, limit });
+    return { totalCount: 924, snos: stuck.pages[0].slice(0, limit), lastSno: 7 };
+  };
+  const logs = [];
+  const res = await learn(client, [10], logs);
+  assert.deepEqual(client.calls.goodsPages.map((c) => c.lastSno), [null, null, 7]); // stops when the cursor repeats
+  assert.equal(res.mismatched, 1);
+  assert.equal(store.getWallet().find((c) => c.coupon_sno === 777).scope, 'category');
+  assert.ok(logs.includes('[4910] 쿠폰 범위: [4910] 인기 스포츠 20% → category (list cut at 3/924)'));
+  assert.equal(store.getCouponGoods(777, DATE).size, 0);
+  assert.deepEqual(applyCouponPrices({ store, date: DATE }), { priced: 0, nulled: 2 });
 });
