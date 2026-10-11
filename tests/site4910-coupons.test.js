@@ -339,3 +339,82 @@ test('past the deadline the wallet is still read but no seller is sampled', asyn
   applyCouponPrices({ store, date: DATE });
   assert.equal(store.getGoods(1).coupon_price, null);
 });
+
+// 4910's "인기 스포츠 20%": seller-only, max 70,000, min 50,000 — it reaches the dear listings of a seller only.
+const sports20 = (discount) => ({ couponSno: 777, name: '[4910] 인기 스포츠 20%', discount, percent: 20, price: null, max: 70000, min: 50000 });
+const wallet18 = (discount) => ({ couponSno: 2, name: '18% 쿠폰', discount, percent: 18, price: null, max: 100000, min: 10000 });
+const W18 = [pct(2, 18, 100000), pct(3, 15, 130000)];
+
+test('a seller with a seller-only coupon above its min and wallet coupons below gets the union', async () => {
+  seed(goods(1, 10, 199000), goods(2, 10, 30000), goods(3, 10, 120000));
+  // high 199,000 → the seller-only 20% (39,800); low 30,000 is under its min → the wallet 18% (5,400)
+  const res = await learn(fakeClient({ wallet: W18, best: { 10: sports20(39800), 20: wallet18(5400) } }), [10]);
+  assert.equal(res.eligible, 1);
+  assert.equal(res.mismatched, 0);
+  const mc = store.getMarketCoupons(DATE).get(10);
+  assert.equal(mc.mismatch, 0);
+  assert.equal(mc.coupon_sno, 777);
+  assert.deepEqual(mc.coupon_snos, [777, 2]);
+  assert.deepEqual(applyCouponPrices({ store, date: DATE }), { priced: 3, nulled: 0 });
+  assert.equal(store.getGoods(1).coupon_price, 159200);
+  assert.equal(store.getGoods(2).coupon_price, 24600); // wallet 18%
+  assert.equal(store.getGoods(3).coupon_price, 96000); // max(20% = 24,000, wallet 18% = 21,600)
+});
+
+test('TNGT-style seller-only coupon alone still prices 50150 → 47650', async () => {
+  seed(goods(1, 10, 50150), goods(2, 10, 12000));
+  const tngt = (discount) => ({ couponSno: 999, name: '[4910] TNGT 5% 쿠폰', discount, percent: 5, price: null, max: Infinity, min: 0 });
+  const res = await learn(fakeClient({ best: { 10: tngt(2507), 20: tngt(600) } }), [10]);
+  assert.equal(res.mismatched, 0);
+  assert.deepEqual(store.getMarketCoupons(DATE).get(10).coupon_snos, [999]);
+  applyCouponPrices({ store, date: DATE });
+  assert.equal(store.getGoods(1).coupon_price, 47650);
+  assert.equal(store.getGoods(2).coupon_price, 11400); // the wallet's 20% (9,600) does not reach this seller
+});
+
+test('self-check uses the detail price, not the listing sale_price', async () => {
+  seed(goods(1, 10, 81200));
+  // YOSEMITE: listed 81,200, but best-coupon's 14,640 is 20% of the detail price 73,200
+  const client = fakeClient({ details: { 1: { optionSno: 10, listPrice: 73200 } }, best: { 10: wallet20(14640) } });
+  const res = await learn(client, [10]);
+  assert.equal(res.mismatched, 0);
+  const mc = store.getMarketCoupons(DATE).get(10);
+  assert.equal(mc.mismatch, 0);
+  assert.equal(mc.checked_price, 73200);
+  applyCouponPrices({ store, date: DATE });
+  assert.equal(store.getGoods(1).coupon_price, 64960);
+});
+
+test('a sample whose discount disagrees with the union set still flags mismatch', async () => {
+  seed(goods(1, 10, 199000), goods(2, 10, 30000), goods(3, 20, 199000), goods(4, 20, 30000));
+  // seller 10: the low sample's seller-only 20% (no min) would beat the high sample's reported wallet 18% (35,820 < 39,800)
+  const open20 = (discount) => ({ ...sports20(discount), min: 0 });
+  // seller 20: the union fits the high sample, but the low one's wallet discount is 80 won off
+  const client = fakeClient({ wallet: W18, best: { 10: wallet18(35820), 20: open20(6000), 30: sports20(39800), 40: wallet18(5320) } });
+  const res = await learn(client, [10, 20]);
+  assert.equal(res.mismatched, 2);
+  const mc = store.getMarketCoupons(DATE);
+  assert.equal(mc.get(10).mismatch, 1);
+  assert.equal(mc.get(20).mismatch, 1);
+  assert.deepEqual(applyCouponPrices({ store, date: DATE }), { priced: 0, nulled: 4 });
+});
+
+test('coupon_snos is stored and an old row without it falls back to coupon_sno', () => {
+  store.replaceWallet(DATE, W);
+  seed(goods(1, 10, 120000), goods(2, 20, 85400), goods(3, 30, 85400), goods(4, 40, 85400));
+  store.addMarketCoupon(DATE, 10, { ...sports20(0), type: 'PERCENT' });
+  store.recordMarketCoupon({ market_sno: 10, date: DATE, coupon_sno: 777, coupon_snos: [777, 1], coupon_name: 'S', checked_price: 120000, coupon_discount: 24000, mismatch: false });
+  store.recordMarketCoupon({ market_sno: 20, date: DATE, coupon_sno: 1, coupon_name: 'A', checked_price: 85400, coupon_discount: 17080, mismatch: false });
+  store.recordMarketCoupon({ market_sno: 30, date: DATE, coupon_sno: null, coupon_name: null, checked_price: 85400, coupon_discount: null, mismatch: false });
+  store.recordMarketCoupon({ market_sno: 40, date: DATE, coupon_sno: null, coupon_snos: [], coupon_name: null, checked_price: 85400, coupon_discount: null, mismatch: false });
+  const mc = store.getMarketCoupons(DATE);
+  assert.deepEqual(mc.get(10).coupon_snos, [777, 1]);
+  assert.equal(mc.get(20).coupon_snos, null);
+  assert.equal(mc.get(30).coupon_snos, null);
+  assert.deepEqual(mc.get(40).coupon_snos, []);
+  assert.deepEqual(applyCouponPrices({ store, date: DATE }), { priced: 4, nulled: 0 });
+  assert.equal(store.getGoods(1).coupon_price, 96000); // seller-only 20% (24,000) beats the wallet's best (21,600)
+  assert.equal(store.getGoods(2).coupon_price, 68320); // [coupon_sno] → the whole wallet
+  assert.equal(store.getGoods(3).coupon_price, 85400); // coupon_sno NULL → []
+  assert.equal(store.getGoods(4).coupon_price, 85400);
+});

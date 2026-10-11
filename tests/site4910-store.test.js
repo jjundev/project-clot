@@ -317,6 +317,30 @@ test('opening an old 4910.db adds market_type_sno and coupon_price', () => {
   new Store4910(file).close();
 });
 
+test('opening an old 4910.db adds market_coupons.coupon_snos', () => {
+  const file = path.join(dir, 'old-coupons.db');
+  const old = new DatabaseSync(file);
+  old.exec(`
+    CREATE TABLE market_coupons (
+      market_sno INTEGER, date TEXT, coupon_sno INTEGER, coupon_name TEXT, checked_price INTEGER,
+      coupon_discount INTEGER, mismatch INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (market_sno, date)
+    );
+    INSERT INTO market_coupons (market_sno, date, coupon_sno, coupon_name) VALUES (10, '2026-10-11', 7, 'A');
+  `);
+  old.close();
+  const reopened = new Store4910(file);
+  try {
+    const cols = reopened.db.prepare('PRAGMA table_info(market_coupons)').all().map((c) => c.name);
+    assert.ok(cols.includes('coupon_snos'));
+    const row = reopened.getMarketCoupons('2026-10-11').get(10);
+    assert.equal(row.coupon_sno, 7);
+    assert.equal(row.coupon_snos, null);
+  } finally {
+    reopened.close();
+  }
+  new Store4910(file).close();
+});
+
 test('upsertBrands deactivates brands that left the ranking but keeps pinned ones', () => {
   s.upsertBrands('2026-10-10', [{ sno: 1, name: 'A' }, { sno: 2, name: 'B' }], [{ sno: 9, name: 'P' }]);
   assert.deepEqual(s.getActiveBrands().map((b) => [b.sno, b.rank, Boolean(b.pinned)]), [[1, 1, false], [2, 2, false], [9, null, true]]);

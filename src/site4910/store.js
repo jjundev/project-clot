@@ -72,9 +72,10 @@ export class Store4910 {
         coupon_sno INTEGER PRIMARY KEY, name TEXT, type TEXT, percent INTEGER, price INTEGER, max INTEGER, min INTEGER,
         finished_at TEXT, market_sno INTEGER, seen_date TEXT
       );
+      -- coupon_sno/coupon_name: the first answered sample's best; coupon_snos: JSON array of every sample's best.
       CREATE TABLE IF NOT EXISTS market_coupons (
         market_sno INTEGER, date TEXT, coupon_sno INTEGER, coupon_name TEXT, checked_price INTEGER,
-        coupon_discount INTEGER, mismatch INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (market_sno, date)
+        coupon_discount INTEGER, mismatch INTEGER NOT NULL DEFAULT 0, coupon_snos TEXT, PRIMARY KEY (market_sno, date)
       );
     `);
     // CREATE TABLE IF NOT EXISTS leaves a 4910.db from before these columns as it was, so add them in place.
@@ -82,6 +83,8 @@ export class Store4910 {
     for (const col of ['market_type_sno', 'coupon_price']) {
       if (!goodsCols.has(col)) this.db.exec(`ALTER TABLE goods ADD COLUMN ${col} INTEGER`);
     }
+    const marketCouponCols = new Set(this.db.prepare('PRAGMA table_info(market_coupons)').all().map((c) => c.name));
+    if (!marketCouponCols.has('coupon_snos')) this.db.exec('ALTER TABLE market_coupons ADD COLUMN coupon_snos TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_goods_market ON goods (market_sno)');
   }
 
@@ -326,17 +329,25 @@ export class Store4910 {
     return this.db.prepare('SELECT * FROM wallet_coupons ORDER BY coupon_sno').all();
   }
 
-  recordMarketCoupon({ market_sno, date, coupon_sno, coupon_name, checked_price, coupon_discount, mismatch }) {
+  // coupon_snos is an array of coupon snos; left out, it is stored NULL (a row from before the column existed).
+  recordMarketCoupon({ market_sno, date, coupon_sno, coupon_snos, coupon_name, checked_price, coupon_discount, mismatch }) {
     this.db
       .prepare(`
-        INSERT OR REPLACE INTO market_coupons (market_sno, date, coupon_sno, coupon_name, checked_price, coupon_discount, mismatch)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO market_coupons (market_sno, date, coupon_sno, coupon_snos, coupon_name, checked_price, coupon_discount, mismatch)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `)
-      .run(market_sno, date, coupon_sno ?? null, coupon_name ?? null, checked_price ?? null, coupon_discount ?? null, mismatch ? 1 : 0);
+      .run(market_sno, date, coupon_sno ?? null, coupon_snos == null ? null : JSON.stringify(coupon_snos), coupon_name ?? null,
+        checked_price ?? null, coupon_discount ?? null, mismatch ? 1 : 0);
   }
 
+  // Rows as stored, except coupon_snos: parsed back into an array (null stays null).
   getMarketCoupons(date) {
-    return new Map(this.db.prepare('SELECT * FROM market_coupons WHERE date = ?').all(date).map((r) => [r.market_sno, r]));
+    return new Map(
+      this.db
+        .prepare('SELECT * FROM market_coupons WHERE date = ?')
+        .all(date)
+        .map((r) => [r.market_sno, { ...r, coupon_snos: r.coupon_snos == null ? null : JSON.parse(r.coupon_snos) }])
+    );
   }
 
   // One transaction: ~16k writes would otherwise each be their own commit.
