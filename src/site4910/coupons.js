@@ -46,7 +46,8 @@ const sellerCouponSeen = (rows, couponSno, date) =>
  * every listing, 'listed' ones only for the goods in their list (`listedGoods(couponSno)` → Set). A seller can get
  * both — a seller-only coupon whose minimum only its dearer listings meet, the wallet below that.
  * Returns a function from a listing sno to its coupons, or null when the seller is hidden: a seller-only coupon not
- * seen on `date` (the seller does have it, we just cannot price it), or one scoped to categories or to Naver.
+ * seen on `date` (the seller does have it, we just cannot price it), or one scoped to categories, to Naver, or of
+ * unknown scope.
  * Learning and pricing both use this, so the self-check validates exactly what is published.
  */
 function couponSetOf(snos, rows, date, listedGoods) {
@@ -59,8 +60,8 @@ function couponSetOf(snos, rows, date, listedGoods) {
     const [own] = sellerCouponSeen(rows, sno, date);
     if (!own) return null;
     if (own.scope === 'listed') listed.push({ coupon: own, goods: listedGoods(sno) });
-    // NULL: a row stored before scopes were classified, priced seller-wide as it was then.
-    else if (own.scope === 'seller' || own.scope == null) always.push(own);
+    else if (own.scope === 'seller') always.push(own);
+    // 'category', 'naver', or NULL (a row from before scopes were classified, e.g. an earlier run the same day).
     else return null;
   }
   if (!listed.length) return () => always;
@@ -77,12 +78,13 @@ function listedGoodsOf(store, date) {
 }
 
 // Every page of a coupon's goods list, up to LISTED_MAX_PAGES; stops on an empty page or a missing or stuck cursor.
+// Distinct snos, so a repeated page cannot make a cut list look complete.
 async function fetchCouponGoods(client, couponSno, memberToken) {
-  const snos = [];
+  const snos = new Set();
   let lastSno = null;
   for (let page = 0; page < LISTED_MAX_PAGES; page++) {
     const res = await client.getCouponGoodsPage(couponSno, { memberToken, lastSno });
-    snos.push(...res.snos);
+    for (const sno of res.snos) snos.add(sno);
     if (!res.snos.length || res.lastSno == null || res.lastSno === lastSno) break;
     lastSno = res.lastSno;
   }
@@ -91,7 +93,7 @@ async function fetchCouponGoods(client, couponSno, memberToken) {
 
 /**
  * Classifies a seller-only coupon as 'naver' (by name), 'listed' (storing its goods list for `date`), 'category' or
- * 'seller'. A failed lookup counts as 'category' (hide); only MEMBER_AUTH is thrown.
+ * 'seller'. A failed lookup or a list cut short counts as 'category' (hide); only MEMBER_AUTH is thrown.
  */
 async function classifyCoupon({ client, store, date, memberToken, best, log }) {
   const name = best.name ?? String(best.couponSno);
@@ -106,6 +108,11 @@ async function classifyCoupon({ client, store, date, memberToken, best, log }) {
     total = (await client.getCouponGoodsPage(best.couponSno, { memberToken, limit: 1 })).totalCount;
     if (total <= LISTED_COUPON_MAX) {
       goods = await fetchCouponGoods(client, best.couponSno, memberToken);
+      // A cut list would leave listed goods priced without the coupon; hide the seller instead.
+      if (goods.size < total) {
+        log(`[4910] 쿠폰 범위: ${name} → category (list cut at ${goods.size}/${total})`);
+        return 'category';
+      }
       scope = 'listed';
     } else {
       const categories = await client.getCouponCategories(best.couponSno, { memberToken });
