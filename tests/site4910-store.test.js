@@ -341,6 +341,30 @@ test('opening an old 4910.db adds market_coupons.coupon_snos', () => {
   new Store4910(file).close();
 });
 
+test('opening an old 4910.db adds wallet_coupons.scope', () => {
+  const file = path.join(dir, 'old-wallet.db');
+  const old = new DatabaseSync(file);
+  old.exec(`
+    CREATE TABLE wallet_coupons (
+      coupon_sno INTEGER PRIMARY KEY, name TEXT, type TEXT, percent INTEGER, price INTEGER, max INTEGER, min INTEGER,
+      finished_at TEXT, market_sno INTEGER, seen_date TEXT
+    );
+    INSERT INTO wallet_coupons (coupon_sno, name, market_sno, seen_date) VALUES (50, 'old seller coupon', 10, '2026-10-10');
+  `);
+  old.close();
+  const reopened = new Store4910(file);
+  try {
+    const cols = reopened.db.prepare('PRAGMA table_info(wallet_coupons)').all().map((c) => c.name);
+    assert.ok(cols.includes('scope'));
+    assert.equal(reopened.getWallet()[0].scope, null);
+    reopened.addMarketCoupon('2026-10-11', 10, { couponSno: 51, name: 'listed', scope: 'listed' });
+    assert.equal(reopened.getWallet().find((c) => c.coupon_sno === 51).scope, 'listed');
+  } finally {
+    reopened.close();
+  }
+  new Store4910(file).close();
+});
+
 test('upsertBrands deactivates brands that left the ranking but keeps pinned ones', () => {
   s.upsertBrands('2026-10-10', [{ sno: 1, name: 'A' }, { sno: 2, name: 'B' }], [{ sno: 9, name: 'P' }]);
   assert.deepEqual(s.getActiveBrands().map((b) => [b.sno, b.rank, Boolean(b.pinned)]), [[1, 1, false], [2, 2, false], [9, null, true]]);
@@ -469,4 +493,15 @@ test('getActivePriceRows returns only sno, market_sno and sale_price of ACTIVE l
     { sno: 1, market_sno: 10, sale_price: 50000 },
     { sno: 3, market_sno: 11, sale_price: 20000 },
   ]);
+});
+
+test('setCouponGoods replaces a coupon\'s list; getCouponGoods returns only that date\'s rows', () => {
+  s.setCouponGoods(777, '2026-10-10', [1, 2, 3]);
+  s.setCouponGoods(888, '2026-10-10', [1]);
+  assert.deepEqual([...s.getCouponGoods(777, '2026-10-10')].sort(), [1, 2, 3]);
+  s.setCouponGoods(777, '2026-10-11', [3, 4, 4]);
+  assert.deepEqual([...s.getCouponGoods(777, '2026-10-11')].sort(), [3, 4]);
+  assert.equal(s.getCouponGoods(777, '2026-10-10').size, 0);
+  assert.deepEqual([...s.getCouponGoods(888, '2026-10-10')], [1]); // other coupons untouched
+  assert.equal(s.db.prepare('SELECT COUNT(*) AS n FROM coupon_goods WHERE coupon_sno = 777').get().n, 2);
 });

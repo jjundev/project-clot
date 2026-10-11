@@ -22,6 +22,8 @@ const MARKET_BASE = 'https://api.a-bly.com/api/v2/markets';
 const ME_URL = 'https://api.a-bly.com/aglo/api/members/me/';
 const MY_COUPONS_URL = 'https://api.a-bly.com/aglo/api/members/me/coupons/';
 const BEST_COUPON_URL = 'https://api.a-bly.com/aglo/api/coupons/best-coupon';
+const COUPON_BASE = 'https://api.a-bly.com/aglo/api/coupons';
+const COUPON_GOODS_PAGE_LIMIT = 500;
 const RANKING_PAGE_LIMIT = 100;
 // Wallet and best-coupon endpoints answer only to the web app's identity headers.
 const AGLO_HEADERS = { 'X-App-Type': 'AGLO', 'X-App-Version': '0.1.0', 'X-Device-Type': 'PCWeb' };
@@ -265,10 +267,37 @@ export function createClient({ fetchFn = fetch, delayMs = 300, retryBaseMs = 100
     };
   }
 
+  // One page of the goods a coupon is limited to (an event list); lastSno is the cursor for the next page. A body
+  // without a numeric total_count throws: read as 0 it would scope the coupon to nothing.
+  async function getCouponGoodsPage(couponSno, { memberToken, lastSno = null, limit = COUPON_GOODS_PAGE_LIMIT }) {
+    let url = `${COUPON_BASE}/${couponSno}/goods?limit=${limit}`;
+    if (lastSno != null) url += `&last_sno=${lastSno}`;
+    const label = `coupon ${couponSno} goods`;
+    const body = await getJson(url, { memberToken, aglo: true, label });
+    const totalCount = body?.total_count == null ? NaN : Number(body.total_count);
+    if (!Number.isFinite(totalCount)) throw httpError(`4910 ${label} failed: no total_count`, undefined);
+    return {
+      totalCount,
+      snos: (Array.isArray(body.goods_list) ? body.goods_list : []).map((e) => Number(e?.item?.sno)).filter(Number.isFinite),
+      lastSno: body.last_sno ?? null,
+    };
+  }
+
+  // The names of the categories a coupon reaches. A body without category_list throws rather than reading as none.
+  async function getCouponCategories(couponSno, { memberToken }) {
+    const label = `coupon ${couponSno} categories`;
+    const body = await getJson(`${COUPON_BASE}/${couponSno}/categories`, { memberToken, aglo: true, label });
+    if (!Array.isArray(body?.category_list)) throw httpError(`4910 ${label} failed: no category_list`, undefined);
+    return body.category_list.map((c) => String(c?.name ?? c?.sno));
+  }
+
   // Returns the cached anonymous token, fetching one first if needed (the runner probe checks this step alone).
   const getToken = async () => token ?? fetchToken();
 
-  return { listBrandGoods, getToken, getGoodsDetail, listLikedGoods, listTopBrands, getMarket, getMyCoupons, getMe, getBestCoupon };
+  return {
+    listBrandGoods, getToken, getGoodsDetail, listLikedGoods, listTopBrands, getMarket, getMyCoupons, getMe, getBestCoupon,
+    getCouponGoodsPage, getCouponCategories,
+  };
 }
 
 const sliceLabel = (lo, hi) => `${lo}-${hi ?? '∞'}`;

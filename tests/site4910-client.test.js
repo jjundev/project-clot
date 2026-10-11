@@ -387,3 +387,43 @@ test('getMyCoupons returns a numeric couponSno', async () => {
   const [c] = await client.getMyCoupons({ memberToken: 't' });
   assert.equal(c.couponSno, 51346850);
 });
+
+test('getCouponGoodsPage pages a coupon\'s goods list with AGLO headers', async () => {
+  const item = (sno) => ({ item: { sno, market_sno: 10 }, logging: {} });
+  const { fn, calls } = fakeFetch({ lists: [
+    json(200, { total_count: 924, goods_list: [item(1), item('2')], last_sno: 2 }),
+    json(200, { total_count: 924, goods_list: [], last_sno: null }),
+  ] });
+  const client = createClient({ fetchFn: fn, delayMs: 0, retryBaseMs: 0 });
+  assert.deepEqual(await client.getCouponGoodsPage(51301683, { memberToken: 'SECRET' }), { totalCount: 924, snos: [1, 2], lastSno: 2 });
+  assert.equal(calls[0].url, 'https://api.a-bly.com/aglo/api/coupons/51301683/goods?limit=500');
+  assert.equal(calls[0].headers['X-App-Type'], 'AGLO');
+  assert.equal(calls[0].headers.Authorization, 'JWT SECRET');
+  assert.equal(calls[0].headers['X-Anonymous-Token'], undefined);
+  assert.deepEqual(await client.getCouponGoodsPage(51301683, { memberToken: 'SECRET', lastSno: 2, limit: 1 }), { totalCount: 924, snos: [], lastSno: null });
+  assert.equal(calls[1].url, 'https://api.a-bly.com/aglo/api/coupons/51301683/goods?limit=1&last_sno=2');
+});
+
+test('getCouponCategories returns the category names', async () => {
+  const { fn, calls } = fakeFetch({ lists: [json(200, { category_list: [{ sno: 702, name: '아우터', count: 108642 }, { sno: 738, name: '스포츠/레저', count: 12526 }] })] });
+  const client = createClient({ fetchFn: fn, delayMs: 0, retryBaseMs: 0 });
+  assert.deepEqual(await client.getCouponCategories(51345873, { memberToken: 'SECRET' }), ['아우터', '스포츠/레저']);
+  assert.equal(calls[0].url, 'https://api.a-bly.com/aglo/api/coupons/51345873/categories');
+  assert.equal(calls[0].headers['X-App-Type'], 'AGLO');
+  assert.equal(calls[0].headers.Authorization, 'JWT SECRET');
+});
+
+test('coupon scope calls throw on a malformed body and reject a 401 with MEMBER_AUTH', async () => {
+  const client = (body) => createClient({ fetchFn: fakeFetch({ lists: [json(200, body)] }).fn, delayMs: 0, retryBaseMs: 0 });
+  await assert.rejects(client({ goods_list: [] }).getCouponGoodsPage(1, { memberToken: 't' }), /coupon 1 goods failed: no total_count/);
+  await assert.rejects(client({}).getCouponCategories(1, { memberToken: 't' }), /coupon 1 categories failed: no category_list/);
+  for (const call of [(c) => c.getCouponGoodsPage(1, { memberToken: 'secret-tok' }), (c) => c.getCouponCategories(1, { memberToken: 'secret-tok' })]) {
+    const { fn, calls } = fakeFetch({ lists: [json(401, {})] });
+    await assert.rejects(call(createClient({ fetchFn: fn, delayMs: 0, retryBaseMs: 0 })), (e) => {
+      assert.equal(e.code, 'MEMBER_AUTH');
+      assert.ok(!e.message.includes('secret-tok'));
+      return true;
+    });
+    assert.equal(calls.length, 1);
+  }
+});
