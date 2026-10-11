@@ -50,7 +50,8 @@ const sellerCouponSeen = (rows, couponSno, date) =>
  * Returns a function from a listing sno to its coupons, or null when the seller is hidden: a seller-only coupon not
  * seen on `date` (the seller does have it, we just cannot price it), or one scoped to categories, to Naver, or of
  * unknown scope.
- * Learning and pricing both use this, so the self-check validates exactly what is published.
+ * Learning and pricing both use this, so the self-check validates the set pricing builds; a seller-only coupon
+ * shared by several sellers is priced with the terms of the last seller checked.
  */
 function couponSetOf(snos, rows, date, listedGoods) {
   const wallet = walletRows(rows);
@@ -188,6 +189,7 @@ export async function learnMarketCoupons({
 
   async function learnSeller(client, marketSno) {
     const answers = [];
+    const own = new Map(); // coupon sno → this seller's terms of it
     for (const sample of samplesOf(store, marketSno)) {
       if (stopped) return;
       let detail;
@@ -222,7 +224,8 @@ export async function learnMarketCoupons({
           stopped = true;
           throw err;
         }
-        store.addMarketCoupon(date, marketSno, { ...sellerCouponFromBest(best), scope });
+        own.set(best.couponSno, { ...sellerCouponFromBest(best), scope });
+        store.addMarketCoupon(date, marketSno, own.get(best.couponSno));
       }
       // best-coupon computes the discount on the detail price, which can differ from the listing's sale_price.
       answers.push({ sno: sample.sno, L: detail.listPrice ?? sample.sale_price, best });
@@ -230,6 +233,9 @@ export async function learnMarketCoupons({
     if (!answers.length) return;
 
     const snos = [...new Set(answers.map((a) => a.best?.couponSno).filter((sno) => sno != null))];
+    // A concurrent seller may have rewritten a shared coupon's row with its terms while this one awaited: write
+    // this seller's back first, so the self-check (and the row priced from) holds this seller's terms.
+    for (const coupon of own.values()) store.addMarketCoupon(date, marketSno, coupon);
     const rows = store.getWallet();
     const setFor = couponSetOf(snos, rows, date, listedGoods);
     let mismatch = setFor == null;

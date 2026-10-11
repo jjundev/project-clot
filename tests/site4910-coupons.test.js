@@ -687,14 +687,33 @@ test('a MEMBER_AUTH inside a shared scope lookup ends as expired once', async ()
   assert.ok(logs.every((l) => !String(l).includes(SECRET)));
 });
 
-test('the deadline passing mid-run lets running sellers finish and logs the skipped count once', async () => {
+test('the deadline passing mid-run lets running sellers finish and logs the skipped count once', async (t) => {
   seed(goods(1, 10, 85400), goods(2, 20, 85400), goods(3, 30, 85400));
   const base = fakeClient({ best: { 10: wallet20(17080), 20: wallet20(17080), 30: wallet20(17080) } });
-  // 50 ms a request: wallet + points end near 100 ms, sellers 10 and 20 start there and end near 200 ms, after the 150 ms deadline
-  const { withClient } = pooled(base, 50);
+  // The clock passes the deadline while sellers 10 and 20 are both running (seller 10's best-coupon call).
+  let clock = 0;
+  t.mock.method(Date, 'now', () => clock);
+  const getBestCoupon = base.getBestCoupon;
+  base.getBestCoupon = async (optionSno, opts) => {
+    if (optionSno === 10) clock = 2;
+    return getBestCoupon(optionSno, opts);
+  };
+  const { withClient } = pooled(base);
   const logs = [];
-  await learn(base, [10, 20, 30], logs, { withClient, concurrency: 2, deadline: Date.now() + 150 });
+  await learn(base, [10, 20, 30], logs, { withClient, concurrency: 2, deadline: 1 });
   assert.deepEqual([...base.calls.detail].sort(), [1, 2]);
   assert.deepEqual([...store.getMarketCoupons(DATE).keys()].sort(), [10, 20]);
   assert.deepEqual(logs.filter((l) => /예산/.test(l)), ['⚠️ [4910] 실행 예산 초과 — 판매처 1곳 쿠폰 확인 생략 (쿠폰가 없음)']);
+});
+
+test('a seller checks its own terms of a seller-only coupon another seller rewrote meanwhile', async () => {
+  // Seller 10 samples 85,400 (its coupon 700: 20,000 off from 50,000) and 30,000 (wallet 20%); seller 20 rewrites
+  // coupon 700's row with its own terms (10,000 off) while seller 10 waits on its second sample.
+  seed(goods(1, 10, 85400), goods(2, 10, 30000), goods(3, 20, 85400));
+  const own700 = (discount) => ({ couponSno: 700, name: '셀러 쿠폰', discount, min: 50000 });
+  const base = fakeClient({ best: { 10: own700(20000), 20: wallet20(6000), 30: own700(10000) } });
+  const { withClient } = pooled(base);
+  const res = await learn(base, [10, 20], [], { withClient, concurrency: 2 });
+  assert.equal(res.mismatched, 0);
+  assert.equal(store.getMarketCoupons(DATE).get(10).mismatch, 0);
 });
