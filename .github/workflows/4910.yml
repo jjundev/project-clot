@@ -1,0 +1,54 @@
+name: 4910 tracker
+
+on:
+  schedule:
+    - cron: '30 1 * * *' # 10:30 KST, an hour after the Musinsa daily run
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'probe = reachability check only (no DB writes); scan = pull DB, scan top brands, push DB'
+        type: choice
+        options: [probe, scan]
+        default: probe
+
+permissions:
+  contents: write # Release asset upload (data-4910)
+
+concurrency:
+  group: clot-4910
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MODE: ${{ github.event_name == 'schedule' && 'scan' || inputs.mode }}
+      GH_TOKEN: ${{ github.token }}
+      ABLY_JWT_TOKEN: ${{ secrets.ABLY_JWT_TOKEN }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24 # node:sqlite
+
+      - name: Probe 4910.kr from this runner
+        if: env.MODE == 'probe'
+        run: node scripts/actions-probe.js --only-4910
+
+      # The scan steps chain on success: a failed pull must not reach track-4910 (it would start from an
+      # empty DB), and a failed track-4910 must not reach push (it would overwrite the Release history).
+      - name: Pull 4910.db from the data-4910 Release
+        if: env.MODE == 'scan'
+        run: node src/cli.js 4910-db pull
+
+      - name: Scan top brands
+        if: env.MODE == 'scan'
+        run: node src/cli.js track-4910
+
+      - name: Push 4910.db to the data-4910 Release
+        if: env.MODE == 'scan'
+        run: node src/cli.js 4910-db push

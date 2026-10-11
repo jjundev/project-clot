@@ -77,27 +77,61 @@ function buildLikedItems(db4910) {
 
 const IMG_BASE_4910 = 'https://d3ha2047wt6x28.cloudfront.net/';
 
-/**
- * Packs every ACTIVE scanned 4910 listing into the compact `4910-all.js` payload. Liked ACTIVE listings are left
- * out: the liked items already carry them with member prices under the same `4910:sno` key.
- * @param {import('node:sqlite').DatabaseSync} db4910
- * @returns {{ v: 1, lastScan: string|null, imgBase: string, b: string[], m: string[], r: any[][] }}
- */
-export function buildScan4910Payload(db4910) {
+// Liked ACTIVE listings are left out of the scan files: the liked items already carry them with member prices
+// under the same `4910:sno` key. The index counts use the same filter so a brand chip matches its file.
+function likedFilterSql(db4910) {
   const hasLiked = db4910
     .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = 'liked_goods'")
     .get();
-  const likedFilter = hasLiked ? "AND sno NOT IN (SELECT sno FROM liked_goods WHERE status = 'ACTIVE')" : '';
-  const goods = db4910
-    .prepare(`SELECT sno, brand, market_name, name, image_url, first_seen_date FROM goods WHERE status = 'ACTIVE' ${likedFilter} ORDER BY sno ASC`)
+  return hasLiked ? "AND sno NOT IN (SELECT sno FROM liked_goods WHERE status = 'ACTIVE')" : '';
+}
+
+// Any run counts, complete or not: a listing unchanged on the latest scan day must not keep yesterday's drop.
+function lastScanDate(db4910) {
+  return db4910.prepare('SELECT MAX(date) AS d FROM scan_runs').get()?.d ?? null;
+}
+
+/**
+ * Lists the brands that have scanned listings for `4910/index.js`, largest first.
+ * @param {import('node:sqlite').DatabaseSync} db4910
+ * @returns {{ v: 2, lastScan: string|null, brands: [number, string, number][] }}
+ */
+export function buildScan4910Index(db4910) {
+  const rows = db4910
+    .prepare(`
+      SELECT brand_sno, MAX(brand) AS name, COUNT(*) AS n FROM goods
+      WHERE status = 'ACTIVE' ${likedFilterSql(db4910)}
+      GROUP BY brand_sno ORDER BY n DESC, brand_sno ASC
+    `)
     .all();
+  const brands = rows.map((r) => [Number(r.brand_sno), r.name || String(r.brand_sno), Number(r.n)]);
+  return { v: 2, lastScan: lastScanDate(db4910), brands };
+}
+
+/**
+ * Packs the ACTIVE scanned listings of one brand (every brand when `brandSno` is omitted) into the compact
+ * `4910/b{sno}.js` payload. Each row is `[sno, bIdx, mIdx, name, imgPath, firstSeen, cat, H, cp]`; `cp` is the
+ * coupon price, null when unknown or when the 4910.db predates the column.
+ * @param {import('node:sqlite').DatabaseSync} db4910
+ * @param {{ brandSno?: number|null }} [options]
+ * @returns {{ v: 1, brandSno: number|null, lastScan: string|null, imgBase: string, b: string[], m: string[], r: any[][] }}
+ */
+export function buildScan4910Payload(db4910, { brandSno = null } = {}) {
+  const goodsCols = new Set(db4910.prepare('PRAGMA table_info(goods)').all().map((c) => c.name));
+  const cpCol = goodsCols.has('coupon_price') ? 'coupon_price' : 'NULL';
+  const brandFilter = brandSno != null ? 'AND brand_sno = :brand' : '';
+  const where = `status = 'ACTIVE' ${likedFilterSql(db4910)} ${brandFilter}`;
+  const params = brandSno != null ? { brand: Number(brandSno) } : {};
+  const goods = db4910
+    .prepare(`SELECT sno, brand, market_name, name, image_url, first_seen_date, ${cpCol} AS cp FROM goods WHERE ${where} ORDER BY sno ASC`)
+    .all(params);
   const changes = db4910
     .prepare(`
       SELECT sno, date, original_price, sale_price FROM price_changes
-      WHERE sno IN (SELECT sno FROM goods WHERE status = 'ACTIVE' ${likedFilter})
+      WHERE sno IN (SELECT sno FROM goods WHERE ${where})
       ORDER BY date ASC, id ASC
     `)
-    .all();
+    .all(params);
 
   const histBySno = new Map();
   for (const c of changes) {
@@ -130,12 +164,35 @@ export function buildScan4910Payload(db4910) {
       g.first_seen_date || '',
       classifyCategory(g.name, g.brand),
       histBySno.get(g.sno) || [],
+      g.cp ?? null,
     ];
   });
 
-  // Any run counts, complete or not: a listing unchanged on the latest scan day must not keep yesterday's drop.
-  const lastScan = db4910.prepare('SELECT MAX(date) AS d FROM scan_runs').get()?.d ?? null;
-  return { v: 1, lastScan, imgBase: IMG_BASE_4910, b, m, r };
+  return { v: 1, brandSno: brandSno != null ? Number(brandSno) : null, lastScan: lastScanDate(db4910), imgBase: IMG_BASE_4910, b, m, r };
+}
+
+const scriptJson = (value) => JSON.stringify(value).replace(/<\/script/gi, '<\\/script');
+
+/**
+ * Writes `index.js` and one `b{sno}.js` per brand into `dir4910`, which the caller has emptied.
+ * @param {import('node:sqlite').DatabaseSync} db4910
+ * @param {string} dir4910
+ * @returns {number} Listings across all brand files.
+ */
+function write4910Files(db4910, dir4910) {
+  const index = buildScan4910Index(db4910);
+  fs.mkdirSync(dir4910, { recursive: true });
+  // One brand at a time: ~190k listings held at once would run to hundreds of MB.
+  for (const [sno] of index.brands) {
+    const payload = buildScan4910Payload(db4910, { brandSno: sno });
+    fs.writeFileSync(
+      path.join(dir4910, `b${sno}.js`),
+      `(window.__CLOT_4910_B__ = window.__CLOT_4910_B__ || {})[${sno}] = ${scriptJson(payload)};\n`,
+      'utf-8'
+    );
+  }
+  fs.writeFileSync(path.join(dir4910, 'index.js'), `window.__CLOT_4910_INDEX__ = ${scriptJson(index)};\n`, 'utf-8');
+  return index.brands.reduce((sum, [, , n]) => sum + n, 0);
 }
 
 /**
@@ -300,10 +357,17 @@ export function generateDashboardHtml({
     shouldCloseDb = true;
   }
 
+  // The 4910 scan files ship beside the HTML in 4910/ and load only when the 4910 전체 chip asks for them. Every
+  // build starts from an empty directory so a brand that left the scan, or a failed 4910 build, never serves stale
+  // listings; 4910-all.js is the single-file layout this replaced.
+  const dir4910 = path.join(outDir, '4910');
+  fs.rmSync(dir4910, { recursive: true, force: true });
+  fs.rmSync(path.join(outDir, '4910-all.js'), { force: true });
+
   const digits = targetGoodsNo != null ? String(targetGoodsNo).replace(/\D/g, '') : '';
   const gNo = digits.length > 0 ? Number(digits) : undefined;
   let payload;
-  let scan = null;
+  let total4910All = null;
   try {
     // A broken 4910.db (corrupt, locked, schema drift) must never block the Musinsa dashboard.
     if (db4910Path && fs.existsSync(db4910Path)) {
@@ -313,14 +377,17 @@ export function generateDashboardHtml({
         payload = buildClotDataPayload(activeDb, { targetGoodsNo: gNo, db4910 });
         // The scan listings fail on their own: the liked items above stay on the dashboard.
         try {
-          scan = buildScan4910Payload(db4910);
+          total4910All = write4910Files(db4910, dir4910);
         } catch (err) {
           console.warn(`⚠️ [4910] 대시보드에서 4910 전체 목록 제외: ${err.message}`);
+          total4910All = null;
+          fs.rmSync(dir4910, { recursive: true, force: true });
         }
       } catch (err) {
         console.warn(`⚠️ [4910] 대시보드에서 4910 항목 제외: ${err.message}`);
         payload = undefined;
-        scan = null;
+        total4910All = null;
+        fs.rmSync(dir4910, { recursive: true, force: true });
       } finally {
         if (db4910) db4910.close();
       }
@@ -331,23 +398,13 @@ export function generateDashboardHtml({
       activeDb.close();
     }
   }
-  payload.has4910All = scan != null;
-  payload.total4910All = scan ? scan.r.length : 0;
-
-  // Every scanned listing ships beside the HTML and loads only when the 4910 전체 chip asks for it. A build without
-  // one removes yesterday's file so the page never serves stale listings.
-  const scanPath = path.join(outDir, '4910-all.js');
-  if (scan) {
-    const scanJson = JSON.stringify(scan).replace(/<\/script/gi, '<\\/script');
-    fs.writeFileSync(scanPath, `window.__CLOT_4910_ALL__ = ${scanJson};\n`, 'utf-8');
-  } else {
-    fs.rmSync(scanPath, { force: true });
-  }
+  payload.has4910All = total4910All != null;
+  payload.total4910All = total4910All ?? 0;
 
   const templateContent = fs.readFileSync(templatePath, 'utf-8');
 
   // Replace data placeholder using a function replacer to prevent '$' corruption (CRLF tolerant)
-  const jsonString = JSON.stringify(payload).replace(/<\/script/gi, '<\\/script');
+  const jsonString = scriptJson(payload);
   const placeholderRegex = /\/\*\s*__CLOT_DATA_PLACEHOLDER__\s*\*\/[\s\S]*?;\s*[\r\n]*/;
   let rendered;
   if (placeholderRegex.test(templateContent)) {

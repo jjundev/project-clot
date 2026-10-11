@@ -38,18 +38,19 @@
    - `opencli musinsa mysize`: 과거 구매한 의류의 실측 치수(총장, 가슴, 허리, 어깨, 소매, 허벅지 cm)를 카테고리별(`top`, `pants`, `outer`)로 조회하고 검색 필터(`--as-filter`)로 변환합니다.
    - `opencli musinsa search <query> --my-size <category>`: 과거 구매했던 의류 실측을 자동으로 반영하여 내 몸에 맞는 상품을 손쉽게 검색합니다.
 
-9. **4910 유니클로·GU 추적 (`track-4910`)**
-   - [4910.kr](https://4910.kr)(에이블리 남성관)에 올라온 **유니클로·GU 판매글 전체**(약 1.6만 개)를 `daily` 실행 때마다 함께 스캔해 `data/4910.db`에 저장합니다.
-   - 4910의 유니클로·GU는 공식몰이 아니라 일본 구매대행 셀러의 판매글이므로, 판매글 번호(`sno`) 단위로 추적합니다. 같은 제품이라도 셀러별로 따로 기록됩니다.
-   - 이력은 **바뀔 때만** 남깁니다(신규·가격변동·종료·재등장). 완전한 스캔에서 2회 연속 보이지 않은 판매글은 종료(`DROPPED`)로 처리하고, 다시 보이면 재등장으로 되살립니다.
-   - 텔레그램으로 하루 1통, 브랜드별 스캔 수와 직전 기록가 대비 **10% 이상 하락한 상위 10개**를 보냅니다.
-   - **찜한 상품의 회원가**: 4910.kr에서 찜(하트)한 상품을 `ABLY_JWT_TOKEN`으로 불러와 하루 한 번 **내 회원가**를 함께 기록합니다. 대시보드에서는 `4910 찜` 필터로 찜 상품만 모아 **표시가 / 쿠폰적용가(신규회원 기준) / 내 회원가** 세 가격을 한 카드에서 비교합니다. 회원가는 보통 쿠폰적용가보다 조금 높은데, 쿠폰적용가에는 신규회원 첫 구매 쿠폰이 포함되기 때문입니다.
-   - **대시보드 출처 필터**: `전체`(무신사 + 4910 판매글 전부) · `무신사` · `4910 찜` · `4910 전체`. `4910 전체`는 스캔한 판매 중 판매글 전부를 보여 주며, 찜한 판매글은 찜 데이터(회원가 포함)로 한 번만 나옵니다. 찜하지 않은 판매글은 **표시가만** 있고 회원가는 없습니다. 하락 표시는 마지막 스캔에서 가격이 내려간 판매글에만, 역대 최저가 표시는 가격이 한 번이라도 바뀐 판매글에만 붙습니다.
-   - 판매글 목록은 `index.html` 옆의 별도 파일 `4910-all.js`(약 4MB, gzip 약 1MB)에 담겨, 페이지를 연 뒤 무신사 상품을 먼저 그리고 나서 백그라운드로 내려받아 `전체`와 `4910 전체`에 합칩니다. 카드는 120개씩 그리고, 스크롤하거나 `더 보기`를 누르면 더 그립니다.
-   - 로그인 쿠키에는 갱신 수단이 없어서, 만료되면 텔레그램 요약에 `⚠️ 4910 로그인 만료 — ABLY_JWT_TOKEN 갱신 필요`가 붙습니다. 이때 Secret을 다시 올리세요. 토큰이 없으면 찜 동기화만 건너뜁니다. 찜 동기화가 그 밖의 이유로 실패하면 `⚠️ 4910 찜 가격 기록 실패 — Actions 로그 확인`이 붙습니다.
-   - 4910 수집이 실패해도 무신사 수집·커밋은 그대로 진행됩니다(`⚠️ [4910] 수집 실패` 로그만 남음).
-   - `daily` 안에서 자동으로 돌고(`--skip-4910`으로 제외), 단독 실행은 `track-4910 [--brand uniqlo|gu] [--dry-run]`입니다.
-   - ⚠️ **로컬(Mac)에서는 `--dry-run`으로만 실행하세요.** `data/4910.db`는 GitHub Actions가 매일 커밋하는 파일이라, 로컬에서 쓰면 다음 `git pull`이 덮어쓰기를 거부하고 텔레그램 요약도 한 통 더 갑니다. 로컬에 따로 쌓고 싶다면 `CLOT_4910_DB_PATH=/tmp/4910.db node src/cli.js track-4910`처럼 경로를 바꾸세요.
+9. **4910 상위 100 브랜드 × 우수 셀러 추적 (`track-4910`)**
+   - **범위**: [4910.kr](https://4910.kr)(에이블리 남성관) **브랜드 랭킹 상위 100개 브랜드**(유니클로·GU는 순위와 관계없이 항상 포함)의 판매글입니다. 브랜드 목록은 주 1회(월요일) 갱신하고, 다른 날은 저장된 목록을 씁니다. 상위 100에서 빠진 브랜드의 판매글은 `OUT_OF_SCOPE`가 되며 종료(`DROPPED`)로 세지 않습니다.
+   - **셀러 기준**: **구매만족도 95% 이상, 리뷰 100개 이상**인 셀러의 판매글만 추적합니다. 4910의 유니클로·GU처럼 공식몰이 아니라 구매대행 셀러가 올린 글이 많아서, 판매글 번호(`sno`) 단위로 따로 기록합니다. 기준에서 탈락한 셀러의 판매글은 `OUT_OF_SCOPE`로 바뀌고(이력은 유지), 다시 통과하면 재등장으로 되살아납니다.
+   - **이력**: **바뀔 때만** 남깁니다(신규·가격변동·종료·재등장). 완전한 스캔에서 2회 연속 보이지 않은 판매글은 종료(`DROPPED`)로 처리합니다. 일부 브랜드가 불완전 스캔이면 그 브랜드는 미발견을 세지 않습니다.
+   - **쿠폰가 계산과 공개 범위**: 로그인(`ABLY_JWT_TOKEN`)한 내 쿠폰함으로 **쿠폰가 = 목록가 − 적용되는 쿠폰 중 최대 할인**(10원 단위 올림)을 매일 계산해 판매글 카드와 정렬(`쿠폰가 낮은순`·`쿠폰 할인율순`)에 씁니다. 쿠폰 적용 여부는 판매처마다 대표 판매글 2개로 `best-coupon`을 조회해 판정하고, 계산이 실제 할인과 어긋나는 판매처는 요약에 경고로 남습니다. 쿠폰가는 가격 이벤트(`price_changes`)에는 쓰지 않습니다. 토큰이 없거나 만료되면 쿠폰 단계만 건너뛰고 `⚠️ 4910 로그인 만료 — ABLY_JWT_TOKEN 갱신 필요`가 요약에 붙습니다. ⚠️ 쿠폰가와 **쿠폰함 내역은 DB(Release)와 Pages 대시보드에 그대로 공개됩니다.**
+   - **찜한 상품의 회원가**: 4910.kr에서 찜(하트)한 상품의 `member_price`를 같은 쿠폰함 기준으로 기록합니다. 대시보드의 `4910 찜` 필터에서 **표시가 / 쿠폰적용가 / 내 회원가**를 한 카드에서 비교합니다. 찜 동기화가 실패하면 `⚠️ 4910 찜 가격 기록 실패 — Actions 로그 확인`이 붙습니다.
+   - ⚠️ **`member_price` 기준 변경 (2026-10)**: 이전에는 에이블리 앱의 회원가(`/api/v2/goods`)였지만, 이 변경 이후 첫 `track-4910` 실행(2026-10)부터는 4910 쿠폰함의 best-coupon 결과(목록가 − 최대 쿠폰 할인)입니다. 열 이름은 그대로라서 그 실행 이전 값은 에이블리 앱 기준입니다.
+   - **저장소: GitHub Release**: 판매글이 수십만 건이라 DB(약 100MB)를 git에 커밋하지 않습니다. `data/4910.db`는 Release `data-4910`의 첨부 파일 `4910.db.gz`(최신본), `4910.db.prev.gz`(직전본, 롤백용), `4910.db.<YYYY-MM-DD>.gz`(날짜별 사본, 최근 7개)로 보관합니다. `4910-db push`는 직전본 → 날짜별 사본 → 최신본 순서로 하나씩 올리므로 중간에 실패해도 받을 수 있는 DB가 남고, `4910-db pull`은 최신본이 없으면 직전본을 받으며 ⚠️ 경고를 남깁니다. **`data/4910.db`의 git 이력은 2026-10-11까지**이고, 이후 파일은 `.gitignore`에 들어 있습니다.
+   - **실행**: 별도 workflow `4910 tracker`(`.github/workflows/4910.yml`)가 매일 10:30(KST)에 `4910-db pull` → `track-4910` → `4910-db push` 순서로 돌고, 텔레그램 요약을 하루 1통 보냅니다. 앞 단계가 실패하면 뒤 단계는 실행하지 않습니다(빈 DB로 스캔하거나 Release 이력을 덮어쓰지 않기 위해서). 무신사 `daily`와 Pages 배포는 4910 실패의 영향을 받지 않고, `daily`에서는 4910 단계가 빠졌습니다(`--skip-4910`은 호환용으로 남아 아무 일도 하지 않습니다).
+   - **로컬 사용법**: `node src/cli.js 4910-db pull`로 Release의 DB를 받은 뒤 `node src/cli.js track-4910 --dry-run`으로 확인합니다. `track-4910`은 `data/4910.db`가 없으면 실행을 거부합니다(빈 DB로 시작하면 모든 판매글이 신규로 잡혀 이력이 덮이므로). ⚠️ **로컬(Mac)에서는 `--dry-run`으로만 실행하세요.** 쓰기 실행은 텔레그램 요약을 한 통 더 보내고, 로컬 DB를 `4910-db push`하면 Actions가 쌓은 이력을 덮어씁니다. 로컬에 따로 쌓고 싶다면 `CLOT_4910_DB_PATH=/tmp/4910.db`처럼 경로를 바꾸세요.
+   - **최초 1회 부트스트랩**: Release가 아직 없을 때는 로컬의 기존 `data/4910.db`로 `node src/cli.js 4910-db push --allow-fresh`를 한 번 실행해 `data-4910` Release를 만듭니다. 그 전에는 `4910 tracker`와 Pages의 4910 섹션이 DB를 받지 못해 멈추거나 건너뜁니다.
+   - **대시보드 출처 필터**: `전체`(무신사 + 4910 찜) · `무신사` · `4910 찜` · `4910 전체`. `4910 전체`를 누르면 브랜드 칩(판매글 수 순)이 뜨고, 브랜드를 고를 때마다 그 브랜드 파일(`4910/b{브랜드번호}.js`, 목록은 `4910/index.js`)만 내려받아 쌓습니다. 카드는 120개씩 그리고, 스크롤하거나 `더 보기`를 누르면 더 그립니다. 찜하지 않은 판매글은 **표시가·쿠폰가만** 있고 회원가는 없습니다. 하락 표시는 마지막 스캔에서 가격이 내려간 판매글에만, 역대 최저가 표시는 가격이 한 번이라도 바뀐 판매글에만 붙습니다.
+   - 텔레그램 요약에는 스캔 브랜드·판매글·통과 셀러 수, 신규·가격변동·종료 수, 직전 기록가 대비 **10% 이상 하락한 상위 10개**, 찜 상품 쿠폰가 하락이 들어갑니다.
 
 ---
 
@@ -59,7 +60,7 @@
 ~/Documents/Private/project-clot/
 ├── data/
 │   ├── prices.db            # SQLite 데이터베이스 (시계열 가격 로그 & 상품 메타데이터)
-│   ├── 4910.db              # 4910 유니클로·GU 판매글 & 변동 이력
+│   ├── 4910.db              # (git 미추적) 4910 판매글 & 변동 이력 — Release data-4910에서 받아 씀
 │   └── latest_prices.json   # Git 저장소 공유용 최신 가격 스냅샷
 ├── logs/                    # 데몬 실행 로그 (daily.log)
 ├── src/
@@ -68,7 +69,7 @@
 │   ├── collector.js         # 상품 가격, 쿠폰, 품절 상태 수집기
 │   ├── sync.js              # 무신사 좋아요 목록 증분 동기화
 │   ├── notifier.js          # macOS 데스크톱 및 텔레그램 알림 발송
-│   └── site4910/            # 4910.kr 유니클로·GU 스캔 (client, store, track, digest)
+│   └── site4910/            # 4910.kr 상위 브랜드 스캔 (client, store, track, sellers, coupons, release, digest)
 ├── package.json
 ├── .env.example             # 텔레그램/디스코드 웹훅 설정 템플릿
 └── README.md
@@ -100,7 +101,8 @@ node src/cli.js watch https://www.musinsa.com/products/3074360
 # 수동 관심 상품 추적 해제
 node src/cli.js unwatch 3074360
 
-# 4910 유니클로·GU 스캔 결과만 확인 (DB에 쓰지 않음, 텔레그램 없음)
+# 4910 상위 100 브랜드 스캔 결과만 확인 (DB에 쓰지 않음, 텔레그램 없음) — 먼저 Release의 DB를 받아야 함
+node src/cli.js 4910-db pull
 node src/cli.js track-4910 --dry-run
 node src/cli.js track-4910 --brand gu --dry-run
 
@@ -228,7 +230,7 @@ Mac 없이 GitHub 러너에서 HTTPS 세션만으로 `daily --skip-opencli`를 �
 |---|---|---|
 | `MUSINSA_COOKIE` | Secret | `app_atk=...; app_rtk=...` (`~/.clot/musinsa-session.json`의 `cookie` 값) |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Secret | 알림용 (선택) |
-| `ABLY_JWT_TOKEN` | Secret | 4910.kr 로그인 쿠키 `ably-jwt-token` 값 (찜 상품 회원가, 선택) |
+| `ABLY_JWT_TOKEN` | Secret | 4910.kr 로그인 쿠키 `ably-jwt-token` 값 (`4910 tracker`의 쿠폰가·찜 회원가용, 선택) |
 | `CLOT_SECRETS_PAT` | Secret | 이 레포의 **Secrets: Read and write** 권한만 준 fine-grained PAT. 실행 중 토큰이 교체되면 `MUSINSA_COOKIE`를 자동 갱신 |
 | `CLOT_ACTIONS_DAILY` | Variable | `true`일 때만 매일 09:30(KST) 스케줄 실행 |
 
@@ -236,7 +238,7 @@ Mac 없이 GitHub 러너에서 HTTPS 세션만으로 `daily --skip-opencli`를 �
 # 쿠키를 Secret으로 올리기 (값이 터미널에 출력되지 않음)
 node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(require("os").homedir()+"/.clot/musinsa-session.json")).cookie)' | gh secret set MUSINSA_COOKIE
 
-# 4910 찜 상품 회원가용 토큰 올리기: 4910.kr에 로그인한 브라우저에서 DevTools → Application → Cookies → https://4910.kr 의
+# 4910 쿠폰가·찜 회원가용 토큰 올리기: 4910.kr에 로그인한 브라우저에서 DevTools → Application → Cookies → https://4910.kr 의
 # `ably-jwt-token` 값을 복사한 뒤, 아래 명령이 값을 물어보면 붙여넣기 (입력이 화면에 표시되지 않음)
 gh secret set ABLY_JWT_TOKEN
 
@@ -244,17 +246,27 @@ gh secret set ABLY_JWT_TOKEN
 gh workflow run daily.yml -f mode=probe
 ```
 
+**4910은 별도 workflow(`.github/workflows/4910.yml`, 이름 `4910 tracker`)입니다.** 매일 10:30(KST)에 스케줄로 돌고(`scan`), 수동 실행은 기본이 `probe`입니다. `scan`은 `4910-db pull` → `track-4910` → `4910-db push`를 차례로 실행하며 앞 단계가 실패하면 멈춥니다. git 커밋은 하지 않고 Release `data-4910`에만 올립니다(`GITHUB_TOKEN`, `contents: write`). 같은 Secret(`ABLY_JWT_TOKEN`, `TELEGRAM_*`)을 씁니다.
+
+```bash
+# 러너에서 4910.kr 접속만 확인 (무신사 세션 불필요, DB 변경 없음)
+gh workflow run 4910.yml -f mode=probe
+
+# 전체 스캔 (Release에 4910.db.gz 가 먼저 있어야 함 — 위 4910 부트스트랩 참고)
+gh workflow run 4910.yml -f mode=scan
+```
+
 - 스케줄을 켜기 전에 Mac 데몬을 내리세요 (`daemon-uninstall`). 둘 다 `data/prices.db`를 커밋하면 나중 push가 거절됩니다.
 - 세션이 만료되면 job이 실패합니다(GitHub 알림 메일). Mac에서 로그인한 뒤 위 명령으로 Secret을 다시 올리면 됩니다.
 
 ### 6. 대시보드 웹 배포 (GitHub Pages)
-`.github/workflows/pages.yml`이 커밋된 `data/prices.db`로 대시보드를 빌드해 Pages에 올립니다. `data/prices.db`·`data/4910.db` push(Mac 데몬), daily Actions 완료 후, 수동 실행(`gh workflow run pages.yml`)에 갱신됩니다.
+`.github/workflows/pages.yml`이 커밋된 `data/prices.db`로 대시보드를 빌드해 Pages에 올립니다. `data/prices.db` push(Mac 데몬), `Daily price tracker`·`4910 tracker` Actions 완료 후, 수동 실행(`gh workflow run pages.yml`)에 갱신됩니다. 빌드 전에 Release `data-4910`에서 `4910.db`를 내려받아 쓰며, 받지 못해도 배포는 실패하지 않습니다.
 
 👉 **https://jjundev.github.io/project-clot/**
 
 - 최초 1회: 저장소 **Settings → Pages → Source: GitHub Actions** 로 설정해야 합니다.
-- 페이지에는 `noindex`와 `robots.txt`로 검색 색인을 막았습니다. 접근 제한은 아니며, 저장소가 공개이므로 `data/prices.db`와 `data/latest_prices.json`은 누구나 내려받을 수 있습니다. `data/4910.db`(찜 목록 포함)와 Pages에 함께 올라가는 `4910-all.js`(판매글 목록)도 마찬가지로 공개됩니다.
-- 4910 쪽 빌드가 실패하면(DB 없음·손상) `4910 전체` 칩은 숨겨지고 무신사 대시보드는 그대로 배포됩니다. 이때 빌드 로그에 `4910-all.js not built` 경고가 남습니다.
+- 페이지에는 `noindex`와 `robots.txt`로 검색 색인을 막았습니다. 접근 제한은 아니며, 저장소가 공개이므로 `data/prices.db`와 `data/latest_prices.json`은 누구나 내려받을 수 있습니다. Release `data-4910`의 `4910.db.gz`(찜 목록·쿠폰함 내역 포함)와 Pages에 함께 올라가는 `4910/` 브랜드별 파일(판매글·쿠폰가 목록)도 마찬가지로 공개됩니다.
+- 4910 쪽 빌드가 실패하면(Release에서 DB를 받지 못함·DB 손상) `4910 전체` 칩은 숨겨지고 무신사 대시보드는 그대로 배포됩니다. 이때 빌드 로그에 `4910.db not available` 또는 `4910 index not built` 경고가 남습니다.
 - 표시 데이터는 마지막으로 커밋된 DB 기준입니다. 로컬 `visualize`가 더 최신일 수 있습니다.
 
 ---

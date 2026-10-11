@@ -25,8 +25,10 @@ import { classifyCategory } from './classifier.js';
 import { probeBrowserBridge, getMacPowerState } from './power.js';
 import { runAudit, formatAuditTerminal } from './audit.js';
 import { skipDailyRun, formatSkipTerminal } from './skip.js';
-import { BRANDS_4910, createClient } from './site4910/client.js';
-import { Store4910 } from './site4910/store.js';
+import { createClient } from './site4910/client.js';
+import { Store4910, default4910DbPath } from './site4910/store.js';
+import { PINNED_BRANDS_4910 } from './site4910/brands.js';
+import { pullDb, pushDb } from './site4910/release.js';
 import { track4910 } from './site4910/track.js';
 import { format4910Digest } from './site4910/digest.js';
 import { syncLiked4910, readAblyToken } from './site4910/liked.js';
@@ -45,7 +47,7 @@ export function parseArgs(rawArgs = process.argv.slice(2)) {
   const command = args[0] || 'help';
   const flags = {};
   const positional = [];
-  const BOOLEAN_FLAGS = new Set(['force', 'with-discovery', 'no-open', 'help', 'skip-opencli', 'assume-awake', 'json', 'skip-4910', 'dry-run']);
+  const BOOLEAN_FLAGS = new Set(['force', 'with-discovery', 'no-open', 'help', 'skip-opencli', 'assume-awake', 'json', 'skip-4910', 'dry-run', 'allow-fresh']);
 
   for (let i = 1; i < args.length; i++) {
     const a = args[i];
@@ -479,15 +481,25 @@ export async function sessionKeeperSuffix({
   }
 }
 
+// --brand: none → null (track4910 resolves the top brands itself), uniqlo|gu → that pinned brand, digits → that sno.
+function selectBrands4910(brand) {
+  if (brand === undefined) return { brands: null };
+  const pinned = new Map([['uniqlo', PINNED_BRANDS_4910[0]], ['gu', PINNED_BRANDS_4910[1]]]).get(brand);
+  if (pinned) return { brands: [pinned] };
+  if (typeof brand === 'string' && /^\d+$/.test(brand)) return { brands: [{ sno: Number(brand), name: `brand ${brand}` }] };
+  return { error: `unknown brand '${brand}' (use a brand sno | uniqlo | gu)` };
+}
+
 /**
- * Scans Uniqlo and GU on 4910.kr into data/4910.db, records member prices of the liked items, and sends one digest.
- * Never throws: a 4910 failure (runner IP blocked, API change, expired login) must not stop the Musinsa commit that
- * follows in the daily run. The scan and the liked sync fail independently; only a successful scan sends the digest.
+ * Scans the top 4910.kr brands (plus Uniqlo and GU) into data/4910.db, records member prices of the liked items,
+ * and sends one digest. Run by `track-4910` (the 4910 workflow), not by `daily`.
+ * Never throws: the scan and the liked sync fail independently; only a successful scan sends the digest.
  */
 export async function run4910Step({
   flags = {},
   today,
   openStore = () => new Store4910(),
+  dbExists = () => fs.existsSync(default4910DbPath()),
   makeClient = () => createClient(),
   trackFn = track4910,
   syncLikedFn = syncLiked4910,
@@ -497,26 +509,38 @@ export async function run4910Step({
 } = {}) {
   if (flags['skip-4910']) return { ran: false, ok: true };
 
-  let brands = BRANDS_4910;
-  if (flags.brand !== undefined) {
-    brands = BRANDS_4910.filter((b) => b.key === flags.brand);
-    if (!brands.length) {
-      const error = `unknown brand '${flags.brand}' (use ${BRANDS_4910.map((b) => b.key).join(' | ')})`;
-      log(`⚠️ [4910] ${error}`);
-      return { ran: false, ok: false, error };
-    }
+  const { brands, error: brandError } = selectBrands4910(flags.brand);
+  if (brandError) {
+    log(`⚠️ [4910] ${brandError}`);
+    return { ran: false, ok: false, error: brandError };
+  }
+  const concurrency = Math.min(parseConcurrency(flags.concurrency, 3), 4);
+
+  // Opening the store would create an empty DB, the scan would fill it with one day, and a push would then replace the
+  // release history. The DB has to come from `4910-db pull` first.
+  if (!flags['dry-run'] && !dbExists()) {
+    const error = '4910.db 없음 — 먼저 `node src/cli.js 4910-db pull`';
+    log(`⚠️ [4910] ${error}`);
+    return { ran: false, ok: false, error };
+  }
+
+  // One token read serves the scan (member-price coupons) and the liked sync; a throwing read means no token.
+  let memberToken = null;
+  let tokenError = null;
+  try {
+    memberToken = readToken() || null;
+  } catch (err) {
+    tokenError = err;
   }
 
   const dryRun = Boolean(flags['dry-run']);
   let store = null;
   try {
-    let client = null;
     let result = null;
     let scanError = null;
     try {
       if (!dryRun) store = openStore();
-      client = makeClient();
-      result = await trackFn({ client, store, date: today, brands, dryRun, log });
+      result = await trackFn({ makeClient, store, date: today, brands, concurrency, dryRun, memberToken, log });
     } catch (err) {
       scanError = err;
       log(`⚠️ [4910] 수집 실패 (${err.message})`);
@@ -529,13 +553,13 @@ export async function run4910Step({
     }
 
     let liked = null;
-    if (store && client) {
+    if (store) {
       try {
-        const memberToken = readToken();
+        if (tokenError) throw tokenError;
         if (!memberToken) {
           log('[4910] ABLY_JWT_TOKEN 없음 — 찜 가격 기록 건너뜀');
         } else {
-          liked = await syncLikedFn({ client, store, date: today, memberToken, log });
+          liked = await syncLikedFn({ client: makeClient(), store, date: today, memberToken, log });
           log(`💜 [4910] 찜 ${liked.liked}개 · 가격 기록 ${liked.logged}개 (${liked.memberStatus})`);
         }
       } catch (err) {
@@ -560,14 +584,32 @@ export async function run4910Step({
   } finally {
     if (store) {
       try {
-        store.checkpoint(); // otherwise today's rows can sit in the ignored -wal file and miss the commit
+        store.checkpoint(); // otherwise today's rows can sit in the ignored -wal file
       } catch (err) {
-        log(`⚠️ [4910] WAL checkpoint failed; the committed 4910.db may lag (${err.message})`);
+        log(`⚠️ [4910] WAL checkpoint failed; the 4910.db pushed to the release may lag (${err.message})`);
       }
       try {
         store.close();
       } catch {}
     }
+  }
+}
+
+/** `4910-db pull|push`: moves data/4910.db (or CLOT_4910_DB_PATH) to and from the data-4910 Release asset. */
+export function run4910Db({ sub, allowFresh = false, dbPath = default4910DbPath(), pullFn = pullDb, pushFn = pushDb, log = console.log } = {}) {
+  if (sub !== 'pull' && sub !== 'push') {
+    log('Usage: node src/cli.js 4910-db pull|push [--allow-fresh]');
+    return { ok: false };
+  }
+  try {
+    const { bytes, source } = sub === 'pull' ? pullFn({ dest: dbPath }) : pushFn({ src: dbPath, allowFresh });
+    log(sub === 'pull' ? `⬇️ [4910-db] pulled ${bytes.toLocaleString('en-US')} bytes into ${dbPath}` : `⬆️ [4910-db] pushed ${bytes.toLocaleString('en-US')} gzipped bytes from ${dbPath}`);
+    // 4910.db.gz was missing (an upload that died after gh deleted it): today runs on the day-before DB.
+    if (source === 'prev') log('⚠️ [4910-db] 4910.db.gz 없음 — 직전본 4910.db.prev.gz를 받음 (Release 확인 필요)');
+    return { ok: true, bytes };
+  } catch (err) {
+    log(`⚠️ [4910-db] ${sub} failed: ${err.message}`);
+    return { ok: false, error: err.message };
   }
 }
 
@@ -680,10 +722,6 @@ async function handleDailyRun(flags) {
       console.warn(`⚠️ Warning: Discovery failed (${discErr.message})`);
     }
   }
-
-  // 4910 (Uniqlo/GU) runs before the export so data/4910.db rides along in the same commit.
-  console.log(`\n🇯🇵 [4910] Scanning Uniqlo & GU listings on 4910.kr...`);
-  await run4910Step({ flags, today });
 
   // 4. Export JSON and try Git auto-commit
   exportDataForGit();
@@ -1137,6 +1175,11 @@ async function main() {
       if (!res.ok) process.exitCode = 1;
       break;
     }
+    case '4910-db': {
+      const res = run4910Db({ sub: positional[0], allowFresh: Boolean(flags['allow-fresh']) });
+      if (!res.ok) process.exitCode = 1;
+      break;
+    }
     case 'skip': {
       const targetDate = positional[0] || new Date().toISOString().split('T')[0];
       const result = await skipDailyRun({
@@ -1156,16 +1199,17 @@ Usage:
   node src/cli.js <command> [options]
 
 Commands:
-  daily [--force] [--concurrency=1-5] [--with-discovery] [--skip-opencli] [--assume-awake] [--skip-4910]
+  daily [--force] [--concurrency=1-5] [--with-discovery] [--skip-opencli] [--assume-awake]
                          Run daily sync & price tracking (default concurrency: 3).
                          Defers OpenCLI automatically while the Mac is asleep / lid closed.
-                         Also scans Uniqlo & GU on 4910.kr unless --skip-4910.
   skip [date]            Skip today's (or specified date's) price collection and stop running tasks
   audit [date] [--json]  Audit collection integrity, OpenCLI auth rate & health status
   discover [--category <codes>] [--limit <n>] [--min-likes <n>] [--auth-limit <n>]
                          Discover popular products; real prices for up to <n> of them (default 120, 0 = off)
-  track-4910 [--brand uniqlo|gu] [--dry-run]
-                         Scan Uniqlo/GU listings on 4910.kr into data/4910.db (--dry-run writes nothing)
+  track-4910 [--brand <sno>|uniqlo|gu] [--concurrency=1-4] [--dry-run]
+                         Scan the top 4910.kr brands into data/4910.db (--dry-run writes nothing)
+  4910-db pull|push [--allow-fresh]
+                         Download / upload data/4910.db as the data-4910 GitHub Release asset (gh CLI)
   sync                   Sync liked items from Musinsa account
   track [goodsNo] [--concurrency=1-5]  Track active items or promote discovery item to VIP
   watch <url/goodsNo>    Manually add a product to track

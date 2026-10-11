@@ -1,5 +1,7 @@
 // Daily sync of the member's liked 4910 items: refresh the like list, then record each item's display (list),
 // coupon and member price. The member token is only ever passed to the client and never logged or stored.
+// member_price is the 4910 wallet price (list price minus the best-coupon discount) from the first track-4910 run
+// after this change (2026-10). Earlier rows hold the Ably app's /api/v2 member price instead.
 import fs from 'node:fs';
 import path from 'node:path';
 import { toRow } from './client.js';
@@ -113,15 +115,19 @@ export async function syncLiked4910({
       continue;
     }
 
+    // Without a linked option or a list price there is nothing to price, so no coupon is asked for.
     let memberPrice = null;
-    try {
-      memberPrice = (await client.getGoodsDetail(item.sno, { memberToken })).price ?? null;
-    } catch (err) {
-      if (err.code === 'MEMBER_AUTH') {
-        result.memberStatus = 'expired';
-        break;
+    if (anon.optionSno != null && anon.listPrice != null) {
+      try {
+        const best = await client.getBestCoupon(anon.optionSno, { memberToken });
+        memberPrice = best ? Math.ceil((anon.listPrice - best.discount) / 10) * 10 : anon.listPrice;
+      } catch (err) {
+        if (err.code === 'MEMBER_AUTH') {
+          result.memberStatus = 'expired';
+          break;
+        }
+        log(`⚠️ [4910] 찜 ${item.sno} 회원가 조회 실패 (HTTP ${err.status ?? '?'})`);
       }
-      log(`⚠️ [4910] 찜 ${item.sno} 회원가 조회 실패 (HTTP ${err.status ?? '?'})`);
     }
 
     const logRow = {
