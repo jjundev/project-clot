@@ -222,9 +222,9 @@ test('with a member token the qualified sellers get coupon prices', async () => 
     async getGoodsDetail(sno) { return { optionSno: sno * 10 }; },
     async getBestCoupon(optionSno) { return { couponSno: 7, name: '10% 쿠폰', discount: optionSno === 10 ? 5000 : 1990 }; },
   };
-  const res = await track4910({
-    makeClient: fakeClients(CATALOG, { member }), store, date: '2026-10-10', brands: BRANDS, memberToken: 'T', log: quiet,
-  });
+  const makeClient = fakeClients(CATALOG, { member });
+  const res = await track4910({ makeClient, store, date: '2026-10-10', brands: BRANDS, memberToken: 'T', log: quiet });
+  assert.ok(makeClient.calls <= 3); // coupon learning reuses the scan's clients
   const { walletChanges, ...coupons } = res.coupons;
   assert.deepEqual(coupons, { memberStatus: 'ok', wallet: 1, emoney: 1200, eligible: 1, mismatched: 0, hidden: { scope: 0, naver: 0, mismatch: 0 }, priced: 5 });
   assert.deepEqual(walletChanges.added, ['10% 쿠폰']);

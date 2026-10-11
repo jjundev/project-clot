@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Store4910 } from '../src/site4910/store.js';
 import { couponDiscount, couponPrice, learnMarketCoupons, applyCouponPrices } from '../src/site4910/coupons.js';
+import { clientPool } from '../src/pool.js';
 
 const SECRET = 'SECRET-TOKEN';
 const DATE = '2026-10-11';
@@ -611,4 +612,89 @@ test('a listed coupon whose list is cut short hides the seller', async () => {
   assert.ok(logs.includes('[4910] 쿠폰 범위: [4910] 인기 스포츠 20% → category (list cut at 3/924)'));
   assert.equal(store.getCouponGoods(777, DATE).size, 0);
   assert.deepEqual(applyCouponPrices({ store, date: DATE }), { priced: 0, nulled: 2 });
+});
+
+// Clients over one fake (shared config and calls): each request waits delayMs; stats track requests in flight,
+// overall and per client, and how many clients were made.
+function pooled(base, delayMs = 5) {
+  const stats = { inFlight: 0, max: 0, perClientMax: 0, clients: 0 };
+  const make = () => {
+    stats.clients++;
+    let mine = 0;
+    const wrap = (fn) => async (...args) => {
+      stats.inFlight++; mine++;
+      stats.max = Math.max(stats.max, stats.inFlight);
+      stats.perClientMax = Math.max(stats.perClientMax, mine);
+      try { await new Promise((r) => setTimeout(r, delayMs)); return await fn(...args); } finally { stats.inFlight--; mine--; }
+    };
+    return Object.fromEntries(Object.entries(base).map(([k, v]) => [k, typeof v === 'function' ? wrap(v) : v]));
+  };
+  return { withClient: clientPool(make), stats };
+}
+const sixSellers = () => seed(...[1, 2, 3, 4, 5, 6].map((i) => goods(i, i * 10, 85400)));
+
+test('six sellers on three clients: at most three at once, one request per client, wallet and points once', async () => {
+  sixSellers();
+  const base = fakeClient({ best: Object.fromEntries([10, 20, 30, 40, 50, 60].map((o) => [o, wallet20(17080)])) });
+  const { withClient, stats } = pooled(base);
+  const res = await learn(base, [10, 20, 30, 40, 50, 60], [], { withClient, concurrency: 3 });
+  assert.equal(stats.max, 3);
+  assert.equal(stats.clients, 3);
+  assert.equal(stats.perClientMax, 1);
+  assert.equal(base.calls.coupons, 1);
+  assert.equal(base.calls.me, 1);
+  assert.equal(res.eligible, 6);
+  assert.equal(store.getMarketCoupons(DATE).size, 6);
+});
+
+test('two sellers sharing a listed coupon classify it once and both get the listed price', async () => {
+  seed(goods(1, 10, 199000), goods(2, 20, 199000));
+  const base = fakeClient({ wallet: W18, best: { 10: sports20(39800), 20: sports20(39800) }, couponGoods: { 777: { total: 2, pages: [[1, 2]] } } });
+  let sets = 0;
+  const setCouponGoods = store.setCouponGoods.bind(store);
+  store.setCouponGoods = (...a) => { sets++; return setCouponGoods(...a); };
+  const { withClient } = pooled(base);
+  const res = await learn(base, [10, 20], [], { withClient, concurrency: 2 });
+  assert.equal(base.calls.goodsPages.filter((p) => p.couponSno === 777 && p.limit === 1).length, 1);
+  assert.equal(sets, 1);
+  assert.equal(res.mismatched, 0);
+  applyCouponPrices({ store, date: DATE });
+  assert.equal(store.getGoods(1).coupon_price, 159200);
+  assert.equal(store.getGoods(2).coupon_price, 159200);
+});
+
+test('a token expiring mid-run starts no further seller', async () => {
+  sixSellers();
+  const base = fakeClient({ best: { 10: authErr(), ...Object.fromEntries([20, 30, 40, 50, 60].map((o) => [o, wallet20(17080)])) } });
+  const { withClient } = pooled(base);
+  const res = await learn(base, [10, 20, 30, 40, 50, 60], [], { withClient, concurrency: 3 });
+  assert.equal(res.memberStatus, 'expired');
+  assert.deepEqual(base.calls.detail.filter((sno) => sno > 3), []);
+  assert.deepEqual([...store.getMarketCoupons(DATE).keys()].filter((m) => m > 30), []);
+});
+
+test('a MEMBER_AUTH inside a shared scope lookup ends as expired once', async () => {
+  seed(goods(1, 10, 85400), goods(2, 20, 85400));
+  const own603 = { couponSno: 603, name: 'seller 603 5%', discount: 4270, percent: 5, price: null, max: Infinity, min: 0 };
+  const base = fakeClient({ best: { 10: own603, 20: own603 }, couponGoods: { 603: authErr() } });
+  const { withClient } = pooled(base);
+  const logs = [];
+  const res = await learn(base, [10, 20], logs, { withClient, concurrency: 2 });
+  assert.equal(res.memberStatus, 'expired');
+  assert.equal(base.calls.goodsPages.length, 1);
+  assert.equal(store.getMarketCoupons(DATE).size, 0);
+  assert.equal(logs.filter((l) => /토큰 만료/.test(l)).length, 1);
+  assert.ok(logs.every((l) => !String(l).includes(SECRET)));
+});
+
+test('the deadline passing mid-run lets running sellers finish and logs the skipped count once', async () => {
+  seed(goods(1, 10, 85400), goods(2, 20, 85400), goods(3, 30, 85400));
+  const base = fakeClient({ best: { 10: wallet20(17080), 20: wallet20(17080), 30: wallet20(17080) } });
+  // 50 ms a request: wallet + points end near 100 ms, sellers 10 and 20 start there and end near 200 ms, after the 150 ms deadline
+  const { withClient } = pooled(base, 50);
+  const logs = [];
+  await learn(base, [10, 20, 30], logs, { withClient, concurrency: 2, deadline: Date.now() + 150 });
+  assert.deepEqual([...base.calls.detail].sort(), [1, 2]);
+  assert.deepEqual([...store.getMarketCoupons(DATE).keys()].sort(), [10, 20]);
+  assert.deepEqual(logs.filter((l) => /예산/.test(l)), ['⚠️ [4910] 실행 예산 초과 — 판매처 1곳 쿠폰 확인 생략 (쿠폰가 없음)']);
 });

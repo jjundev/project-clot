@@ -58,3 +58,17 @@ export async function mapConcurrent(items, concurrency = 4, iteratorFn) {
 
   return results;
 }
+
+// Hands each concurrent worker a client of its own (each client keeps its own request spacing). A client is
+// made only when none is free, so at most `concurrency` clients ever exist.
+export function clientPool(makeClient) {
+  const idle = [];
+  return async (fn) => {
+    const client = idle.pop() ?? makeClient();
+    try {
+      return await fn(client);
+    } finally {
+      idle.push(client);
+    }
+  };
+}

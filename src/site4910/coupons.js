@@ -1,7 +1,9 @@
 // 4910 coupon price = list price − the best coupon that reaches the listing (docs/verify/4910-member-price.md §2–3).
 // Which coupons reach a seller is decided per seller, so once a day each qualified seller's 1–2 sample listings are
 // asked for their best coupon, and every ACTIVE listing is then priced locally. The member token is only ever passed
-// to the client and never logged.
+// to the client and never logged. Sellers are sampled concurrently, each on a client of its own (one client's
+// request spacing does not hold across concurrent calls), and each seller-only coupon's scope is looked up once.
+import { mapConcurrent } from '../pool.js';
 
 // A seller-only coupon is not always seller-wide (docs/verify/4910-member-price.md §3): one limited to an event list
 // of at most LISTED_COUPON_MAX goods reaches only those goods; one limited to at most SCOPED_MAX_CATEGORIES categories,
@@ -141,10 +143,14 @@ function samplesOf(store, marketSno) {
 }
 
 /**
- * Reads the wallet and the e-money balance, then samples each seller's best coupon. Past `deadline` no new seller
- * is sampled: the sellers not reached get no market_coupons row today, so their listings' coupon price is NULL.
+ * Reads the wallet and the e-money balance once, then samples each seller's best coupon: sellers run `concurrency`
+ * at a time, each on a client of its own from `withClient`, and each seller-only coupon is classified once. Past
+ * `deadline` no new seller is sampled: the sellers not reached get no market_coupons row today, so their listings'
+ * coupon price is NULL. A rejected member token starts no further sample and ends the run as 'expired'.
  */
-export async function learnMarketCoupons({ client, store, date, marketSnos, memberToken, deadline = Infinity, log = console.log }) {
+export async function learnMarketCoupons({
+  client, withClient = (fn) => fn(client), concurrency = 1, store, date, marketSnos, memberToken, deadline = Infinity, log = console.log,
+}) {
   const result = { memberStatus: 'none', wallet: 0, walletChanges: { added: [], removed: [] }, emoney: null, eligible: 0, mismatched: 0, hidden: { scope: 0, naver: 0, mismatch: 0 } };
   if (!memberToken) return result;
   const expired = () => {
@@ -154,33 +160,36 @@ export async function learnMarketCoupons({ client, store, date, marketSnos, memb
 
   let coupons;
   try {
-    coupons = await client.getMyCoupons({ memberToken });
+    coupons = await withClient(async (client) => {
+      const mine = await client.getMyCoupons({ memberToken });
+      result.walletChanges = store.replaceWallet(date, mine);
+      result.memberStatus = 'ok';
+      try {
+        result.emoney = (await client.getMe({ memberToken })).emoney ?? null;
+      } catch (err) {
+        log(`⚠️ [4910] 포인트 조회 실패 (HTTP ${err.status ?? '?'})`);
+      }
+      return mine;
+    });
   } catch (err) {
     if (err.code === 'MEMBER_AUTH') return expired();
     throw err;
   }
-  result.walletChanges = store.replaceWallet(date, coupons);
   const wallet = walletRows(store.getWallet());
   const walletSnos = new Set(wallet.map((c) => c.coupon_sno));
   const walletMin = new Map(wallet.map((c) => [c.coupon_sno, c.min]));
   result.wallet = wallet.length;
-  result.memberStatus = 'ok';
 
-  try {
-    result.emoney = (await client.getMe({ memberToken })).emoney ?? null;
-  } catch (err) {
-    log(`⚠️ [4910] 포인트 조회 실패 (HTTP ${err.status ?? '?'})`);
-  }
-
-  const scopes = new Map(); // coupon sno → scope, classified once per run
+  // coupon sno → Promise of its scope: a seller meeting a coupon another seller is still classifying waits for that
+  // lookup instead of starting its own (so its goods list is stored once).
+  const scopes = new Map();
   const listedGoods = listedGoodsOf(store, date);
-  for (const [i, marketSno] of marketSnos.entries()) {
-    if (Date.now() > deadline) {
-      log(`⚠️ [4910] 실행 예산 초과 — 판매처 ${marketSnos.length - i}곳 쿠폰 확인 생략 (쿠폰가 없음)`);
-      break;
-    }
+  let stopped = false;
+
+  async function learnSeller(client, marketSno) {
     const answers = [];
     for (const sample of samplesOf(store, marketSno)) {
+      if (stopped) return;
       let detail;
       try {
         detail = await client.getGoodsDetail(sample.sno);
@@ -197,25 +206,28 @@ export async function learnMarketCoupons({ client, store, date, marketSnos, memb
       try {
         best = await client.getBestCoupon(detail.optionSno, { memberToken });
       } catch (err) {
-        if (err.code === 'MEMBER_AUTH') return expired();
+        if (err.code === 'MEMBER_AUTH') {
+          stopped = true;
+          throw err;
+        }
         log(`⚠️ [4910] 판매처 ${marketSno} 표본 ${sample.sno} 쿠폰 조회 실패 (HTTP ${err.status ?? '?'})`);
         continue;
       }
       if (best && !walletSnos.has(best.couponSno)) {
-        if (!scopes.has(best.couponSno)) {
-          try {
-            scopes.set(best.couponSno, await classifyCoupon({ client, store, date, memberToken, best, log }));
-          } catch (err) {
-            if (err.code === 'MEMBER_AUTH') return expired();
-            throw err;
-          }
+        if (!scopes.has(best.couponSno)) scopes.set(best.couponSno, classifyCoupon({ client, store, date, memberToken, best, log }));
+        let scope;
+        try {
+          scope = await scopes.get(best.couponSno);
+        } catch (err) {
+          stopped = true;
+          throw err;
         }
-        store.addMarketCoupon(date, marketSno, { ...sellerCouponFromBest(best), scope: scopes.get(best.couponSno) });
+        store.addMarketCoupon(date, marketSno, { ...sellerCouponFromBest(best), scope });
       }
       // best-coupon computes the discount on the detail price, which can differ from the listing's sale_price.
       answers.push({ sno: sample.sno, L: detail.listPrice ?? sample.sale_price, best });
     }
-    if (!answers.length) continue;
+    if (!answers.length) return;
 
     const snos = [...new Set(answers.map((a) => a.best?.couponSno).filter((sno) => sno != null))];
     const rows = store.getWallet();
@@ -245,6 +257,22 @@ export async function learnMarketCoupons({ client, store, date, marketSnos, memb
       result.hidden[setFor ? 'mismatch' : hiddenReason(snos, rows, date, walletSnos)]++;
     }
   }
+
+  let skipped = 0;
+  try {
+    await mapConcurrent(marketSnos, concurrency, (marketSno) => {
+      if (stopped) return;
+      if (Date.now() > deadline) {
+        skipped++;
+        return;
+      }
+      return withClient((client) => learnSeller(client, marketSno));
+    });
+  } catch (err) {
+    if (err.code === 'MEMBER_AUTH') return expired();
+    throw err;
+  }
+  if (skipped) log(`⚠️ [4910] 실행 예산 초과 — 판매처 ${skipped}곳 쿠폰 확인 생략 (쿠폰가 없음)`);
   return result;
 }
 
