@@ -47,17 +47,29 @@ function withTmpDir(tmpDir, fn) {
   }
 }
 
-// Downloads one asset into dir; returns its path, or throws when gh fails or the asset did not arrive.
+// gh's answer when the release exists but has no asset by that name.
+const NO_ASSET_RE = /no assets? match/i;
+
+// Downloads one asset into dir; returns its path, or throws when gh fails or the asset did not arrive. The error
+// has `missing: true` only when the asset is genuinely absent (gh's "no assets match", or exit 0 with no file), not
+// for a network, 5xx, auth or missing-release failure.
 function downloadAsset(run, dir, asset) {
-  gh(run, ['release', 'download', RELEASE_TAG_4910, '-p', asset, '-D', dir, '--clobber'], `release download ${asset}`);
+  try {
+    gh(run, ['release', 'download', RELEASE_TAG_4910, '-p', asset, '-D', dir, '--clobber'], `release download ${asset}`);
+  } catch (err) {
+    if (NO_ASSET_RE.test(err.message)) err.missing = true;
+    throw err;
+  }
   const file = path.join(dir, asset);
-  if (!fs.existsSync(file)) throw new Error(`release ${RELEASE_TAG_4910} has no ${asset} asset`);
+  if (!fs.existsSync(file)) throw Object.assign(new Error(`release ${RELEASE_TAG_4910} has no ${asset} asset`), { missing: true });
   return file;
 }
 
 /**
- * Downloads the Release asset and replaces `dest` with its gunzipped bytes. When 4910.db.gz cannot be downloaded
- * (an upload that failed after gh deleted it), falls back to 4910.db.prev.gz and says so with source 'prev'.
+ * Downloads the Release asset and replaces `dest` with its gunzipped bytes. Only when 4910.db.gz is genuinely
+ * missing (an upload that failed after gh deleted it) does it fall back to 4910.db.prev.gz, saying so with source
+ * 'prev'; any other download failure (network, 5xx, auth) throws, so a run never starts from a day-old base while
+ * the latest asset still exists.
  * dest is only touched by the final rename, after the download and the gunzip both succeeded; any failure throws and
  * leaves it byte-identical.
  */
@@ -68,6 +80,7 @@ export function pullDb({ dest, run = defaultRun, tmpDir }) {
     try {
       gz = downloadAsset(run, dir, ASSET_4910);
     } catch (latestErr) {
+      if (!latestErr.missing) throw latestErr;
       try {
         gz = downloadAsset(run, dir, PREV_ASSET_4910);
         source = 'prev';

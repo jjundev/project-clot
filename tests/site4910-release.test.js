@@ -61,25 +61,40 @@ test('pullDb writes the gunzipped asset to dest and clears stale sidecars', (t) 
   assert.deepEqual(fs.readdirSync(path.dirname(dest)).filter((n) => n.includes('tmp')), [], 'no partial file is left behind');
 });
 
-test('pullDb leaves dest untouched when gh fails', (t) => {
+test('pullDb leaves dest untouched and does not try prev when the release is not found', (t) => {
   const dir = scratch(t);
   const dest = path.join(dir, '4910.db');
   fs.writeFileSync(dest, 'precious');
   const run = fakeRun(() => ({ status: 1, stderr: 'release not found\n' }));
-  assert.throws(() => pullDb({ dest, run, tmpDir: dir }), /release download 4910\.db\.gz failed.*release not found; fallback 4910\.db\.prev\.gz: .*failed/);
+  assert.throws(() => pullDb({ dest, run, tmpDir: dir }), /release download 4910\.db\.gz failed.*release not found$/);
+  assert.equal(fs.readFileSync(dest, 'utf8'), 'precious');
+  assert.equal(run.calls.length, 1);
+});
+
+test('a transient download failure throws without falling back to prev', (t) => {
+  const dir = scratch(t);
+  const dest = path.join(dir, '4910.db');
+  fs.writeFileSync(dest, 'precious');
+  const run = fakeRun((args) => {
+    if (args[4] === ASSET_4910) return { status: 1, stderr: 'HTTP 502: Bad Gateway' };
+    fs.writeFileSync(path.join(args[args.indexOf('-D') + 1], PREV_ASSET_4910), zlib.gzipSync(Buffer.from('day-before')));
+    return undefined;
+  });
+  assert.throws(() => pullDb({ dest, run, tmpDir: path.join(dir, 'tmp') }), /release download 4910\.db\.gz failed.*HTTP 502: Bad Gateway$/);
+  assert.deepEqual(run.calls.map((c) => c.args[4]), [ASSET_4910], 'no prev download');
   assert.equal(fs.readFileSync(dest, 'utf8'), 'precious');
 });
 
-test('pullDb leaves dest untouched when the asset is missing', (t) => {
+test('pullDb leaves dest untouched when neither latest nor prev is there', (t) => {
   const dir = scratch(t);
   const dest = path.join(dir, '4910.db');
   fs.writeFileSync(dest, 'precious');
   const run = fakeRun(); // gh exits 0 but downloads nothing
-  assert.throws(() => pullDb({ dest, run, tmpDir: dir }), /no 4910\.db\.gz asset/);
+  assert.throws(() => pullDb({ dest, run, tmpDir: dir }), /no 4910\.db\.gz asset; fallback 4910\.db\.prev\.gz: .*no 4910\.db\.prev\.gz asset/);
   assert.equal(fs.readFileSync(dest, 'utf8'), 'precious');
 });
 
-test('pullDb falls back to the prev asset when 4910.db.gz cannot be downloaded', (t) => {
+test('pullDb falls back to the prev asset when gh reports no asset matching 4910.db.gz', (t) => {
   const dir = scratch(t);
   const dest = path.join(dir, '4910.db');
   const payload = Buffer.from('day-before database');
