@@ -277,7 +277,6 @@ a{color:inherit}
 .card.out .mine,.card.out .rate{color:var(--muted)}
 .was{font-size:11px;color:var(--muted);text-decoration:line-through;margin-top:2px}
 .was.nb{text-decoration:none}
-.was.cp{text-decoration:none;color:var(--down);font-weight:700}
 .tag{
   display:inline-block;margin-top:7px;font-size:10px;font-weight:700;
   letter-spacing:0.03em;padding:3px 6px;border-radius:4px;
@@ -570,8 +569,6 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         <option value="rate">할인율 높은 순</option>
         <option value="priceAsc">실구매가 낮은 순</option>
         <option value="priceDesc">실구매가 높은 순</option>
-        <option value="coupon">쿠폰가 낮은순</option>
-        <option value="couponRate">쿠폰 할인율순</option>
         <option value="dropAmt">하락폭 큰 순</option>
         <option value="brand">브랜드명 순</option>
         <option value="new">최근 추가 순</option>
@@ -712,16 +709,20 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     // 4910 rows are priced on different bases ('내 회원가' vs '쿠폰적용가(신규회원 기준)', slot [5]); only
     // rows on the latest row's basis are comparable, so a coupon-only day never fakes a drop or a low.
     var is4910Item = is4910(it);
-    var lowMy = Infinity, lowDate = null;
+    var lowMy = Infinity, lowDate = null, basisMoved = false, firstMy = null;
     L.forEach(function (r) {
       if (is4910Item && r[5] !== last[5]) return;
       if (r[3] != null && r[3] < lowMy) { lowMy = r[3]; lowDate = r[0]; }
+      if (r[3] != null) {
+        if (firstMy == null) firstMy = r[3];
+        else if (r[3] !== firstMy) basisMoved = true;
+      }
     });
     it.lowMy = lowMy === Infinity ? null : lowMy;
     it.lowDate = lowDate;
     it.isLow = it.lowMy != null && it.my != null && it.my <= it.lowMy;
-    // A scanned listing whose price never changed has nothing to be lowest against.
-    if (it.src === '4910all' && !it.moved) it.isLow = false;
+    // A listing whose price on today's basis never changed has nothing to be lowest against.
+    if (it.src === '4910all' && !basisMoved) it.isLow = false;
 
     it.dropAmt = (prev && (!is4910Item || prev[5] === last[5]) && prev[3] != null && it.my != null && it.my < prev[3]) ? prev[3] - it.my : 0;
   }
@@ -850,18 +851,20 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     else { sel4910[sno] = true; load4910Brand(sno); }
     renderBrandBar(); render();
   });
-  // Scanned listings carry 표시가 only. A tail row on the latest scan keeps an old change from reading
-  // as today's drop (dropAmt compares the last two rows). cp (쿠폰가) counts only below the current price.
+  // A scanned listing's price on a day is its 쿠폰가 when that day's coupon price is known, else its 표시가;
+  // the two bases are never compared (slot [5]). The payload already ends on the latest scan, so an old
+  // change never reads as today's drop (dropAmt compares the last two rows).
   function expand4910All(P) {
     var start = D.items.length;
     P.r.forEach(function (r) {
-      var L = r[7].map(function (h) { return [h[0], h[1], h[2], h[2], 0, '표시가', 0]; });
-      var tail = L[L.length - 1];
-      if (P.lastScan && tail && tail[0] < P.lastScan) L.push([P.lastScan, tail[1], tail[2], tail[3], 0, '표시가', 0]);
+      var L = r[7].map(function (h) {
+        var cp = h[3];
+        return [h[0], h[1], h[2], cp != null ? cp : h[2], 0, cp != null ? '쿠폰가' : '표시가', cp != null ? h[2] - cp : 0];
+      });
       D.items.push({
         n: r[0], k: '4910:' + r[0], src: '4910all', bs: P.brandSno, b: P.b[r[1]], m: P.m[r[2]], g: r[3],
         u: 'https://4910.kr/goods/' + r[0], i: !r[4] ? '' : (/^https?:/.test(r[4]) ? r[4] : P.imgBase + r[4]),
-        s: 'ACTIVE', c: r[6], fs: r[5], L: L, moved: r[7].length > 1, cp: r[8] == null ? null : r[8]
+        s: 'ACTIVE', c: r[6], fs: r[5], L: L
       });
     });
     for (var i = start; i < D.items.length; i++) derive(D.items[i], i);
@@ -876,7 +879,6 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   var grid = document.getElementById('grid');
   var qEl = document.getElementById('q');
   var sortSel = document.getElementById('sortSel');
-  sortSel.value = state.sort;
 
   function matches(it) {
     if (!inSrc(it)) return false;
@@ -890,12 +892,6 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       default: return true;
     }
   }
-  // 쿠폰가 counts only when it beats the current price; without one the current price stands in.
-  function couponPrice(it) { return it.cp != null && (it.my == null || it.cp < it.my) ? it.cp : it.my; }
-  function couponRate(it) {
-    var p = couponPrice(it);
-    return it.normal && p != null ? (it.normal - p) / it.normal : null;
-  }
   var SORTERS = {
     category: function (a, b) {
       var d = (CAT_ORDER[a.c] || 9) - (CAT_ORDER[b.c] || 9);
@@ -904,18 +900,15 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     rate: function (a, b) { return b.rate - a.rate || a.n - b.n; },
     priceAsc: function (a, b) { return (a.my == null ? 1e12 : a.my) - (b.my == null ? 1e12 : b.my); },
     priceDesc: function (a, b) { return (b.my == null ? -1 : b.my) - (a.my == null ? -1 : a.my); },
-    coupon: function (a, b) {
-      var pa = couponPrice(a), pb = couponPrice(b);
-      return (pa == null ? 1e12 : pa) - (pb == null ? 1e12 : pb) || a.n - b.n;
-    },
-    couponRate: function (a, b) {
-      var ra = couponRate(a), rb = couponRate(b);
-      return (rb == null ? -1e9 : rb) - (ra == null ? -1e9 : ra) || a.n - b.n;
-    },
     dropAmt: function (a, b) { return b.dropAmt - a.dropAmt || b.rate - a.rate; },
     brand: function (a, b) { return (a.b || '').localeCompare(b.b || '', 'ko') || a.g.localeCompare(b.g, 'ko'); },
     new: function (a, b) { return (b.fs || '').localeCompare(a.fs || '') || b.n - a.n; }
   };
+  // The coupon sorts became the price sorts once 쿠폰가 is the 4910 price; a saved one opens as its successor.
+  var SORT_RENAMED = { coupon: 'priceAsc', couponRate: 'rate' };
+  if (SORT_RENAMED[state.sort]) { state.sort = SORT_RENAMED[state.sort]; store('sort', state.sort); }
+  if (!SORTERS[state.sort]) state.sort = 'rate';
+  sortSel.value = state.sort;
 
   var FILTER_CAPTION = {
     all: '', lowest: '· 역대 최저가만', drop: '· 어제보다 하락한 상품만',
@@ -945,7 +938,6 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         '<span class="mine num">' + won(it.my) + '</span></div>' +
         (it.normal && it.normal !== it.my ? '<div class="was num">' + won(it.normal) + '</div>' : '') +
         (it.newbie != null && it.newbie !== it.my ? '<div class="was nb num">쿠폰적용가(신규회원 기준) ' + won(it.newbie) + '</div>' : '') +
-        (it.cp != null && it.my != null && it.cp < it.my ? '<div class="was cp num">쿠폰가 ' + won(it.cp) + '</div>' : '') +
         (it.coupon > 0 ? '<span class="tag">' + esc(it.couponName || '쿠폰') + ' −' + it.coupon.toLocaleString('ko-KR') + '원</span>' : '');
     }
     var tags = (it.c ? '<span class="cat-tag">' + esc(CAT_NAMES[it.c] || it.c) + '</span>' : '') +
@@ -1273,7 +1265,6 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         '</b> · ' + md(it.lowDate) + '</span>');
       f.push('<span class="fact">' + (on4910 ? '4910 표시가' : '무신사 판매가') + ' <b class="num">' + won(it.sale) + '</b></span>');
       if (it.newbie != null) f.push('<span class="fact">쿠폰적용가(신규회원 기준) <b class="num">' + won(it.newbie) + '</b></span>');
-      if (it.cp != null && it.my != null && it.cp < it.my) f.push('<span class="fact">쿠폰가 <b class="num">' + won(it.cp) + '</b></span>');
       if (it.coupon > 0) f.push('<span class="fact">' + esc(it.couponName || '쿠폰') + ' <b class="num">−' + won(it.coupon) + '</b></span>');
       if (it.isOut) f.push('<span class="fact out">품절</span>');
       fx.innerHTML = f.join('');

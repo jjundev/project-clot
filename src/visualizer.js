@@ -108,22 +108,54 @@ export function buildScan4910Index(db4910) {
   return { v: 2, lastScan: lastScanDate(db4910), brands };
 }
 
+/** Days past the last priced day (a coupon-ok run, or a day with a coupon row) a listing keeps its last coupon price. */
+export const COUPON_CARRY_DAYS_4910 = 3;
+
+const dayNo = (date) => Date.UTC(+date.slice(0, 4), +date.slice(5, 7) - 1, +date.slice(8, 10)) / 86400000;
+
+/**
+ * Merges a listing's price history with its coupon price history into one `[date, original, sale, cp]` row per date
+ * in changes ∪ coupons ∪ lastScan (none before the first price change). `cp` is the last coupon row's price only while
+ * that row's sale price is the day's sale price and the day is within COUPON_CARRY_DAYS_4910 of the last priced day;
+ * otherwise null (the day is on the 표시가 basis).
+ * @param {{ changes: [string, number|null, number|null][], coupons: [string, number, number|null][], okDates: string[], lastScan: string|null }} input
+ *   All sorted by date; okDates holds every priced day (a coupons_ok run or any listing's coupon row).
+ * @returns {[string, number|null, number|null, number|null][]}
+ */
+export function mergeCouponHistory4910({ changes, coupons, okDates, lastScan }) {
+  if (!changes.length) return [];
+  const first = changes[0][0];
+  const dates = [...new Set([...changes.map((c) => c[0]), ...coupons.map((c) => c[0]), ...(lastScan ? [lastScan] : [])])]
+    .filter((d) => d >= first)
+    .sort();
+  let ci = -1;
+  let ki = -1;
+  let oi = -1;
+  return dates.map((d) => {
+    while (ci + 1 < changes.length && changes[ci + 1][0] <= d) ci++;
+    while (ki + 1 < coupons.length && coupons[ki + 1][0] <= d) ki++;
+    while (oi + 1 < okDates.length && okDates[oi + 1] <= d) oi++;
+    const [, original, sale] = changes[ci];
+    const c = ki >= 0 ? coupons[ki] : null;
+    const fresh = oi >= 0 && dayNo(d) - dayNo(okDates[oi]) <= COUPON_CARRY_DAYS_4910;
+    return [d, original, sale, c && c[2] != null && c[1] === sale && fresh ? c[2] : null];
+  });
+}
+
 /**
  * Packs the ACTIVE scanned listings of one brand (every brand when `brandSno` is omitted) into the compact
- * `4910/b{sno}.js` payload. Each row is `[sno, bIdx, mIdx, name, imgPath, firstSeen, cat, H, cp]`; `cp` is the
- * coupon price, null when unknown or when the 4910.db predates the column.
+ * `4910/b{sno}.js` payload. Each row is `[sno, bIdx, mIdx, name, imgPath, firstSeen, cat, H]`, where H holds
+ * `[date, original, sale, cp]` rows from mergeCouponHistory4910 (cp null throughout on a 4910.db without coupon history).
  * @param {import('node:sqlite').DatabaseSync} db4910
  * @param {{ brandSno?: number|null }} [options]
  * @returns {{ v: 1, brandSno: number|null, lastScan: string|null, imgBase: string, b: string[], m: string[], r: any[][] }}
  */
 export function buildScan4910Payload(db4910, { brandSno = null } = {}) {
-  const goodsCols = new Set(db4910.prepare('PRAGMA table_info(goods)').all().map((c) => c.name));
-  const cpCol = goodsCols.has('coupon_price') ? 'coupon_price' : 'NULL';
   const brandFilter = brandSno != null ? 'AND brand_sno = :brand' : '';
   const where = `status = 'ACTIVE' ${likedFilterSql(db4910)} ${brandFilter}`;
   const params = brandSno != null ? { brand: Number(brandSno) } : {};
   const goods = db4910
-    .prepare(`SELECT sno, brand, market_name, name, image_url, first_seen_date, ${cpCol} AS cp FROM goods WHERE ${where} ORDER BY sno ASC`)
+    .prepare(`SELECT sno, brand, market_name, name, image_url, first_seen_date FROM goods WHERE ${where} ORDER BY sno ASC`)
     .all(params);
   const changes = db4910
     .prepare(`
@@ -133,13 +165,39 @@ export function buildScan4910Payload(db4910, { brandSno = null } = {}) {
     `)
     .all(params);
 
-  const histBySno = new Map();
-  for (const c of changes) {
-    const h = [c.date, c.original_price ?? null, c.sale_price ?? null];
-    const arr = histBySno.get(c.sno);
-    if (arr) arr.push(h);
-    else histBySno.set(c.sno, [h]);
-  }
+  const group = (rows, toRow) => {
+    const bySno = new Map();
+    for (const row of rows) {
+      const arr = bySno.get(row.sno);
+      if (arr) arr.push(toRow(row));
+      else bySno.set(row.sno, [toRow(row)]);
+    }
+    return bySno;
+  };
+  const histBySno = group(changes, (c) => [c.date, c.original_price ?? null, c.sale_price ?? null]);
+
+  // A 4910.db from before the coupon history has neither the table nor scan_runs.coupons_ok: no coupon prices then.
+  const hasCouponHistory = !!db4910.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'coupon_price_changes'").get();
+  const couponsBySno = hasCouponHistory
+    ? group(
+        db4910
+          .prepare(`
+            SELECT sno, date, sale_price, coupon_price FROM coupon_price_changes
+            WHERE sno IN (SELECT sno FROM goods WHERE ${where})
+            ORDER BY date ASC
+          `)
+          .all(params),
+        (c) => [c.date, c.sale_price, c.coupon_price ?? null]
+      )
+    : new Map();
+  // A coupon row on any listing proves an ok run that day, even if a later non-ok rerun overwrote scan_runs.
+  const runCols = new Set(db4910.prepare('PRAGMA table_info(scan_runs)').all().map((c) => c.name));
+  const okSql = [
+    runCols.has('coupons_ok') ? 'SELECT date FROM scan_runs WHERE coupons_ok = 1' : null,
+    hasCouponHistory ? 'SELECT date FROM coupon_price_changes' : null,
+  ].filter(Boolean);
+  const okDates = okSql.length ? db4910.prepare(`${okSql.join(' UNION ')} ORDER BY date`).all().map((r) => r.date) : [];
+  const lastScan = lastScanDate(db4910);
 
   const b = [];
   const m = [];
@@ -153,6 +211,9 @@ export function buildScan4910Payload(db4910, { brandSno = null } = {}) {
     return idx.get(v);
   };
 
+  const historyOf = (sno) =>
+    mergeCouponHistory4910({ changes: histBySno.get(sno) || [], coupons: couponsBySno.get(sno) || [], okDates, lastScan });
+
   const r = goods.map((g) => {
     const img = g.image_url || '';
     return [
@@ -163,12 +224,11 @@ export function buildScan4910Payload(db4910, { brandSno = null } = {}) {
       img.startsWith(IMG_BASE_4910) ? img.slice(IMG_BASE_4910.length) : img,
       g.first_seen_date || '',
       classifyCategory(g.name, g.brand),
-      histBySno.get(g.sno) || [],
-      g.cp ?? null,
+      historyOf(g.sno),
     ];
   });
 
-  return { v: 1, brandSno: brandSno != null ? Number(brandSno) : null, lastScan: lastScanDate(db4910), imgBase: IMG_BASE_4910, b, m, r };
+  return { v: 1, brandSno: brandSno != null ? Number(brandSno) : null, lastScan, imgBase: IMG_BASE_4910, b, m, r };
 }
 
 const scriptJson = (value) => JSON.stringify(value).replace(/<\/script/gi, '<\\/script');

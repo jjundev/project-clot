@@ -131,6 +131,33 @@ test('a seller without a coupon keeps the list price; a mismatched seller gets n
   assert.equal(store.getGoods(5).coupon_price, null);
 });
 
+test("applyCouponPrices records every ACTIVE listing's (sale, coupon) pair, nulls included", () => {
+  store.replaceWallet(DATE, W);
+  seed(goods(1, 10, 85400), goods(2, 20, 85400), goods(3, 30, 85400), goods(4, 40, 85400), goods(5, 10, null));
+  store.recordMarketCoupon({ market_sno: 10, date: DATE, coupon_sno: 1, coupon_name: 'A', checked_price: 85400, coupon_discount: 17080, mismatch: false });
+  store.recordMarketCoupon({ market_sno: 20, date: DATE, coupon_sno: null, coupon_name: null, checked_price: 85400, coupon_discount: null, mismatch: false });
+  store.recordMarketCoupon({ market_sno: 30, date: DATE, coupon_sno: 1, coupon_name: 'A', checked_price: 85400, coupon_discount: 9000, mismatch: true });
+  applyCouponPrices({ store, date: DATE });
+  const logged = store.db.prepare('SELECT sno, sale_price, coupon_price FROM coupon_price_changes WHERE date = ? ORDER BY sno').all(DATE).map((r) => ({ ...r }));
+  // listing 5 has no sale price, so it has no pair to record
+  const goodsRows = store.db.prepare("SELECT sno, sale_price, coupon_price FROM goods WHERE status = 'ACTIVE' AND sale_price IS NOT NULL ORDER BY sno").all().map((r) => ({ ...r }));
+  assert.deepEqual(logged, goodsRows);
+  assert.equal(logged.length, 4);
+  assert.ok(logged.some((r) => r.coupon_price === null));
+});
+
+test('with marketSnos, applyCouponPrices leaves the listings of sellers outside it untouched', () => {
+  store.replaceWallet(DATE, W);
+  seed(goods(1, 10, 85400), goods(2, 20, 85400));
+  store.setCouponPrices([[2, 70000]]);
+  store.logCouponPriceChanges('2026-10-10', [{ sno: 2, sale_price: 85400, coupon_price: 70000 }]);
+  store.recordMarketCoupon({ market_sno: 10, date: DATE, coupon_sno: 1, coupon_name: 'A', checked_price: 85400, coupon_discount: 17080, mismatch: false });
+  assert.deepEqual(applyCouponPrices({ store, date: DATE, marketSnos: [10] }), { priced: 1, nulled: 0 });
+  assert.equal(store.getGoods(1).coupon_price, 68320);
+  assert.equal(store.getGoods(2).coupon_price, 70000);
+  assert.deepEqual(store.db.prepare('SELECT sno FROM coupon_price_changes WHERE date = ?').all(DATE).map((r) => r.sno), [1]);
+});
+
 test('applyCouponPrices uses only seller-only coupons seen today', () => {
   store.replaceWallet(DATE, W);
   seed(goods(1, 10, 50150));

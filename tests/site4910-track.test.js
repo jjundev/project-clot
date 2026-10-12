@@ -201,18 +201,6 @@ test('past the run budget no seller is checked and no coupon is sampled, but the
   assert.match(lines.join('\n'), /run budget/);
 });
 
-test('without a member token the scan still stores rows and coupon_price stays null', async () => {
-  await track4910({ makeClient: fakeClients(CATALOG), store, date: '2026-10-10', brands: BRANDS, log: quiet });
-  store.setCouponPrices(new Map([[1, 40000]])); // yesterday's value must not survive today
-  const res = await track4910({ makeClient: fakeClients(CATALOG), store, date: '2026-10-11', brands: BRANDS, log: quiet });
-
-  assert.equal(res.coupons.memberStatus, 'none');
-  assert.equal(res.coupons.priced, 0);
-  assert.equal(count("SELECT COUNT(*) AS n FROM goods WHERE status = 'ACTIVE'"), 5);
-  assert.equal(count('SELECT COUNT(*) AS n FROM goods WHERE coupon_price IS NOT NULL'), 0);
-  assert.equal(count('SELECT COUNT(*) AS n FROM scan_runs'), 2);
-});
-
 const WALLET = [{ couponSno: 7, name: '10% 쿠폰', type: 'PERCENT', percent: 10, price: null, max: Infinity, min: 10000, finishedAt: null, usable: true }];
 
 test('with a member token the qualified sellers get coupon prices', async () => {
@@ -231,6 +219,54 @@ test('with a member token the qualified sellers get coupon prices', async () => 
   assert.equal(store.getGoods(1).coupon_price, 45000);
   assert.equal(store.getGoods(11).coupon_price, 17910);
   assert.equal(store.getGoods(3).coupon_price, 9900); // below the coupon minimum
+  assert.equal(count("SELECT COUNT(*) AS n FROM coupon_price_changes WHERE date = '2026-10-10'"), 5);
+  assert.equal(count("SELECT COUNT(*) AS n FROM scan_runs WHERE coupons_ok = 1"), 1);
+});
+
+test('a run whose coupon learning is not ok keeps the last coupon prices and history', async () => {
+  const member = {
+    async getMyCoupons() { return WALLET; },
+    async getMe() { return { emoney: 0 }; },
+    async getGoodsDetail(sno) { return { optionSno: sno * 10 }; },
+    async getBestCoupon(optionSno) { return { couponSno: 7, name: '10% 쿠폰', discount: optionSno === 10 ? 5000 : 1990 }; },
+  };
+  await track4910({ makeClient: fakeClients(CATALOG, { member }), store, date: '2026-10-10', brands: BRANDS, memberToken: 'T', log: quiet });
+  const lines = [];
+  const none = await track4910({ makeClient: fakeClients(CATALOG), store, date: '2026-10-11', brands: BRANDS, log: (l) => lines.push(l) });
+  const authErr = Object.assign(new Error('member token rejected'), { code: 'MEMBER_AUTH', status: 401 });
+  const expired = await track4910({
+    makeClient: fakeClients(CATALOG, { member: { async getMyCoupons() { throw authErr; } } }), store, date: '2026-10-12', brands: BRANDS, memberToken: 'T', log: quiet,
+  });
+
+  assert.equal(none.coupons.memberStatus, 'none');
+  assert.equal(none.coupons.priced, 0);
+  assert.equal(expired.coupons.memberStatus, 'expired');
+  assert.equal(expired.coupons.priced, 0);
+  assert.equal(count("SELECT COUNT(*) AS n FROM goods WHERE status = 'ACTIVE'"), 5);
+  assert.equal(store.getGoods(1).coupon_price, 45000);
+  assert.equal(count("SELECT COUNT(*) AS n FROM coupon_price_changes WHERE date > '2026-10-10'"), 0);
+  assert.deepEqual(store.db.prepare('SELECT date, coupons_ok FROM scan_runs ORDER BY date').all().map((r) => [r.date, r.coupons_ok]),
+    [['2026-10-10', 1], ['2026-10-11', 0], ['2026-10-12', 0]]);
+  assert.ok(lines.includes('⚠️ [4910] 쿠폰가 갱신 생략 — 마지막 쿠폰가 유지'));
+});
+
+test("a --brand run reprices only the sellers it learned; another brand's listings keep their coupon prices", async () => {
+  const catalog = { ...CATALOG, 13647: [[11, 19900, 3], [12, 29900, 3]] }; // GU is sold by seller 3 only
+  const price = { 1: 50000, 2: 30000, 11: 19900, 12: 29900 };
+  const member = {
+    async getMyCoupons() { return WALLET; },
+    async getMe() { return { emoney: 0 }; },
+    async getGoodsDetail(sno) { return { optionSno: sno * 10 }; },
+    async getBestCoupon(optionSno) { return { couponSno: 7, name: '10% 쿠폰', discount: price[optionSno / 10] * 0.1 }; },
+  };
+  store.upsertBrands('2026-10-10', BRANDS, []); // the stored brand list keeps GU in scope on a partial run
+  await track4910({ makeClient: fakeClients(catalog, { member }), store, date: '2026-10-10', brands: BRANDS, memberToken: 'T', log: quiet });
+  assert.equal(store.getGoods(11).coupon_price, 17910);
+  const res = await track4910({ makeClient: fakeClients(catalog, { member }), store, date: '2026-10-11', brands: [BRANDS[0]], memberToken: 'T', log: quiet });
+  assert.equal(res.coupons.memberStatus, 'ok');
+  assert.equal(store.getGoods(11).status, 'ACTIVE');
+  assert.equal(store.getGoods(11).coupon_price, 17910);
+  assert.equal(count("SELECT COUNT(*) AS n FROM coupon_price_changes WHERE date = '2026-10-11'"), 0);
 });
 
 const LIST_PRICE = { 1: 40000, 2: 30000, 3: 9900, 11: 19900, 12: 29900 }; // day-2 prices of the drop test below

@@ -2,7 +2,7 @@ import './setup-env.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { buildClotDataPayload, buildScan4910Payload, buildScan4910Index } from '../src/visualizer.js';
+import { buildClotDataPayload, buildScan4910Payload, buildScan4910Index, mergeCouponHistory4910, COUPON_CARRY_DAYS_4910 } from '../src/visualizer.js';
 import { Store4910 } from '../src/site4910/store.js';
 
 describe('Visualizer Data Extraction', () => {
@@ -281,7 +281,8 @@ describe('Visualizer Data Extraction', () => {
       assert.equal(img, 'x/1.jpg');
       assert.equal(fs, '2026-10-10');
       assert.equal(typeof cat, 'string');
-      assert.deepEqual(H, [['2026-10-10', 100000, 50000], ['2026-10-11', 90000, 45000]]);
+      assert.deepEqual(H, [['2026-10-10', 100000, 50000, null], ['2026-10-11', 90000, 45000, null]]);
+      assert.equal(p.r[0].length, 8);
       store.close();
     });
 
@@ -329,26 +330,59 @@ describe('Visualizer Data Extraction', () => {
       store.close();
     });
 
-    test('brand payload carries coupon_price as the 9th field', () => {
+    test('a brand payload holds only its brand and no coupon_price field', () => {
       const store = fixture();
       store.db.prepare("UPDATE liked_goods SET status = 'UNLIKED' WHERE sno = 2").run();
-      store.setCouponPrices([[1, 39000]]);
+      store.setCouponPrices([[1, 39000]]);   // goods.coupon_price is not read
       const p = buildScan4910Payload(store.db, { brandSno: 2421 });
       assert.equal(p.v, 1);
       assert.equal(p.brandSno, 2421);
       assert.deepEqual(p.r.map((r) => r[0]), [1]);   // GU's listing 2 stays in its own file
-      assert.equal(p.r[0].length, 9);
-      assert.equal(p.r[0][8], 39000);
-      const gu = buildScan4910Payload(store.db, { brandSno: 13647 });
-      assert.deepEqual(gu.r.map((r) => [r[0], r[8]]), [[2, null]]);
+      assert.equal(p.r[0].length, 8);
+      assert.equal(p.r[0][7].at(-1)[3], null);
       store.close();
     });
 
-    test('a 4910.db without coupon_price gives cp null', () => {
+    test("a coupon row's own date counts as a priced day", () => {
+      const store = fixture();
+      // An ok run logged the coupon price, then an expired rerun the same day overwrote scan_runs with coupons_ok 0.
+      store.logCouponPriceChanges('2026-10-11', [{ sno: 1, sale_price: 45000, coupon_price: 40000 }]);
+      assert.equal(store.db.prepare("SELECT coupons_ok FROM scan_runs WHERE date = '2026-10-11'").get().coupons_ok, 0);
+      const p = buildScan4910Payload(store.db);
+      assert.deepEqual(p.r[0][7].at(-1), ['2026-10-11', 90000, 45000, 40000]);
+      store.close();
+    });
+
+    test("any listing's coupon row marks its date as priced for every listing", () => {
+      const store = new Store4910(':memory:');
+      const both = (d) => store.applyScan(d, [scanRow(1, 50000), scanRow(2, 30000)], { completeBrands: [2421] });
+      both('2026-10-10');
+      store.logCouponPriceChanges('2026-10-10', [{ sno: 1, sale_price: 50000, coupon_price: 40000 }, { sno: 2, sale_price: 30000, coupon_price: 27000 }]);
+      store.recordScanRun({ ...run('2026-10-10', true), couponsOk: true });
+      // 10/14: an ok run changed only listing 2's coupon price, then an expired rerun the same day left coupons_ok 0.
+      both('2026-10-14');
+      store.logCouponPriceChanges('2026-10-14', [{ sno: 1, sale_price: 50000, coupon_price: 40000 }, { sno: 2, sale_price: 30000, coupon_price: 26000 }]);
+      store.recordScanRun(run('2026-10-14', true));
+      both('2026-10-17');
+      store.recordScanRun(run('2026-10-17', true));
+      const p = buildScan4910Payload(store.db);
+      assert.deepEqual(p.r.map((r) => [r[0], r[7].at(-1)]), [[1, ['2026-10-17', 100000, 50000, 40000]], [2, ['2026-10-17', 60000, 30000, 26000]]]);
+      store.close();
+    });
+
+    test('a 4910.db without coupon history gives every day a null coupon price', () => {
+      const store = fixture();
+      store.db.exec('DROP TABLE coupon_price_changes');
+      const p = buildScan4910Payload(store.db);
+      assert.deepEqual(p.r[0][7].map((h) => h[3]), [null, null]);
+      store.close();
+    });
+
+    test('a 4910.db without goods.coupon_price still builds', () => {
       const store = fixture();
       store.db.exec('ALTER TABLE goods DROP COLUMN coupon_price');
       const p = buildScan4910Payload(store.db, { brandSno: 2421 });
-      assert.deepEqual(p.r.map((r) => [r[0], r[8]]), [[1, null]]);
+      assert.deepEqual(p.r.map((r) => [r[0], r[7].at(-1)[3]]), [[1, null]]);
       assert.deepEqual(buildScan4910Index(store.db).brands, [[2421, '유니클로', 1]]);
       store.close();
     });
@@ -366,5 +400,38 @@ describe('Visualizer Data Extraction', () => {
   test('buildClotDataPayload throws on invalid db input', () => {
     assert.throws(() => buildClotDataPayload(null), /valid DatabaseSync instance is required/);
     assert.throws(() => buildClotDataPayload({}), /valid DatabaseSync instance is required/);
+  });
+});
+
+describe('mergeCouponHistory4910', () => {
+  const C = (d, sale, cp) => [d, sale, cp];
+  const base = { changes: [['2026-10-10', 100000, 50000]], coupons: [], okDates: [], lastScan: '2026-10-10' };
+
+  test('without coupon rows every day is 표시가 (cp null) and lastScan gets its own row', () => {
+    assert.deepEqual(mergeCouponHistory4910({ ...base, lastScan: '2026-10-12' }),
+      [['2026-10-10', 100000, 50000, null], ['2026-10-12', 100000, 50000, null]]);
+  });
+  test('a coupon row is carried while the sale price stays', () => {
+    assert.deepEqual(mergeCouponHistory4910({ ...base, coupons: [C('2026-10-14', 50000, 40000)], okDates: ['2026-10-14', '2026-10-15'], lastScan: '2026-10-16' }),
+      [['2026-10-10', 100000, 50000, null], ['2026-10-14', 100000, 50000, 40000], ['2026-10-16', 100000, 50000, 40000]]);
+  });
+  test('a sale change after the last coupon row is unknown', () => {
+    const m = mergeCouponHistory4910({ changes: [['2026-10-10', 100000, 50000], ['2026-10-15', 90000, 45000]], coupons: [C('2026-10-14', 50000, 40000)], okDates: ['2026-10-14'], lastScan: '2026-10-15' });
+    assert.deepEqual(m.at(-1), ['2026-10-15', 90000, 45000, null]);
+  });
+  test('a null coupon row switches to 표시가 and back', () => {
+    const m = mergeCouponHistory4910({ ...base, coupons: [C('2026-10-14', 50000, 40000), C('2026-10-15', 50000, null), C('2026-10-16', 50000, 40000)], okDates: ['2026-10-14', '2026-10-15', '2026-10-16'], lastScan: '2026-10-16' });
+    assert.deepEqual(m.map((h) => h[3]), [null, 40000, null, 40000]);
+  });
+  test('a coupon price is carried at most COUPON_CARRY_DAYS_4910 days past the last priced day', () => {
+    const at = (lastScan) => mergeCouponHistory4910({ ...base, coupons: [C('2026-10-14', 50000, 40000)], okDates: ['2026-10-14'], lastScan }).at(-1)[3];
+    assert.equal(COUPON_CARRY_DAYS_4910, 3);
+    assert.equal(at('2026-10-17'), 40000);
+    assert.equal(at('2026-10-18'), null);
+  });
+  test('dates before the first price change get no row of their own; no changes means no history', () => {
+    assert.deepEqual(mergeCouponHistory4910({ ...base, coupons: [C('2026-10-09', 50000, 40000)], okDates: ['2026-10-09'], lastScan: '2026-10-10' }),
+      [['2026-10-10', 100000, 50000, 40000]]);
+    assert.deepEqual(mergeCouponHistory4910({ ...base, changes: [] }), []);
   });
 });

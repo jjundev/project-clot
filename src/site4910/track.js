@@ -100,10 +100,13 @@ export async function track4910({
     log(`⚠️ [4910] 쿠폰 학습 실패 (${err.status ?? err.name}: ${err.message})`);
     learned = { memberStatus: 'error', wallet: 0, walletChanges: { added: [], removed: [] }, emoney: null, eligible: 0, mismatched: 0, hidden: { scope: 0, naver: 0, mismatch: 0 } };
   }
-  // Also without a token: listings with no coupon result today get NULL rather than yesterday's price.
-  const { priced } = applyCouponPrices({ store, date });
+  // Only an ok run knows today's coupons; otherwise the last coupon prices and their history stay as they were.
+  const couponsOk = learned.memberStatus === 'ok';
+  let priced = 0;
+  if (couponsOk) ({ priced } = applyCouponPrices({ store, date, marketSnos: [...qualified] }));
+  else log('⚠️ [4910] 쿠폰가 갱신 생략 — 마지막 쿠폰가 유지');
   // The digest shows a coupon price next to each alert; drops are a short list, so read them back one by one.
-  for (const d of diff.drops) d.couponPrice = store.getGoods(d.row.sno)?.coupon_price ?? null;
+  for (const d of diff.drops) d.couponPrice = couponsOk ? store.getGoods(d.row.sno)?.coupon_price ?? null : null;
 
   const durationMs = Date.now() - started;
   store.recordScanRun({
@@ -114,6 +117,7 @@ export async function track4910({
     added: diff.added.length,
     dropped: diff.dropped.length,
     durationMs,
+    couponsOk,
   });
   return {
     date, brandCounts, diff, sellers: { seen: marketSnos.length, qualified: qualified.size, checked },

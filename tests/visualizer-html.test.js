@@ -219,7 +219,7 @@ describe('Visualizer HTML Generation', () => {
     const { store, db4910Path } = scanDb(dir, [
       scanListing(71863924, 2421, '유니클로'), scanListing(71863925, 2421, '유니클로'), scanListing(80000001, 13647, 'GU'),
     ]);
-    store.setCouponPrices([[71863924, 18000]]);
+    store.logCouponPriceChanges('2026-10-10', [{ sno: 71863924, sale_price: 21600, coupon_price: 18000 }]);
     store.close();
 
     const tempOutput = path.join(dir, 'index.html');
@@ -241,7 +241,7 @@ describe('Visualizer HTML Generation', () => {
     assert.deepEqual(Object.keys(win.__CLOT_4910_B__).sort(), ['13647', '2421']);
     const uniqlo = win.__CLOT_4910_B__[2421];
     assert.equal(uniqlo.brandSno, 2421);
-    assert.deepEqual(plain(uniqlo.r.map((r) => [r[0], r[8]])), [[71863924, 18000], [71863925, null]]);
+    assert.deepEqual(plain(uniqlo.r.map((r) => [r[0], r[7].at(-1)[3]])), [[71863924, 18000], [71863925, null]]);
 
     assert.equal(res.total4910All, 3);
     const html = fs.readFileSync(tempOutput, 'utf-8');
@@ -331,12 +331,16 @@ describe('Visualizer HTML Generation', () => {
     }
   });
 
-  test('template loads brand files on demand and offers coupon sorts', () => {
+  test('template loads brand files on demand; coupon price is the 4910 basis', () => {
     const html = buildInTempDir('clot-4910brands-contract-');
-    for (const s of ['__CLOT_4910_INDEX__', 'data-b4910', "'4910/b'", 'value="coupon"', 'value="couponRate"',
-      '쿠폰가 낮은순', '쿠폰 할인율순', '쿠폰가 ', "'&brand='", "get('brand')"]) {
+    for (const s of ['__CLOT_4910_INDEX__', 'data-b4910', "'4910/b'", "'쿠폰가'", "{ coupon: 'priceAsc', couponRate: 'rate' }",
+      "'&brand='", "get('brand')"]) {
       assert.ok(html.includes(s), s);
     }
+    // The coupon price is the hero price, so it has no line, fact or sorts of its own.
+    assert.ok(!html.includes('was cp'));
+    assert.ok(!html.includes('value="coupon"'));
+    assert.ok(!html.includes('value="couponRate"'));
     assert.ok(!html.includes('4910-all.js'));
     // No background load after first paint: only the 4910 전체 chip starts it.
     assert.ok(!/^\s*if \(D\.has4910All\) ensure4910\w*\(\);/m.test(html));
