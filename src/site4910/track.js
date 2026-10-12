@@ -5,7 +5,7 @@ import { tokenExpiry } from './liked.js';
 import { resolveBrands } from './brands.js';
 import { refreshMarkets } from './sellers.js';
 import { learnMarketCoupons, applyCouponPrices } from './coupons.js';
-import { mapConcurrent } from '../pool.js';
+import { mapConcurrent, clientPool } from '../pool.js';
 
 // Keeps a degraded (slow, not dead) API from running the Actions job (45-minute timeout) into its timeout; brands
 // not finished by then count as incomplete, so their listings take no misses.
@@ -13,20 +13,6 @@ export const BUDGET_MS_4910 = 20 * 60_000;
 // The whole run, from its start: past it the seller checks and the coupon sampling start no new work, so the
 // coupon prices, scan_runs and the Release push still happen inside the job timeout.
 export const RUN_BUDGET_MS_4910 = 35 * 60_000;
-
-// Hands each concurrent worker a client of its own (each client keeps its own request spacing). A client is
-// made only when none is free, so at most `concurrency` clients ever exist.
-function clientPool(makeClient) {
-  const idle = [];
-  return async (fn) => {
-    const client = idle.pop() ?? makeClient();
-    try {
-      return await fn(client);
-    } finally {
-      idle.push(client);
-    }
-  };
-}
 
 async function scanOne(client, brand, deadline) {
   try {
@@ -52,9 +38,9 @@ function mergeDiffs(diffs, initial) {
 
 /**
  * Order: brand list → concurrent scan → seller verdicts → OUT_OF_SCOPE → per-brand applyScan of the qualified
- * sellers' rows → coupons → coupon prices → scan_runs. OUT_OF_SCOPE comes before applyScan so a seller that just
- * failed takes no misses (applyScan counts misses only for ACTIVE rows). A dry run stops after the scan and
- * writes nothing (no seller calls either).
+ * sellers' rows → coupons (concurrent per seller) → coupon prices → scan_runs. OUT_OF_SCOPE comes before
+ * applyScan so a seller that just failed takes no misses (applyScan counts misses only for ACTIVE rows). A dry run
+ * stops after the scan and writes nothing (no seller calls either).
  */
 export async function track4910({
   makeClient, store, date, brands = null, concurrency = 3, dryRun = false, memberToken = null,
@@ -108,11 +94,11 @@ export async function track4910({
 
   let learned;
   try {
-    learned = await withClient((client) => learnMarketCoupons({ client, store, date, marketSnos: [...qualified], memberToken, deadline: runDeadline, log }));
+    learned = await learnMarketCoupons({ withClient, concurrency, store, date, marketSnos: [...qualified], memberToken, deadline: runDeadline, log });
   } catch (err) {
     // The client never puts the member token in an error message.
     log(`⚠️ [4910] 쿠폰 학습 실패 (${err.status ?? err.name}: ${err.message})`);
-    learned = { memberStatus: 'error', wallet: 0, walletChanges: { added: [], removed: [] }, emoney: null, eligible: 0, mismatched: 0 };
+    learned = { memberStatus: 'error', wallet: 0, walletChanges: { added: [], removed: [] }, emoney: null, eligible: 0, mismatched: 0, hidden: { scope: 0, naver: 0, mismatch: 0 } };
   }
   // Also without a token: listings with no coupon result today get NULL rather than yesterday's price.
   const { priced } = applyCouponPrices({ store, date });

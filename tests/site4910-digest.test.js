@@ -185,10 +185,12 @@ test('wallet change lines list at most 5 names, then the count of the rest', () 
   assert.match(text, /^🎟 사라진 쿠폰: 옛1, 옛2, 옛3, 옛4, 옛5$/m);
 });
 
-test('mismatch adds a warning line', () => {
-  const text = format4910Digest({ ...result, coupons: coupons({ mismatched: 3 }) });
-  assert.match(text, /⚠️ 쿠폰 계산 불일치 셀러 3곳 — 해당 쿠폰가 숨김/);
-  assert.doesNotMatch(format4910Digest({ ...result, coupons: coupons() }), /불일치/);
+test('hidden sellers add one line split by reason', () => {
+  const text = format4910Digest({ ...result, coupons: coupons({ mismatched: 64, hidden: { scope: 36, naver: 4, mismatch: 24 } }) });
+  assert.match(text, /^⚠️ 쿠폰가 숨김 셀러 64곳 \(범위 한정 36 · 네이버 4 · 불일치 24\)$/m);
+  const old = format4910Digest({ ...result, coupons: coupons({ mismatched: 3 }) });
+  assert.match(old, /^⚠️ 쿠폰가 숨김 셀러 3곳 \(범위 한정 0 · 네이버 0 · 불일치 3\)$/m);
+  assert.doesNotMatch(format4910Digest({ ...result, coupons: coupons() }), /숨김/);
 });
 
 test('coupon status none or null adds no coupon lines', () => {
@@ -244,7 +246,7 @@ test('100 brands still fit under 4096 chars', () => {
   assert.ok(text.length <= 4096, `length ${text.length}`);
   assert.match(text, /4910 리포트 \(2026-10-11\)/);
   assert.match(text, /브랜드 100개 스캔 \(불완전 5\) · 판매글 30,000 · 우수 셀러 12\/40/);
-  for (const re of [/🎟 쿠폰 7장/, /🎟 새 쿠폰: 새쿠폰/, /🎟 사라진 쿠폰: 옛쿠폰/, /쿠폰 계산 불일치/]) assert.match(text, re);
+  for (const re of [/🎟 쿠폰 7장/, /🎟 새 쿠폰: 새쿠폰/, /🎟 사라진 쿠폰: 옛쿠폰/, /쿠폰가 숨김 셀러 1곳/]) assert.match(text, re);
 });
 
 test('trimming drops scan lines before liked lines and never cuts the coupon lines', () => {

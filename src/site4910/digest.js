@@ -31,7 +31,11 @@ function couponLines(coupons) {
   const { added = [], removed = [] } = coupons.walletChanges ?? {};
   if (added.length) out.push(`🎟 새 쿠폰: ${nameList(added)}`);
   if (removed.length) out.push(`🎟 사라진 쿠폰: ${nameList(removed)}`);
-  if (coupons.mismatched > 0) out.push(`⚠️ 쿠폰 계산 불일치 셀러 ${fmt(coupons.mismatched)}곳 — 해당 쿠폰가 숨김`);
+  if (coupons.mismatched > 0) {
+    // A result from before the reasons were split counts every hidden seller as a mismatch.
+    const { scope, naver, mismatch } = coupons.hidden ?? { scope: 0, naver: 0, mismatch: coupons.mismatched };
+    out.push(`⚠️ 쿠폰가 숨김 셀러 ${fmt(coupons.mismatched)}곳 (범위 한정 ${fmt(scope)} · 네이버 ${fmt(naver)} · 불일치 ${fmt(mismatch)})`);
+  }
   return out;
 }
 
