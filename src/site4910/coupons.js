@@ -287,6 +287,7 @@ export async function learnMarketCoupons({
  * NULL; otherwise the best of the coupons couponSetOf gives that listing (over coupon_snos; a row from before that
  * column falls back to its coupon_sno), so no coupon → sale price, and a hidden seller (an unpriceable or scoped
  * seller-only coupon) → NULL (never the list price: the seller does have a coupon, we just cannot price it).
+ * Each listing's (sale price, coupon price) pair also goes to the change-only coupon price history.
  */
 export function applyCouponPrices({ store, date }) {
   const today = store.getMarketCoupons(date);
@@ -301,13 +302,16 @@ export function applyCouponPrices({ store, date }) {
   }
 
   const prices = new Map();
+  const pairs = [];
   let priced = 0;
   for (const g of store.getActivePriceRows()) {
     const setFor = setOf.get(g.market_sno);
     const price = g.sale_price != null && setFor ? couponPrice(g.sale_price, setFor(g.sno)) : null;
     prices.set(g.sno, price);
+    pairs.push({ sno: g.sno, sale_price: g.sale_price, coupon_price: price });
     if (price != null) priced++;
   }
   store.setCouponPrices(prices);
+  store.logCouponPriceChanges(date, pairs);
   return { priced, nulled: prices.size - priced };
 }
