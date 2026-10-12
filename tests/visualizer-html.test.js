@@ -219,7 +219,7 @@ describe('Visualizer HTML Generation', () => {
     const { store, db4910Path } = scanDb(dir, [
       scanListing(71863924, 2421, '유니클로'), scanListing(71863925, 2421, '유니클로'), scanListing(80000001, 13647, 'GU'),
     ]);
-    store.setCouponPrices([[71863924, 18000]]);
+    store.logCouponPriceChanges('2026-10-10', [{ sno: 71863924, sale_price: 21600, coupon_price: 18000 }]);
     store.close();
 
     const tempOutput = path.join(dir, 'index.html');
@@ -241,7 +241,7 @@ describe('Visualizer HTML Generation', () => {
     assert.deepEqual(Object.keys(win.__CLOT_4910_B__).sort(), ['13647', '2421']);
     const uniqlo = win.__CLOT_4910_B__[2421];
     assert.equal(uniqlo.brandSno, 2421);
-    assert.deepEqual(plain(uniqlo.r.map((r) => [r[0], r[8]])), [[71863924, 18000], [71863925, null]]);
+    assert.deepEqual(plain(uniqlo.r.map((r) => [r[0], r[7].at(-1)[3]])), [[71863924, 18000], [71863925, null]]);
 
     assert.equal(res.total4910All, 3);
     const html = fs.readFileSync(tempOutput, 'utf-8');
