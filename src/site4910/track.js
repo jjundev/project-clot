@@ -103,7 +103,7 @@ export async function track4910({
   // Only an ok run knows today's coupons; otherwise the last coupon prices and their history stay as they were.
   const couponsOk = learned.memberStatus === 'ok';
   let priced = 0;
-  if (couponsOk) ({ priced } = applyCouponPrices({ store, date }));
+  if (couponsOk) ({ priced } = applyCouponPrices({ store, date, marketSnos: [...qualified] }));
   else log('⚠️ [4910] 쿠폰가 갱신 생략 — 마지막 쿠폰가 유지');
   // The digest shows a coupon price next to each alert; drops are a short list, so read them back one by one.
   for (const d of diff.drops) d.couponPrice = couponsOk ? store.getGoods(d.row.sno)?.coupon_price ?? null : null;

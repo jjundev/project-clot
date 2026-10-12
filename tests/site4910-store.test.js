@@ -170,6 +170,14 @@ test('recordScanRun stores coupons_ok', () => {
     [['2026-10-14', 1], ['2026-10-15', 0]]);
 });
 
+test('a non-ok rerun on the same date keeps coupons_ok from the earlier ok run', () => {
+  const base = { brandCounts: [{ sno: 2421, scanned: 1 }], complete: true, changed: 1, added: 1, dropped: 0, durationMs: 10 };
+  s.recordScanRun({ ...base, date: '2026-10-14', couponsOk: true });
+  s.recordScanRun({ ...base, date: '2026-10-14', changed: 7 });
+  const run = s.db.prepare('SELECT changed, coupons_ok FROM scan_runs').get();
+  assert.deepEqual([run.changed, run.coupons_ok], [7, 1]);
+});
+
 const pairs = () => s.db.prepare('SELECT sno, date, sale_price, coupon_price FROM coupon_price_changes ORDER BY sno, date').all().map((r) => ({ ...r }));
 
 test('logCouponPriceChanges writes a row only when the (sale, coupon) pair changes', () => {

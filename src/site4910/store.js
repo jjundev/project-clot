@@ -441,12 +441,16 @@ export class Store4910 {
     return this.db.prepare(`SELECT sno, market_sno, sale_price FROM goods WHERE status = 'ACTIVE' ORDER BY sno`).all();
   }
 
-  // coupons_ok: whether this run refreshed the coupon prices (its coupon learning was ok).
+  // coupons_ok: whether a run on that date refreshed the coupon prices (its coupon learning was ok). A later non-ok
+  // rerun the same day leaves those prices alone, so it does not clear the flag.
   recordScanRun({ date, brandCounts, complete, changed, added, dropped, durationMs, couponsOk = false }) {
     this.db
       .prepare(`
-        INSERT OR REPLACE INTO scan_runs (date, brand_counts_json, complete, changed, added, dropped, duration_ms, completed_at, coupons_ok)
+        INSERT INTO scan_runs (date, brand_counts_json, complete, changed, added, dropped, duration_ms, completed_at, coupons_ok)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (date) DO UPDATE SET brand_counts_json = excluded.brand_counts_json, complete = excluded.complete,
+          changed = excluded.changed, added = excluded.added, dropped = excluded.dropped, duration_ms = excluded.duration_ms,
+          completed_at = excluded.completed_at, coupons_ok = MAX(COALESCE(scan_runs.coupons_ok, 0), excluded.coupons_ok)
       `)
       .run(date, JSON.stringify(brandCounts), complete ? 1 : 0, changed, added, dropped, durationMs, new Date().toISOString(), couponsOk ? 1 : 0);
   }

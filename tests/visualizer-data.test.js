@@ -353,6 +353,23 @@ describe('Visualizer Data Extraction', () => {
       store.close();
     });
 
+    test("any listing's coupon row marks its date as priced for every listing", () => {
+      const store = new Store4910(':memory:');
+      const both = (d) => store.applyScan(d, [scanRow(1, 50000), scanRow(2, 30000)], { completeBrands: [2421] });
+      both('2026-10-10');
+      store.logCouponPriceChanges('2026-10-10', [{ sno: 1, sale_price: 50000, coupon_price: 40000 }, { sno: 2, sale_price: 30000, coupon_price: 27000 }]);
+      store.recordScanRun({ ...run('2026-10-10', true), couponsOk: true });
+      // 10/14: an ok run changed only listing 2's coupon price, then an expired rerun the same day left coupons_ok 0.
+      both('2026-10-14');
+      store.logCouponPriceChanges('2026-10-14', [{ sno: 1, sale_price: 50000, coupon_price: 40000 }, { sno: 2, sale_price: 30000, coupon_price: 26000 }]);
+      store.recordScanRun(run('2026-10-14', true));
+      both('2026-10-17');
+      store.recordScanRun(run('2026-10-17', true));
+      const p = buildScan4910Payload(store.db);
+      assert.deepEqual(p.r.map((r) => [r[0], r[7].at(-1)]), [[1, ['2026-10-17', 100000, 50000, 40000]], [2, ['2026-10-17', 60000, 30000, 26000]]]);
+      store.close();
+    });
+
     test('a 4910.db without coupon history gives every day a null coupon price', () => {
       const store = fixture();
       store.db.exec('DROP TABLE coupon_price_changes');

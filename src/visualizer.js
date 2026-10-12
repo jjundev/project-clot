@@ -119,7 +119,7 @@ const dayNo = (date) => Date.UTC(+date.slice(0, 4), +date.slice(5, 7) - 1, +date
  * that row's sale price is the day's sale price and the day is within COUPON_CARRY_DAYS_4910 of the last priced day;
  * otherwise null (the day is on the 표시가 basis).
  * @param {{ changes: [string, number|null, number|null][], coupons: [string, number, number|null][], okDates: string[], lastScan: string|null }} input
- *   All sorted by date; okDates already includes the coupon rows' dates.
+ *   All sorted by date; okDates holds every priced day (a coupons_ok run or any listing's coupon row).
  * @returns {[string, number|null, number|null, number|null][]}
  */
 export function mergeCouponHistory4910({ changes, coupons, okDates, lastScan }) {
@@ -190,10 +190,13 @@ export function buildScan4910Payload(db4910, { brandSno = null } = {}) {
         (c) => [c.date, c.sale_price, c.coupon_price ?? null]
       )
     : new Map();
+  // A coupon row on any listing proves an ok run that day, even if a later non-ok rerun overwrote scan_runs.
   const runCols = new Set(db4910.prepare('PRAGMA table_info(scan_runs)').all().map((c) => c.name));
-  const okDates = runCols.has('coupons_ok')
-    ? db4910.prepare('SELECT date FROM scan_runs WHERE coupons_ok = 1 ORDER BY date').all().map((r) => r.date)
-    : [];
+  const okSql = [
+    runCols.has('coupons_ok') ? 'SELECT date FROM scan_runs WHERE coupons_ok = 1' : null,
+    hasCouponHistory ? 'SELECT date FROM coupon_price_changes' : null,
+  ].filter(Boolean);
+  const okDates = okSql.length ? db4910.prepare(`${okSql.join(' UNION ')} ORDER BY date`).all().map((r) => r.date) : [];
   const lastScan = lastScanDate(db4910);
 
   const b = [];
@@ -208,15 +211,8 @@ export function buildScan4910Payload(db4910, { brandSno = null } = {}) {
     return idx.get(v);
   };
 
-  const historyOf = (sno) => {
-    const coupons = couponsBySno.get(sno) || [];
-    return mergeCouponHistory4910({
-      changes: histBySno.get(sno) || [],
-      coupons,
-      okDates: coupons.length ? [...new Set([...okDates, ...coupons.map((c) => c[0])])].sort() : okDates,
-      lastScan,
-    });
-  };
+  const historyOf = (sno) =>
+    mergeCouponHistory4910({ changes: histBySno.get(sno) || [], coupons: couponsBySno.get(sno) || [], okDates, lastScan });
 
   const r = goods.map((g) => {
     const img = g.image_url || '';

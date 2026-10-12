@@ -250,6 +250,25 @@ test('a run whose coupon learning is not ok keeps the last coupon prices and his
   assert.ok(lines.includes('⚠️ [4910] 쿠폰가 갱신 생략 — 마지막 쿠폰가 유지'));
 });
 
+test("a --brand run reprices only the sellers it learned; another brand's listings keep their coupon prices", async () => {
+  const catalog = { ...CATALOG, 13647: [[11, 19900, 3], [12, 29900, 3]] }; // GU is sold by seller 3 only
+  const price = { 1: 50000, 2: 30000, 11: 19900, 12: 29900 };
+  const member = {
+    async getMyCoupons() { return WALLET; },
+    async getMe() { return { emoney: 0 }; },
+    async getGoodsDetail(sno) { return { optionSno: sno * 10 }; },
+    async getBestCoupon(optionSno) { return { couponSno: 7, name: '10% 쿠폰', discount: price[optionSno / 10] * 0.1 }; },
+  };
+  store.upsertBrands('2026-10-10', BRANDS, []); // the stored brand list keeps GU in scope on a partial run
+  await track4910({ makeClient: fakeClients(catalog, { member }), store, date: '2026-10-10', brands: BRANDS, memberToken: 'T', log: quiet });
+  assert.equal(store.getGoods(11).coupon_price, 17910);
+  const res = await track4910({ makeClient: fakeClients(catalog, { member }), store, date: '2026-10-11', brands: [BRANDS[0]], memberToken: 'T', log: quiet });
+  assert.equal(res.coupons.memberStatus, 'ok');
+  assert.equal(store.getGoods(11).status, 'ACTIVE');
+  assert.equal(store.getGoods(11).coupon_price, 17910);
+  assert.equal(count("SELECT COUNT(*) AS n FROM coupon_price_changes WHERE date = '2026-10-11'"), 0);
+});
+
 const LIST_PRICE = { 1: 40000, 2: 30000, 3: 9900, 11: 19900, 12: 29900 }; // day-2 prices of the drop test below
 
 test('a >=10% drop carries its coupon price with a member token, null without', async () => {
