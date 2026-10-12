@@ -162,6 +162,40 @@ test('recordScanRun replaces the row for the same date', () => {
   assert.deepEqual(JSON.parse(runs[0].brand_counts_json), base.brandCounts);
 });
 
+test('recordScanRun stores coupons_ok', () => {
+  const base = { brandCounts: [{ sno: 2421, scanned: 1 }], complete: true, changed: 1, added: 1, dropped: 0, durationMs: 10 };
+  s.recordScanRun({ ...base, date: '2026-10-14', couponsOk: true });
+  s.recordScanRun({ ...base, date: '2026-10-15' });
+  assert.deepEqual(s.db.prepare('SELECT date, coupons_ok FROM scan_runs ORDER BY date').all().map((r) => [r.date, r.coupons_ok]),
+    [['2026-10-14', 1], ['2026-10-15', 0]]);
+});
+
+const pairs = () => s.db.prepare('SELECT sno, date, sale_price, coupon_price FROM coupon_price_changes ORDER BY sno, date').all().map((r) => ({ ...r }));
+
+test('logCouponPriceChanges writes a row only when the (sale, coupon) pair changes', () => {
+  s.logCouponPriceChanges('2026-10-14', [{ sno: 1, sale_price: 50000, coupon_price: 40000 }]);
+  s.logCouponPriceChanges('2026-10-15', [{ sno: 1, sale_price: 50000, coupon_price: 40000 }]);
+  s.logCouponPriceChanges('2026-10-16', [{ sno: 1, sale_price: 50000, coupon_price: 38000 }]);
+  s.logCouponPriceChanges('2026-10-17', [{ sno: 1, sale_price: 45000, coupon_price: 38000 }]);
+  assert.deepEqual(pairs().map((r) => r.date), ['2026-10-14', '2026-10-16', '2026-10-17']);
+});
+
+test('a null coupon price is recorded as a change and back; a null sale price is skipped', () => {
+  s.logCouponPriceChanges('2026-10-14', [{ sno: 1, sale_price: 50000, coupon_price: 40000 }, { sno: 2, sale_price: null, coupon_price: null }]);
+  s.logCouponPriceChanges('2026-10-15', [{ sno: 1, sale_price: 50000, coupon_price: null }]);
+  s.logCouponPriceChanges('2026-10-16', [{ sno: 1, sale_price: 50000, coupon_price: 40000 }]);
+  assert.deepEqual(pairs().map((r) => [r.sno, r.date, r.coupon_price]), [[1, '2026-10-14', 40000], [1, '2026-10-15', null], [1, '2026-10-16', 40000]]);
+});
+
+test("a same-day rerun replaces today's row and removes it when the pair returns", () => {
+  s.logCouponPriceChanges('2026-10-14', [{ sno: 1, sale_price: 50000, coupon_price: 40000 }]);
+  s.logCouponPriceChanges('2026-10-15', [{ sno: 1, sale_price: 50000, coupon_price: 38000 }]);
+  s.logCouponPriceChanges('2026-10-15', [{ sno: 1, sale_price: 50000, coupon_price: 39000 }]);
+  assert.deepEqual(pairs().map((r) => [r.date, r.coupon_price]), [['2026-10-14', 40000], ['2026-10-15', 39000]]);
+  s.logCouponPriceChanges('2026-10-15', [{ sno: 1, sale_price: 50000, coupon_price: 40000 }]);
+  assert.deepEqual(pairs().map((r) => r.date), ['2026-10-14']);
+});
+
 const liked = (sno) => ({
   sno, brand: '유니클로', name: `liked ${sno}`, market_name: 'seller', category: 'cat',
   url: `https://4910.kr/goods/${sno}`, image_url: null,
@@ -314,6 +348,29 @@ test('opening an old 4910.db adds market_type_sno and coupon_price', () => {
     reopened.close();
   }
   // a second open must not try to add the columns again
+  new Store4910(file).close();
+});
+
+test('opening an old 4910.db adds scan_runs.coupons_ok and coupon_price_changes', () => {
+  const file = path.join(dir, 'old.db');
+  const old = new DatabaseSync(file);
+  old.exec(`
+    CREATE TABLE scan_runs (
+      date TEXT PRIMARY KEY, brand_counts_json TEXT, complete INTEGER, changed INTEGER,
+      added INTEGER, dropped INTEGER, duration_ms INTEGER, completed_at TEXT NOT NULL
+    );
+    INSERT INTO scan_runs (date, complete, completed_at) VALUES ('2026-10-11', 1, 'x');
+  `);
+  old.close();
+  const reopened = new Store4910(file);
+  try {
+    const cols = reopened.db.prepare('PRAGMA table_info(scan_runs)').all().map((c) => c.name);
+    assert.ok(cols.includes('coupons_ok'));
+    assert.equal(reopened.db.prepare('SELECT coupons_ok FROM scan_runs').get().coupons_ok, null);
+    assert.equal(reopened.logCouponPriceChanges('2026-10-14', [{ sno: 1, sale_price: 50000, coupon_price: 40000 }]), 1);
+  } finally {
+    reopened.close();
+  }
   new Store4910(file).close();
 });
 

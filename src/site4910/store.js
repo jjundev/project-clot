@@ -47,7 +47,11 @@ export class Store4910 {
       CREATE INDEX IF NOT EXISTS idx_goods_brand_status ON goods (brand_sno, status);
       CREATE TABLE IF NOT EXISTS scan_runs (
         date TEXT PRIMARY KEY, brand_counts_json TEXT, complete INTEGER, changed INTEGER,
-        added INTEGER, dropped INTEGER, duration_ms INTEGER, completed_at TEXT NOT NULL
+        added INTEGER, dropped INTEGER, duration_ms INTEGER, completed_at TEXT NOT NULL, coupons_ok INTEGER
+      );
+      -- Change-only history of a listing's coupon price on the runs whose coupon learning was ok; NULL = priced as hidden.
+      CREATE TABLE IF NOT EXISTS coupon_price_changes (
+        sno INTEGER NOT NULL, date TEXT NOT NULL, sale_price INTEGER NOT NULL, coupon_price INTEGER, PRIMARY KEY (sno, date)
       );
       CREATE TABLE IF NOT EXISTS liked_goods (
         sno INTEGER PRIMARY KEY, name TEXT NOT NULL, brand TEXT, market_name TEXT, category TEXT,
@@ -92,6 +96,8 @@ export class Store4910 {
     if (!marketCouponCols.has('coupon_snos')) this.db.exec('ALTER TABLE market_coupons ADD COLUMN coupon_snos TEXT');
     const walletCols = new Set(this.db.prepare('PRAGMA table_info(wallet_coupons)').all().map((c) => c.name));
     if (!walletCols.has('scope')) this.db.exec('ALTER TABLE wallet_coupons ADD COLUMN scope TEXT');
+    const scanRunCols = new Set(this.db.prepare('PRAGMA table_info(scan_runs)').all().map((c) => c.name));
+    if (!scanRunCols.has('coupons_ok')) this.db.exec('ALTER TABLE scan_runs ADD COLUMN coupons_ok INTEGER');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_goods_market ON goods (market_sno)');
   }
 
@@ -391,6 +397,36 @@ export class Store4910 {
     }
   }
 
+  /**
+   * Logs each listing's (sale_price, coupon_price) pair on date only when it differs from the last row before date;
+   * a same-day rerun replaces date's row, or removes it when the pair is back to the earlier one. Rows without a sale
+   * price are skipped. Returns the number of rows written.
+   */
+  logCouponPriceChanges(date, rows) {
+    this.db.exec('BEGIN');
+    try {
+      const prev = this.db.prepare('SELECT sale_price, coupon_price FROM coupon_price_changes WHERE sno = ? AND date < ? ORDER BY date DESC LIMIT 1');
+      const del = this.db.prepare('DELETE FROM coupon_price_changes WHERE sno = ? AND date = ?');
+      const put = this.db.prepare('INSERT OR REPLACE INTO coupon_price_changes (sno, date, sale_price, coupon_price) VALUES (?, ?, ?, ?)');
+      let written = 0;
+      for (const { sno, sale_price, coupon_price } of rows) {
+        if (sale_price == null) continue;
+        const cp = coupon_price ?? null;
+        const p = prev.get(Number(sno), date);
+        if (p && p.sale_price === sale_price && p.coupon_price === cp) del.run(Number(sno), date);
+        else {
+          put.run(Number(sno), date, sale_price, cp);
+          written++;
+        }
+      }
+      this.db.exec('COMMIT');
+      return written;
+    } catch (e) {
+      this.db.exec('ROLLBACK');
+      throw e;
+    }
+  }
+
   // The cheapest and priciest ACTIVE listing of a seller at or above 10,000 won — cheaper ones may not meet a coupon's minimum.
   getQualifiedSamples(marketSno) {
     const pick = (order) =>
@@ -405,13 +441,14 @@ export class Store4910 {
     return this.db.prepare(`SELECT sno, market_sno, sale_price FROM goods WHERE status = 'ACTIVE' ORDER BY sno`).all();
   }
 
-  recordScanRun({ date, brandCounts, complete, changed, added, dropped, durationMs }) {
+  // coupons_ok: whether this run refreshed the coupon prices (its coupon learning was ok).
+  recordScanRun({ date, brandCounts, complete, changed, added, dropped, durationMs, couponsOk = false }) {
     this.db
       .prepare(`
-        INSERT OR REPLACE INTO scan_runs (date, brand_counts_json, complete, changed, added, dropped, duration_ms, completed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO scan_runs (date, brand_counts_json, complete, changed, added, dropped, duration_ms, completed_at, coupons_ok)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
-      .run(date, JSON.stringify(brandCounts), complete ? 1 : 0, changed, added, dropped, durationMs, new Date().toISOString());
+      .run(date, JSON.stringify(brandCounts), complete ? 1 : 0, changed, added, dropped, durationMs, new Date().toISOString(), couponsOk ? 1 : 0);
   }
 
   /**
