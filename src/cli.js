@@ -35,8 +35,8 @@ import { syncLiked4910, readAblyToken } from './site4910/liked.js';
 import { createMusinsaClient, CATEGORIES_MUSINSA, DEPTH_PAGES } from './musinsaWide/client.js';
 import { MusinsaWideStore, defaultMusinsaWideDbPath } from './musinsaWide/store.js';
 import { pullDb as pullDbMusinsa, pushDb as pushDbMusinsa } from './musinsaWide/release.js';
-import { trackMusinsa } from './musinsaWide/track.js';
-import { formatMusinsaWideDigest } from './musinsaWide/digest.js';
+import { trackMusinsa, backfillMusinsaCoupons } from './musinsaWide/track.js';
+import { formatMusinsaWideDigest, formatBackfillDigest } from './musinsaWide/digest.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,7 +52,7 @@ export function parseArgs(rawArgs = process.argv.slice(2)) {
   const command = args[0] || 'help';
   const flags = {};
   const positional = [];
-  const BOOLEAN_FLAGS = new Set(['force', 'with-discovery', 'no-open', 'help', 'skip-opencli', 'assume-awake', 'json', 'skip-4910', 'dry-run', 'allow-fresh', 'init']);
+  const BOOLEAN_FLAGS = new Set(['force', 'with-discovery', 'no-open', 'help', 'skip-opencli', 'assume-awake', 'json', 'skip-4910', 'dry-run', 'allow-fresh', 'init', 'backfill']);
 
   for (let i = 1; i < args.length; i++) {
     const a = args[i];
@@ -651,6 +651,7 @@ export async function runMusinsaWideStep({
   makeClient = () => createMusinsaClient(),
   makeProvider = () => makeSessionProvider({ allowBridge: false }),
   trackFn = trackMusinsa,
+  backfillFn = backfillMusinsaCoupons,
   notify = sendTelegramMessage,
   log = console.log,
 } = {}) {
@@ -661,6 +662,24 @@ export async function runMusinsaWideStep({
   }
   const concurrency = Math.min(parseConcurrency(flags.concurrency, 3), 4);
   const dryRun = Boolean(flags['dry-run']);
+  const backfill = Boolean(flags.backfill);
+
+  // The one-time registry fill writes the DB and needs the member session: not a dry run, not a fresh DB.
+  let from = null;
+  if (backfill) {
+    let backfillError = null;
+    if (flags.init || dryRun) {
+      backfillError = '--backfill은 --init·--dry-run과 함께 쓸 수 없음';
+    } else if (flags.from !== undefined) {
+      const n = typeof flags.from === 'string' && /^\d+$/.test(flags.from) ? Number(flags.from) : NaN;
+      if (Number.isSafeInteger(n) && n >= 1) from = n;
+      else backfillError = `invalid --from '${flags.from}' (use a positive integer)`;
+    }
+    if (backfillError) {
+      log(`⚠️ [무신사] ${backfillError}`);
+      return { ran: false, ok: false, error: backfillError };
+    }
+  }
 
   // Opening the store would create an empty DB, the scan would fill it with one day, and a push would then replace the
   // release history. The DB has to come from `musinsa-db pull` first (or be created on purpose with --init).
@@ -674,6 +693,13 @@ export async function runMusinsaWideStep({
   try {
     if (!dryRun) store = openStore();
     const sessionProvider = dryRun ? null : makeProvider();
+    if (backfill) {
+      // Not done (deadline, throttle, expired session) is not a failure: the saved cursor still has to be pushed, and the
+      // digest tells the operator to run it again.
+      const result = await backfillFn({ makeClient, store, date: today, sessionProvider, from, concurrency, log });
+      await notify(formatBackfillDigest(result));
+      return { ran: true, ok: true, result };
+    }
     const result = await trackFn({ makeClient, store, date: today, categories, depthPages, partial, concurrency, dryRun, sessionProvider, log });
     if (dryRun) {
       log(formatMusinsaWideDigest(result));
@@ -684,7 +710,7 @@ export async function runMusinsaWideStep({
     await notify(formatMusinsaWideDigest(result, { lookup: (goodsNo) => store.getGoods(goodsNo) }));
     return { ran: true, ok: true, result };
   } catch (err) {
-    log(`⚠️ [무신사] 수집 실패 (${err.message})`);
+    log(`⚠️ [무신사] ${backfill ? '전환' : '수집'} 실패 (${err.message})`);
     return { ran: true, ok: false, error: err.message };
   } finally {
     if (store) {
@@ -1326,8 +1352,9 @@ Commands:
                          Scan the top 4910.kr brands into data/4910.db (--dry-run writes nothing)
   4910-db pull|push [--allow-fresh]
                          Download / upload data/4910.db as the data-4910 GitHub Release asset (gh CLI)
-  track-musinsa [--category <codes>] [--depth <pages>] [--concurrency=1-4] [--dry-run] [--init]
-                         Scan the Musinsa top-level categories into data/musinsa-wide.db (--dry-run writes nothing)
+  track-musinsa [--category <codes>] [--depth <pages>] [--concurrency=1-4] [--dry-run] [--init] [--backfill [--from <n>]]
+                         Scan the Musinsa top-level categories into data/musinsa-wide.db (--dry-run writes nothing);
+                         --backfill fills the coupon registry once (resumable, needs the DB and a member session)
   musinsa-db pull|push [--allow-fresh]
                          Download / upload data/musinsa-wide.db as the data-musinsa GitHub Release asset (gh CLI)
   sync                   Sync liked items from Musinsa account

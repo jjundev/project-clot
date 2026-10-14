@@ -225,3 +225,120 @@ test('musinsa-db rejects an unknown subcommand and reports pull/push', () => {
   assert.equal(bad.ok, false);
   assert.match(fail.lines[0], /^⚠️ \[musinsa-db\] push failed: HTTP 502/);
 });
+
+const BACKFILL_RESULT = {
+  date: TODAY, from: 345000, next: 346000, probed: 1000, hits: 12, seeded: 3,
+  classify: { calls: 40, usable: 5, other: 30, outOfScope: 0, pending: 7 },
+  neighbors: { probed: 0, hits: 0 }, done: true, memberStatus: 'ok', stop: null, enumStop: null, classifyStop: null,
+};
+
+function backfillSpy(result = BACKFILL_RESULT) {
+  const fn = async (args) => {
+    fn.args = args;
+    return result;
+  };
+  return fn;
+}
+
+test('--backfill is a boolean and --from passes through', () => {
+  assert.deepEqual(parseArgs(['track-musinsa', '--backfill', 'x']).flags, { backfill: true });
+  assert.deepEqual(parseArgs(['track-musinsa', '--backfill', '--from', '345000']).flags, { backfill: true, from: '345000' });
+});
+
+test('--backfill refuses without a DB and with --init or --dry-run', async () => {
+  const noDb = backfillSpy();
+  let opened = false;
+  const log = logSpy();
+  const res = await runMusinsaWideStep(common({
+    flags: { backfill: true }, dbExists: () => false, backfillFn: noDb, log,
+    openStore: () => { opened = true; return fakeStore(); },
+  }));
+  assert.equal(res.ran, false);
+  assert.equal(res.ok, false);
+  assert.match(res.error, /musinsa-wide\.db 없음/);
+  assert.equal(noDb.args, undefined);
+  assert.equal(opened, false);
+
+  for (const extra of [{ init: true }, { 'dry-run': true }]) {
+    const fn = backfillSpy();
+    const trackFn = trackSpy();
+    const l = logSpy();
+    let o = false;
+    const r = await runMusinsaWideStep(common({
+      flags: { backfill: true, ...extra }, backfillFn: fn, trackFn, log: l, openStore: () => { o = true; return fakeStore(); },
+    }));
+    assert.equal(r.ran, false, JSON.stringify(extra));
+    assert.equal(r.ok, false, JSON.stringify(extra));
+    assert.equal(r.error, '--backfill은 --init·--dry-run과 함께 쓸 수 없음');
+    assert.match(l.lines.join('\n'), /⚠️ \[무신사\] --backfill은 --init·--dry-run과 함께 쓸 수 없음/);
+    assert.equal(fn.args, undefined);
+    assert.equal(trackFn.args, undefined);
+    assert.equal(o, false);
+  }
+});
+
+test('--from rejects 0 and non-integers', async () => {
+  for (const from of ['0', '-5', '1.5', 'abc', '', true, '12x']) {
+    const fn = backfillSpy();
+    const log = logSpy();
+    let opened = false;
+    const res = await runMusinsaWideStep(common({
+      flags: { backfill: true, from }, backfillFn: fn, log, openStore: () => { opened = true; return fakeStore(); },
+    }));
+    assert.equal(res.ran, false, String(from));
+    assert.equal(res.ok, false, String(from));
+    assert.equal(res.error, `invalid --from '${from}' (use a positive integer)`);
+    assert.match(log.lines.join('\n'), /⚠️ \[무신사\] invalid --from/);
+    assert.equal(fn.args, undefined);
+    assert.equal(opened, false);
+  }
+  const fn = backfillSpy();
+  const res = await runMusinsaWideStep(common({ flags: { backfill: true, from: '345000' }, backfillFn: fn }));
+  assert.equal(res.ok, true);
+  assert.equal(fn.args.from, 345000);
+});
+
+test('a backfill run notifies once with the backfill digest and closes the store', async () => {
+  const store = fakeStore();
+  const fn = backfillSpy();
+  const notify = spyFn();
+  const log = logSpy();
+  const trackFn = trackSpy();
+  const res = await runMusinsaWideStep(common({
+    flags: { backfill: true, concurrency: '2' }, openStore: () => store, backfillFn: fn, notify, log, trackFn,
+  }));
+  assert.equal(res.ran, true);
+  assert.equal(res.ok, true);
+  assert.equal(res.result, BACKFILL_RESULT);
+  assert.equal(trackFn.args, undefined, 'the scan does not run');
+  assert.equal(fn.args.store, store);
+  assert.equal(fn.args.date, TODAY);
+  assert.equal(fn.args.sessionProvider, 'PROVIDER');
+  assert.equal(fn.args.concurrency, 2);
+  assert.equal(fn.args.from, null);
+  assert.equal(typeof fn.args.makeClient, 'function');
+  assert.equal(notify.calls.length, 1);
+  assert.match(notify.calls[0][0], /무신사 쿠폰 등록부 전환 \(2026-10-14\)/);
+  assert.deepEqual(store.calls, ['checkpoint', 'close']);
+
+  // not done is not a failure: the workflow still pushes the saved cursor
+  const stopped = { ...BACKFILL_RESULT, done: false, stop: 'deadline' };
+  const n2 = spyFn();
+  const s2 = fakeStore();
+  const r2 = await runMusinsaWideStep(common({ flags: { backfill: true }, openStore: () => s2, backfillFn: backfillSpy(stopped), notify: n2 }));
+  assert.equal(r2.ok, true);
+  assert.match(n2.calls[0][0], /⏸/);
+  assert.deepEqual(s2.calls, ['checkpoint', 'close']);
+
+  // a throw is a failure, with the store closed and nothing sent
+  const s3 = fakeStore();
+  const n3 = spyFn();
+  const l3 = logSpy();
+  const r3 = await runMusinsaWideStep(common({
+    flags: { backfill: true }, openStore: () => s3, notify: n3, log: l3, backfillFn: async () => { throw new Error('boom'); },
+  }));
+  assert.equal(r3.ok, false);
+  assert.equal(n3.calls.length, 0);
+  assert.deepEqual(s3.calls, ['checkpoint', 'close']);
+  assert.match(l3.lines.join('\n'), /⚠️ \[무신사\] 전환 실패 \(boom\)/);
+});
