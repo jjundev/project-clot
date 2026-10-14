@@ -2,10 +2,12 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 무신사 5개 대분류 × 누적 리뷰순 상위 6,000개(약 3만 개)를 매일 비로그인으로 스캔하고, 브랜드×대분류마다 표본으로 알아낸 내 쿠폰으로 전 상품의 쿠폰가를 로컬 계산해 Release DB에 변경분만 기록한다.
+**Goal:** 무신사 5개 대분류 × 누적 리뷰순 상위 6,000개(약 3만 개)를 매일 비로그인으로 스캔하고, 하루 최대 4,000개 상품의 내 쿠폰을 상품별로 돌아가며 조회해 저장한 뒤, 전 상품의 쿠폰가를 로컬 계산해 Release DB에 변경분만 기록한다.
+
+> **재설계 (2026-10-14):** 관문 B 실패(키 예측 63%)로 브랜드×대분류 학습·자가검증을 버리고 상품별 순환 조회로 바꿨다(spec #0·#2·#8). Task 1–2는 원래 계획대로 완료됐고, Task 4·6·7·8이 새 설계로 바뀌었다.
 
 **Architecture:**
-- 새 모듈 `src/musinsaWide/`가 `src/site4910/`의 구조를 따른다: `client.js`(목록 체인 + 쿠폰 API) → `store.js`(변경분만) → `coupons.js`(계산·학습·자가검증) → `track.js`(순서·예산) → `digest.js`.
+- 새 모듈 `src/musinsaWide/`가 `src/site4910/`의 구조를 따른다: `client.js`(목록 체인 + 쿠폰 API) → `store.js`(변경분만, 상품별 쿠폰 목록) → `coupons.js`(계산·상품별 조회·쿠폰가 반영) → `track.js`(순서·예산) → `digest.js`.
 - `src/site4910/release.js`를 `createRelease(config)`로 일반화하고, 무신사는 `src/musinsaWide/release.js`에서 자기 설정으로 쓴다.
 - 0단계(Task 1–2)는 go/no-go 관문이다. 통과하지 못하면 Task 3 이후를 시작하지 않는다.
 
@@ -19,8 +21,8 @@
 - 페이지 간격 `300`ms, 쿠폰 API 호출 간격 `700`ms(작업자 단위). 대분류 동시 스캔 `3`, 쿠폰 학습 동시 `3`.
 - 예산: `BUDGET_MS_MUSINSA = 20 * 60_000`(스캔), `RUN_BUDGET_MS_MUSINSA = 35 * 60_000`(전체, 실행 시작부터). workflow 제한 45분.
 - 쿠폰 할인: `P < min ? 0 : floor10(min(max ?? ∞, PERCENT ? P·percent/100 : price))`. 쿠폰가: `sale_price − extra_discount − max(0, 할인들)`.
-- 학습 키: `${brand}|${cat}` (`brand`는 목록의 영문 코드). 학습한 쿠폰 집합은 `7`일까지 재사용(`COUPON_KEY_TTL_DAYS`), 그보다 오래되면 숨김(`stale`).
-- 자가검증 `200`개/일(`SELF_CHECK_SIZE`).
+- 쿠폰 조회: 상품별, 하루 최대 `4000`개(`COUPON_CHECKS_PER_DAY`), 목록 값(`goodsNo, brand, comId=brand, salePrice=price`)으로 호출. 조회 결과는 `10`일 유효(`COUPON_TTL_DAYS`), 그보다 오래됐거나 없으면 쿠폰가 NULL(`stale`). `until < date`인 쿠폰은 계산에서 뺀다.
+- 조회 순서: 미조회 → 조회 후 `sale_price`·`extra_discount`가 바뀐 상품 → `coupon_checked_date` 오래된 순, 동률 `goods_no`. ACTIVE·품절 아님·`sale_price` 있음만. 같은 날 이미 조회한 상품은 다시 조회하지 않는다.
 - `OUT_OF_SCOPE`: 완전한 대분류 스캔에서 `2`회 연속 미노출(`OUT_AFTER_MISSES`). 하락 알림 기준 `0.1`(`DROP_ALERT_RATE`), 상위 `10`개.
 - Release 태그 `data-musinsa`(prerelease), 첨부 `musinsa-wide.db.gz` / `musinsa-wide.db.prev.gz` / `musinsa-wide.db.<YYYY-MM-DD>.gz`(최근 7개).
 - DB 경로 `CLOT_MUSINSA_WIDE_DB_PATH` 또는 `data/musinsa-wide.db`. git에 넣지 않는다.
@@ -31,9 +33,9 @@
 ## Review Focus
 1. **대분류 체인이 중간에 끊김**(403·429·빈 응답·마감 시간) → 그 대분류만 불완전, 그 대분류 상품은 miss를 세지 않는다. 다른 대분류에는 영향 없음. (Task 5, Task 4 테스트)
 2. **6,000위 경계에서 하루 빠졌다 돌아오는 상품** → 1회 미노출로는 ACTIVE 유지, 완전 스캔 2회 연속이어야 `OUT_OF_SCOPE`, 돌아오면 REVIVED. (Task 4 테스트)
-3. **쿠키 없음 / 학습 도중 만료** → 스캔·저장은 정상, 쿠폰가는 마지막 값 유지, 요약에 경고, 출력 어디에도 쿠키 문자열 없음. (Task 6·7·8 테스트)
+3. **쿠키 없음 / 조회 도중 만료 / 429** → 스캔·저장은 정상, 쿠폰가는 저장된 쿠폰 목록으로 계속 계산(10일 지나면 NULL), 요약에 경고, 출력 어디에도 쿠키 문자열 없음. (Task 6·7·8 테스트)
 4. **같은 날 재실행** → `price_changes` 중복 없음, miss는 날짜당 1회, `coupon_price_changes`는 그날 행을 교체. (Task 4 테스트)
-5. **키 안에서 쿠폰 집합이 모순**(싼 표본엔 있고 비싼 표본엔 없음) 또는 자가검증 불일치 → 그 키 쿠폰가는 NULL(틀린 값을 공개하지 않음). (Task 2·6 테스트)
+5. **조회가 오래된 상품 / 조회 뒤 만료된 쿠폰** → 10일 넘은 조회는 쿠폰가 NULL, 만료 쿠폰은 빼고 계산(틀린 값을 공개하지 않음). (Task 6 테스트)
 
 ---
 
@@ -211,29 +213,26 @@ git commit -m "refactor(release): configurable Release DB storage; add data-musi
   - `class MusinsaWideStore(dbPath)`:
     - `isEmpty() -> boolean`
     - `applyScan(date, rows: ListingRow[], { cat, complete }) -> { added: ListingRow[], priceChanged: number, drops: Array<{ row, prevPrice, currentPrice, dropRate }>, revived: ListingRow[], outOfScope: number }`
-    - `getActiveKeys() -> Array<{ brand, cat, goods: number }>` (goods 내림차순)
-    - `getKeySamples(brand, cat) -> { high: Row|null, low: Row|null }` (ACTIVE, `sale_price` 있음)
-    - `getCouponKeys() -> Map<key, { brand, cat, learned_date, coupons: Parsed[]|null, hidden_reason: string|null, mismatch_date: string|null }>`
-    - `putCouponKey({ brand, cat, date, coupons: Parsed[]|null, hiddenReason: string|null })`, `markKeyMismatch(key, date)`
-    - `getActivePriceRows() -> Array<{ goods_no, brand, cat, sale_price, extra_discount }>`
+    - `pickCouponChecks(n, date) -> Array<{ goods_no, brand, sale_price, extra_discount }>` — Global Constraints의 조회 순서. `coupon_checked_date = date`인 상품은 제외.
+    - `putGoodsCoupons(goodsNo, date, coupons: Parsed[], { sale_price, extra_discount })` — `coupons_json`, `coupon_checked_date = date`, `coupon_checked_sale_price`, `coupon_checked_extra`를 쓴다.
+    - `getActivePriceRows() -> Array<{ goods_no, sale_price, extra_discount, coupon_checked_date, coupons: Parsed[]|null }>`
     - `setCouponPrices(Map<goods_no, number|null>)`
     - `logCouponPriceChanges(date, rows: Array<{ goods_no, sale_price, coupon_price }>) -> { written: number, drops: Array<{ goods_no, prevPrice, currentPrice, dropRate }> }`
-    - `pickSelfCheck(n, excludeKeys: Set<string>) -> Row[]` (`coupon_checked_date` NULL 먼저, 그다음 오래된 순, 동률 goods_no), `markChecked(goodsNos, date)`
-    - `recordScanRun({ date, categoryCounts, complete, changed, added, outOfScope, durationMs, couponsOk })`
+    - `recordScanRun({ date, categoryCounts, complete, changed, added, outOfScope, durationMs, couponsOk, couponChecks })`
     - `getGoods(goodsNo)`, `getChanges(goodsNo)`, `checkpoint()`, `close()`
 
 스키마:
 ```sql
 goods(goods_no INTEGER PRIMARY KEY, cat TEXT, brand TEXT, brand_name TEXT, name TEXT NOT NULL, url TEXT NOT NULL, image_url TEXT,
   status TEXT NOT NULL DEFAULT 'ACTIVE', sale_price INTEGER, normal_price INTEGER, extra_discount INTEGER NOT NULL DEFAULT 0,
-  is_sold_out INTEGER NOT NULL DEFAULT 0, coupon_price INTEGER, coupon_checked_date TEXT,
+  is_sold_out INTEGER NOT NULL DEFAULT 0, coupon_price INTEGER, coupons_json TEXT, coupon_checked_date TEXT,
+  coupon_checked_sale_price INTEGER, coupon_checked_extra INTEGER,
   lowest_price INTEGER, lowest_price_date TEXT, first_seen_date TEXT NOT NULL, misses INTEGER NOT NULL DEFAULT 0, last_miss_date TEXT)
 price_changes(id INTEGER PRIMARY KEY AUTOINCREMENT, goods_no INTEGER NOT NULL, date TEXT NOT NULL, sale_price INTEGER, normal_price INTEGER, event TEXT NOT NULL)
 coupon_price_changes(goods_no INTEGER NOT NULL, date TEXT NOT NULL, sale_price INTEGER NOT NULL, coupon_price INTEGER, PRIMARY KEY (goods_no, date))
-coupon_keys(key TEXT PRIMARY KEY, brand TEXT, cat TEXT, learned_date TEXT, coupons_json TEXT, hidden_reason TEXT, mismatch_date TEXT)
 scan_runs(date TEXT PRIMARY KEY, category_counts_json TEXT, complete INTEGER, changed INTEGER, added INTEGER, out_of_scope INTEGER,
-  duration_ms INTEGER, completed_at TEXT NOT NULL, coupons_ok INTEGER)
--- 인덱스: price_changes(goods_no, date), goods(cat, status), goods(brand, cat, status)
+  duration_ms INTEGER, completed_at TEXT NOT NULL, coupons_ok INTEGER, coupon_checks INTEGER)
+-- 인덱스: price_changes(goods_no, date), goods(cat, status), goods(status, coupon_checked_date)
 ```
 `applyScan`은 `Store4910.applyScan`(`src/site4910/store.js:110-216`)과 같은 방식이다. 바뀐 칸이 있을 때만 행을 다시 쓰고, 이벤트는 NEW·PRICE·REVIVED만 기록한다. 다른 점은 세 가지다:
 1. 기존 행을 `cat = ? OR goods_no IN rows`로 읽는다. 다른 대분류에서 넘어온 상품도 이렇게 해야 PK 충돌이 없다.
@@ -254,7 +253,8 @@ test('a listing seen under another cat updates in place', ...);          // 001�
 test('logCouponPriceChanges writes only changes and reports coupon-to-coupon drops', ...);
   // 전날 (50000, 45000), 오늘 (50000, 40000) → written 1, drops[0].dropRate === 11
   // 전날 coupon_price null → drop 없음; 같은 쌍이면 written 0; 같은 날 재실행이면 행 교체
-test('pickSelfCheck returns never-checked rows first and skips excluded keys', ...);
+test('pickCouponChecks orders never-checked, then price-changed since check, then oldest; skips sold-out and today-checked', ...);
+test('putGoodsCoupons round-trips the coupon list through getActivePriceRows', ...);
 ```
 
 - [ ] **Step 2: 실패 확인** — Run: `node --test tests/musinsa-wide-store.test.js` / Expected: FAIL
@@ -283,7 +283,7 @@ git commit -m "feat(musinsa): change-only wide store with OUT_OF_SCOPE after two
 - Produces:
   - 상수 `CATEGORIES_MUSINSA`, `SORT_MUSINSA = 'REVIEW'`, `GENDER_MUSINSA = 'A'`, `DEPTH_PAGES = 100`
   - `createMusinsaClient({ fetchFn = fetch, pageDelayMs = 300, couponDelayMs = 700, sleep } = {}) -> { getCategoryPage(cat, pageUrl|null) -> { items, nextPageUrl }, getUsableCoupons({ goodsNo, brand, salePrice }, cookie, { onSetCookie } = {}) -> raw[] }`
-    - 쿠폰 API 401/403 → `err.code = 'MEMBER_AUTH'`로 throw(메시지에 쿠키 없음). 응답의 `Set-Cookie`는 `onSetCookie(headers.getSetCookie())`로 넘긴다.
+    - 쿠폰 API 401/403 → `err.code = 'MEMBER_AUTH'`로 throw(메시지에 쿠키 없음). 응답의 `Set-Cookie`는 `onSetCookie(headers.getSetCookie())`로 넘긴다. 그 밖의 non-ok는 `err.status`(예: 429)를 단 Error로 throw. 쿠폰 호출은 재시도하지 않는다(429 처리는 Task 6).
   - `toListingRow(item, cat) -> ListingRow | null` (`goodsNo` 없으면 null. `sale_price = item.price`, `extra_discount = item.extraDiscountAmount ?? 0`, `is_sold_out = item.isSoldOut ? 1 : 0`)
   - `scanCategory(client, cat, { maxPages = DEPTH_PAGES, deadline = Infinity }) -> { cat, rows: Map<goods_no, ListingRow>, pages, complete, problems: string[] }`
     - 페이지 실패(throw/non-ok/빈 목록인데 `nextPageUrl` 있음)는 2초·4초 백오프로 최대 3회 시도. 그래도 실패하면 멈추고 `complete=false`.
@@ -298,6 +298,7 @@ test('scanCategory skips items without goodsNo', ...);
 test('a page that keeps failing ends the category incomplete with a problem', ...); // 403 ×3 → complete false, rows는 앞 페이지까지
 test('scanCategory past the deadline is incomplete', ...);
 test('getUsableCoupons sends the cookie, passes Set-Cookie on, and maps 401 to MEMBER_AUTH without the cookie in the message', ...);
+test('getUsableCoupons throws a 429 with err.status 429 and no retry', ...);
 ```
 
 - [ ] **Step 2: 실패 확인** — Run: `node --test tests/musinsa-wide-client.test.js` / Expected: FAIL
@@ -315,50 +316,52 @@ git commit -m "feat(musinsa): REVIEW category chain scanner and usable-coupon cl
 
 ---
 
-### Task 6: 쿠폰 학습, 자가검증, 쿠폰가 반영
+### Task 6: 상품별 쿠폰 조회와 쿠폰가 반영
 
 **Files:**
 - Modify: `src/musinsaWide/coupons.js`
-- Test: `tests/musinsa-wide-coupons.test.js`
+- Modify: `scripts/musinsa-coupon-verify.js` (`keyCouponSet`을 이 스크립트 안으로 옮긴다 — `evaluate`만 쓴다)
+- Test: `tests/musinsa-wide-coupons.test.js` (`keyCouponSet` 테스트 2개는 삭제)
 
 **Interfaces:**
-- Consumes: Task 2 순수 함수, Task 4 store 메서드, Task 5 `getUsableCoupons`, `mapConcurrent`/`clientPool` (`src/pool.js`), `sessionProvider` (`makeSessionProvider` 결과, `src/session.js:616` — `provider()`, `provider({ refresh: true, failedCookie })`, `provider.absorb(headers)`).
+- Consumes: Task 2 `parseCoupon`·`couponPriceMusinsa`, Task 4 store 메서드(`pickCouponChecks`, `putGoodsCoupons`, `getActivePriceRows`, `setCouponPrices`, `logCouponPriceChanges`), Task 5 `getUsableCoupons`, `mapConcurrent`/`clientPool` (`src/pool.js`), `sessionProvider` (`makeSessionProvider` 결과, `src/session.js:616` — `provider()`, `provider({ refresh: true, failedCookie })`, `provider.absorb(setCookieHeaders)`).
 - Produces:
-  - 상수 `COUPON_KEY_TTL_DAYS = 7`, `SELF_CHECK_SIZE = 200`
-  - `learnKeyCoupons({ withClient, store, date, sessionProvider, concurrency = 3, deadline, log }) -> { memberStatus: 'ok'|'none'|'expired'|'error', learned: number, keys: number }`
-    - `sessionProvider`가 null이거나 쿠키를 못 주면 `'none'`.
-    - 키 순서: `learned_date`가 없는 키 먼저, 그다음 오래된 순. 같은 날 이미 학습한 키는 건너뛴다. 마감 시간이 지나면 새 키를 시작하지 않는다.
-    - 키마다 `getKeySamples`의 high·low(같은 상품이면 1개)를 조회하고 `keyCouponSet`을 만든다. null이면 `putCouponKey({ hiddenReason: 'scope' })`, 아니면 쿠폰 집합을 저장한다.
-    - `MEMBER_AUTH`가 나면 run 전체에서 1회만 `sessionProvider({ refresh: true, failedCookie })`를 시도한다. 그래도 실패하면 학습을 멈추고 `'expired'`. 그 밖의 예외는 그 키만 건너뛴다(로그 1줄).
-  - `selfCheck({ withClient, store, date, sessionProvider, size = SELF_CHECK_SIZE, deadline, log }) -> { checked: number, mismatched: number }`
-    - `pickSelfCheck(size, 숨김 키)`로 고른 상품마다 API 최대 할인으로 계산한 쿠폰가와 저장된 키 쿠폰 집합으로 계산한 쿠폰가를 비교한다. 다르면 `markKeyMismatch`. 비교한 상품은 모두 `markChecked`.
-  - `applyCouponPrices({ store, date }) -> { priced: number, hidden: { scope: number, stale: number, mismatch: number }, drops: Array<{ goods_no, prevPrice, currentPrice, dropRate }> }` (drops는 하락률 내림차순)
-    - 키별 쿠폰 집합으로 ACTIVE 상품의 쿠폰가를 계산해 `setCouponPrices`, `logCouponPriceChanges`를 부르고 drops를 넘긴다.
-    - 숨김 키(`hidden_reason`, `mismatch_date === date`, `learned_date`가 7일보다 오래된 키, 학습 기록이 없는 키)의 상품은 쿠폰가를 null로 둔다. 학습 기록이 없는 키는 `stale`로 센다.
+  - 상수 `COUPON_CHECKS_PER_DAY = 4000`, `COUPON_TTL_DAYS = 10`
+  - `checkGoodsCoupons({ withClient, store, date, sessionProvider, limit = COUPON_CHECKS_PER_DAY, concurrency = 3, deadline, log }) -> { memberStatus: 'ok'|'none'|'expired'|'throttled'|'error', checked: number, failed: number }`
+    - `sessionProvider`가 null이거나 쿠키를 못 주면 `'none'`, 쿠폰 호출 없음.
+    - `store.pickCouponChecks(limit, date)`의 상품마다 `getUsableCoupons` → raw를 `parseCoupon`, `id`로 중복 제거 → `putGoodsCoupons`. 마감 시간이 지나면 새 상품을 시작하지 않는다.
+    - `MEMBER_AUTH`: run 전체에서 1회만 `sessionProvider({ refresh: true, failedCookie })`로 갱신하고 그 상품을 다시 시도. 그래도 실패하면 조회를 멈추고 `'expired'`.
+    - HTTP 429: 조회를 멈추고 `'throttled'`(그때까지 조회한 결과는 저장된 채로 둔다).
+    - 그 밖의 예외는 그 상품만 건너뛰고 `failed`를 센다(로그는 상품번호와 상태만, 연속 실패도 한 줄씩).
+    - `Set-Cookie`는 `onSetCookie`로 `sessionProvider.absorb`에 넘긴다.
+  - `applyCouponPrices({ store, date }) -> { priced: number, stale: number, drops: Array<{ goods_no, prevPrice, currentPrice, dropRate }> }` (drops는 하락률 내림차순)
+    - ACTIVE 상품마다: `coupon_checked_date`가 있고 `date`로부터 `COUPON_TTL_DAYS`일 이내면 `couponPriceMusinsa(row, coupons.filter(c => !c.until || c.until >= date))`, 아니면 null(`stale`로 센다).
+    - `setCouponPrices` → `logCouponPriceChanges` → drops 반환. 세션이 없어도 실행된다(로컬 계산).
 
-- [ ] **Step 1: 실패하는 테스트** (가짜 client와 가짜 `sessionProvider` 사용. 테스트 끝에 모든 로그 문자열에 가짜 쿠키 값이 없는지 `assert.ok(!logs.join().includes(COOKIE))`)
+- [ ] **Step 1: 실패하는 테스트** (가짜 client와 가짜 `sessionProvider`. 테스트 끝에 모든 로그 문자열에 가짜 쿠키 값이 없는지 `assert.ok(!logs.join().includes(COOKIE))`)
 
 ```js
-test('learnKeyCoupons stores the union of both samples and prices every listing of the key', ...);
-test('a key with a contradictory coupon is hidden as scope and priced null', ...);
+test('checkGoodsCoupons stores each picked goods coupons and applyCouponPrices prices it', ...);
 test('no session → memberStatus none, no coupon calls', ...);
-test('MEMBER_AUTH refreshes once, then expired stops learning and never logs the cookie', ...);
-test('keys learned 8 days ago are stale and priced null; 6 days ago are reused', ...);
-test('selfCheck marks a mismatching key and applyCouponPrices nulls it for that date only', ...);
-test('learning past the deadline starts no new key', ...);
+test('MEMBER_AUTH refreshes once and retries; a second failure is expired and never logs the cookie', ...);
+test('429 stops checking as throttled and keeps what was checked', ...);
+test('a failing goods is skipped and counted as failed', ...);
+test('checking past the deadline starts no new goods', ...);
+test('a check 11 days old is stale and priced null; 9 days old is priced', ...);
+test('an expired coupon (until before date) is left out of the price', ...);
 ```
 
 - [ ] **Step 2: 실패 확인** — Run: `node --test tests/musinsa-wide-coupons.test.js` / Expected: 새 테스트 FAIL
 
-- [ ] **Step 3: 구현**
+- [ ] **Step 3: 구현.** `keyCouponSet`은 `src/musinsaWide/coupons.js`에서 빼서 `scripts/musinsa-coupon-verify.js`로 옮기고 그 테스트 2개를 지운다. `node scripts/musinsa-coupon-verify.js evaluate`는 같은 두 줄을 그대로 출력해야 한다.
 
-- [ ] **Step 4: 통과 확인** — Run: `node --test tests/musinsa-wide-coupons.test.js` / Expected: PASS
+- [ ] **Step 4: 통과 확인** — Run: `node --test tests/musinsa-wide-coupons.test.js && node scripts/musinsa-coupon-verify.js evaluate` / Expected: PASS, `식 재현: 435/435`, `키 예측: 17/27`
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/musinsaWide/coupons.js tests/musinsa-wide-coupons.test.js
-git commit -m "feat(musinsa): learn coupon sets per brand×category, self-check, price locally"
+git add src/musinsaWide/coupons.js tests/musinsa-wide-coupons.test.js scripts/musinsa-coupon-verify.js
+git commit -m "feat(musinsa): rotating per-goods coupon checks and local coupon prices"
 ```
 
 ---
@@ -374,16 +377,16 @@ git commit -m "feat(musinsa): learn coupon sets per brand×category, self-check,
 - Produces:
   - `BUDGET_MS_MUSINSA`, `RUN_BUDGET_MS_MUSINSA`
   - `trackMusinsa({ makeClient, store, date, categories = CATEGORIES_MUSINSA, depthPages = DEPTH_PAGES, partial = false, concurrency = 3, dryRun = false, sessionProvider = null, budgetMs, runBudgetMs, log }) -> MusinsaResult`
-  - `MusinsaResult = { date, categoryCounts: Array<{ cat, scanned, pages, complete, problems }>, diff: { initial, added, priceChanged, drops, revived, outOfScope } | null, coupons: { memberStatus, learned, keys, checked, mismatched, priced, hidden, drops } | null, durationMs }`
+  - `MusinsaResult = { date, categoryCounts: Array<{ cat, scanned, pages, complete, problems }>, diff: { initial, added, priceChanged, drops, revived, outOfScope } | null, coupons: { memberStatus, checked, failed, priced, stale, drops } | null, durationMs }`
 
 순서:
 1. 대분류를 `concurrency`로 동시 스캔한다. 대분류마다 로그 한 줄: `[무신사] ${cat}: ${scanned}개 ${pages}페이지` + 불완전이면 ` (불완전: ${problems 앞 3개 '; '로})`.
 2. 모든 대분류의 `scanned`가 0이면 첫 problem으로 throw한다.
 3. `dryRun`이면 `diff`·`coupons`를 null로 두고 반환한다.
 4. 대분류마다 `applyScan(date, rows, { cat, complete: complete && !partial })`.
-5. `learnKeyCoupons`를 실행한다. 예외가 나면 `memberStatus: 'error'`로 둔다.
-6. `ok`일 때만 `selfCheck` → `applyCouponPrices`를 실행한다. 아니면 로그 `⚠️ [무신사] 쿠폰가 갱신 생략 — 마지막 쿠폰가 유지`를 남기고 `coupons.priced = 0`, `drops = []`.
-7. `recordScanRun`을 호출한다(`couponsOk = memberStatus === 'ok'`).
+5. `checkGoodsCoupons`를 실행한다(마감은 `runDeadline`). 예외가 나면 `{ memberStatus: 'error', checked: 0, failed: 0 }`. `ok`가 아니면 로그 `⚠️ [무신사] 쿠폰 조회 ${memberStatus} — 저장된 쿠폰 목록으로 계산`.
+6. `applyCouponPrices`는 상태와 상관없이 실행한다.
+7. `recordScanRun`을 호출한다(`couponsOk = memberStatus === 'ok'`, `couponChecks = checked`).
 
 `diff`는 대분류별 결과를 합친 것이고, drops는 하락률 내림차순이다. 4910 `mergeDiffs`처럼 spread 없이 하나씩 push한다.
 
@@ -391,11 +394,11 @@ git commit -m "feat(musinsa): learn coupon sets per brand×category, self-check,
 
 ```js
 test('dry run scans and writes nothing', ...);
-test('a full run records listings, learns coupons and prices them', ...);   // coupons.memberStatus 'ok', getGoods(x).coupon_price 계산값
+test('a full run records listings, checks coupons and prices them', ...);   // coupons.memberStatus 'ok', getGoods(x).coupon_price 계산값
 test('one failing category is incomplete and its listings take no misses', ...);
 test('every category failing throws', ...);
 test('partial (--category/--depth) counts no misses anywhere', ...);
-test('without a session the scan is stored and coupon prices stay as they were', ...); // 전날 coupon_price 유지, couponsOk 0
+test('without a session the scan is stored and coupon prices come from the stored coupons', ...); // 전날 조회한 쿠폰으로 오늘 판매가 기준 쿠폰가, couponsOk 0, coupon_checks 0
 ```
 
 - [ ] **Step 2: 실패 확인** — Run: `node --test tests/musinsa-wide-track.test.js` / Expected: FAIL
@@ -427,14 +430,15 @@ git commit -m "feat(musinsa): daily wide scan orchestration with scan and run bu
 - 제목: `<b>🛍 [Project-Clot] 무신사 와이드 리포트 (${date})</b>`
 - 스캔: `대분류 ${n}개 스캔 (불완전 ${k}) · 상품 ${합계}`, 불완전이면 ` ⚠️ ${cat 목록}`
 - 변화: 첫 적재면 `초기 적재 ${added}개`, 아니면 `신규 ${a} · 가격변동 ${p} · 범위이탈 ${o} · 재등장 ${r}`
-- 쿠폰: `ok`이면 `🎟 쿠폰 학습 ${learned}/${keys}키 · 쿠폰가 ${priced}개 · 숨김 키 ${scope+stale+mismatch} (범위 ${scope} · 오래됨 ${stale} · 불일치 ${mismatch}) · 자가검증 ${checked}개 중 불일치 ${mismatched}`. `expired`/`none`이면 `⚠️ 무신사 로그인 만료 — MUSINSA_COOKIE 갱신 필요`. `error`이면 `⚠️ 무신사 쿠폰 학습 실패 — Actions 로그 확인`.
-- 하락: 쿠폰 ok이면 `<b>📉 쿠폰가 10% 이상 하락 (상위 ${n}):</b>`와 `coupons.drops`, 아니면 `<b>📉 판매가 10% 이상 하락 (상위 ${n}):</b>`와 `diff.drops`. 줄 형식: `🔻 [${brand_name}] ${name} — ${prev}→${cur}원 (-${rate}%)\n  • <a href="${url}">바로가기</a>`
+- 쿠폰: 항상 `🎟 쿠폰 조회 ${checked}개 (실패 ${failed}) · 쿠폰가 ${priced}개 · 미확인·오래됨 ${stale}개`. 그 아래 상태별 경고 한 줄: `expired`/`none`이면 `⚠️ 무신사 로그인 만료 — MUSINSA_COOKIE 갱신 필요`, `throttled`이면 `⚠️ 무신사 쿠폰 조회 제한(429) — ${checked}개에서 중단`, `error`이면 `⚠️ 무신사 쿠폰 조회 실패 — Actions 로그 확인`.
+- 하락: `coupons.drops`가 있으면 `<b>📉 쿠폰가 10% 이상 하락 (상위 ${n}):</b>`와 그 목록(행은 `lookup(goods_no)`), 없으면 `<b>📉 판매가 10% 이상 하락 (상위 ${n}):</b>`와 `diff.drops`(행은 `d.row`). 줄 형식: `🔻 [${brand_name}] ${name} — ${prev}→${cur}원 (-${rate}%)\n  • <a href="${url}">바로가기</a>`
 
 - [ ] **Step 1: 실패하는 테스트**
 
 ```js
 test('digest shows scan, change, coupon lines and coupon drops', ...);
-test('expired session shows the renewal warning and sale-price drops', ...);
+test('expired session shows the renewal warning; no coupon drops falls back to sale-price drops', ...);
+test('throttled shows the 429 line with the checked count', ...);
 test('dry run (diff null) shows only the scan line', ...);
 test('escapes HTML in names and stays within 4096 chars by dropping drop lines', ...);
 ```
@@ -529,11 +533,11 @@ workflow 요점:
 
 - [ ] **Step 1: workflow와 README 작성.** README에는 다음을 적는다.
   - 범위: 5 대분류 × REVIEW 상위 6,000
-  - 쿠폰가 정의와 제외 항목
+  - 쿠폰가 정의와 제외 항목, 상품별 순환 조회(하루 4,000개, 10일 유효)
   - OUT_OF_SCOPE 규칙
   - Release 저장소
   - 로컬에서는 `--dry-run`만 쓸 것
-  - 공개 경고: 쿠폰가와 키별 쿠폰 집합이 Release에 공개됨
+  - 공개 경고: 쿠폰가와 상품별 쿠폰 목록(쿠폰 이름 포함)이 Release에 공개됨
 
 - [ ] **Step 2: 검증** — Run: `npm test` / Expected: 전체 PASS. `actionlint`가 설치돼 있으면 `actionlint .github/workflows/musinsa-wide.yml` / Expected: 출력 없음. 없으면 `daily.yml`의 rotation 단계와 diff해 조건식(`if:`)과 env 이름이 같은지 확인한다.
 
@@ -547,4 +551,4 @@ git commit -m "ci(musinsa): daily wide scan workflow sharing the clot-daily conc
 - [ ] **Step 4: 첫 실행(사용자 확인 후).** main에 merge한 다음 아래를 순서대로 실행한다. 사람이 결과를 확인하고 진행한다.
   1. Actions에서 `mode=dry-run`을 수동 실행한다. 대분류 5개가 모두 `100페이지 complete`인지, 걸린 시간이 얼마인지 본다.
   2. `mode=init`을 실행한다. Release `data-musinsa`가 생기고, 텔레그램에 `초기 적재` 메시지가 1통 온다.
-  3. 다음 날 스케줄 실행에서 `신규·가격변동` 줄과 자가검증 불일치 수를 확인한다.
+  3. 다음 날 스케줄 실행에서 `신규·가격변동` 줄과 쿠폰 조회 수·실패 수를 확인한다. 429(`throttled`)가 보이면 `COUPON_CHECKS_PER_DAY`를 낮춘다.
