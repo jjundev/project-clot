@@ -104,9 +104,8 @@ export async function enumerateNumbers({ withClient, store, date, from, mustReac
       // A probe hit is registered here, so the walk reaching it later sees a known number: count it as new now.
       newCoupons += pr.newCoupons.length;
       if (pr.stop) {
-        // The walk will not get to what the probes recorded before the stop, so count and lift `highest` with it.
+        // Counted here since the walk will not get to them; `highest` and the frontier stay where the walk itself reached.
         hits += pr.hits.length;
-        if (pr.hits.length > 0) lastHit = Math.max(lastHit, ...pr.hits);
         stop = pr.stop;
         break;
       }

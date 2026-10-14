@@ -269,13 +269,23 @@ test('a stop mid-batch leaves next and the cursor at that batch\'s first number'
   assert.equal(r.highest, 230);
 });
 
-test('a probe hit recorded before a 429 still counts and lifts highest and the frontier', async () => {
+test('a probe hit recorded before a 429 counts as a hit but does not lift highest or the frontier', async () => {
   const f = fakeClient({ counts: countsOf([200, 700]), throw429: [1200] });
   const r = await enumerateNumbers({ withClient: f.withClient, store, date: DATE, from: 200 });
   assert.equal(r.stop, 'throttled');
   assert.ok(store.getCoupon(700));
-  assert.equal(r.highest, 700);
+  assert.equal(r.highest, 200);
   assert.equal(r.hits, 2);
   assert.equal(r.newCoupons, 2);
+  assert.equal(store.getMeta('frontier'), '200');
+  // no trailing empties are remembered above highest
+  assert.deepEqual(store.emptyNumbersToRecheck('2026-10-16'), []);
+
+  // the next run starts at frontier+1 and walks the numbers the probes jumped over
+  const g = fakeClient({ counts: countsOf([200, 700]) });
+  const next = await enumerateNumbers({ withClient: g.withClient, store, date: DATE, from: 201, mustReach: store.maxCouponNo() });
+  for (const n of [450, 699, 700]) assert.ok(g.calls.count.includes(n), `walked ${n}`);
+  assert.equal(next.highest, 700);
+  assert.equal(next.stop, null);
   assert.equal(store.getMeta('frontier'), '700');
 });
