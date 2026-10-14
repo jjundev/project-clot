@@ -174,8 +174,8 @@ export function createMemberChecker({ withClient, sessionProvider, concurrency =
         log(`⚠️ [무신사] 쿠폰 조회 실패 goods ${goods.goods_no} (HTTP ${err.status ?? '?'})`);
         return;
       }
-      calls++;
       await onResult?.(goods, coupons);
+      calls++; // only after onResult resolved: a throwing onResult counts as failed, never as a call
       return;
     }
   }

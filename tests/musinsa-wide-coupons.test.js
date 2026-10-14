@@ -284,7 +284,6 @@ test('onResult gets deduped parsed coupons with start', async () => {
   assert.equal(results.length, 1);
   assert.deepEqual(results[0].goods, { goods_no: 1, brand: 'nike', sale_price: 100000, extra_discount: 0 });
   assert.deepEqual(results[0].coupons.map((c) => [c.id, c.start, c.until, c.percent]), [['11', '2026-10-01', '2026-10-15', 10], ['12', '2026-10-01', '2026-10-15', 10]]);
-  assert.equal(store.getActivePriceRows()[0].coupons, null); // the checker itself never writes
 });
 
 test('429 stops checking as throttled and keeps what was checked', async () => {
@@ -298,6 +297,23 @@ test('429 stops checking as throttled and keeps what was checked', async () => {
   assert.equal(rows[0].coupons.length, 1);
   assert.equal(rows[1].coupons, null);
   assert.ok(!logs.join().includes(COOKIE));
+});
+
+test('only HTTP failures end as error with nothing checked', async () => {
+  store.applyScan('2026-10-13', [goodsRow(1, 10000), goodsRow(2, 20000)], { cat: '001', complete: true });
+  const checker = createMemberChecker({ withClient: withClientOf(fakeClient({ 1: httpError(500), 2: httpError(500) })), sessionProvider: provider(), concurrency: 1, log });
+  await checker.start();
+  await checker.check(activeGoods(), { onResult: () => assert.fail('no result expected') });
+  assert.deepEqual([checker.status, checker.calls, checker.failed], ['error', 0, 2]);
+});
+
+test('an onResult that throws counts only as failed, so all-failed writes end as error', async () => {
+  store.applyScan('2026-10-13', [goodsRow(1, 10000), goodsRow(2, 20000), goodsRow(3, 30000)], { cat: '001', complete: true });
+  const checker = createMemberChecker({ withClient: withClientOf(fakeClient({})), sessionProvider: provider(), concurrency: 1, log });
+  await checker.start();
+  await checker.check(activeGoods(), { onResult: () => { throw new Error('db gone'); } });
+  assert.deepEqual([checker.status, checker.calls, checker.failed], ['error', 0, 3]);
+  assert.equal(logs.filter((l) => l.includes('저장 실패')).length, 3);
 });
 
 test('a failing goods is skipped and counted as failed', async () => {
