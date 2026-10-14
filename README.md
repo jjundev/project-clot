@@ -52,6 +52,16 @@
    - **대시보드 출처 필터**: `전체`(무신사 + 4910 찜) · `무신사` · `4910 찜` · `4910 전체`. `4910 전체`를 누르면 브랜드 칩(판매글 수 순)이 뜨고, 브랜드를 고를 때마다 그 브랜드 파일(`4910/b{브랜드번호}.js`, 목록은 `4910/index.js`)만 내려받아 쌓습니다. 카드는 120개씩 그리고, 스크롤하거나 `더 보기`를 누르면 더 그립니다. 찜하지 않은 판매글의 가격은 그날 쿠폰가를 알면 **쿠폰가**, 모르면 **표시가**이고(회원가는 없음), 두 기준끼리는 비교하지 않습니다. 하락 표시는 마지막 스캔에서 같은 기준 가격이 내려간 판매글에만, 역대 최저가 표시는 같은 기준 가격이 한 번이라도 바뀐 판매글에만 붙습니다.
    - 텔레그램 요약에는 스캔 브랜드·판매글·통과 셀러 수, 신규·가격변동·종료 수, 직전 기록가 대비 **10% 이상 하락한 상위 10개**, 찜 상품 쿠폰가 하락이 들어갑니다.
 
+10. **무신사 와이드 스캔 (`track-musinsa`)**
+   - **범위**: 무신사 대분류 5개(`001`, `002`, `003`, `103`, `004`) × 리뷰순(`REVIEW`) 상위 100페이지(페이지당 60개 = **6,000개**), 성별 `gf=A`. 하루 약 3만 개를 **로그인 없이** 스캔하고, 대분류끼리만 병렬로 돌립니다. 목록 API는 페이지마다 서명이 붙어 `page`를 건너뛸 수 없어서 `nextPageUrl`을 순서대로 따라갑니다.
+   - **쿠폰가 정의**: **쿠폰가 = 판매가 − 추가할인 − 그 상품에서 조회한 내 쿠폰 중 만료되지 않은 것의 최대 할인**입니다. 회원 등급 할인·적립금·카드 즉시할인은 **제외**합니다(목록에 제한 플래그가 없고 결제수단별 조건이 달라서). 조회한 지 10일이 넘었거나 한 번도 조회하지 않은 상품의 쿠폰가는 비어 있습니다(NULL).
+   - **상품별 순환 조회**: 쿠폰은 로그인 쿠키(`MUSINSA_COOKIE`)로 **상품마다** 조회합니다(하루 최대 4,000개, `COUPON_CHECKS_PER_DAY`). 조회 결과는 10일간 유효하고(`COUPON_TTL_DAYS`), 상품에 쿠폰 목록으로 저장해 두었다가 매일 그날 판매가로 쿠폰가를 다시 계산합니다. 만료된 쿠폰(`useToDate`가 오늘 이전)은 계산에서 뺍니다. 조회 순서는 **한 번도 조회하지 않은 상품 → 조회 후 판매가·추가할인이 바뀐 상품 → 조회가 오래된 순**이고, 품절 상품은 조회하지 않습니다(약 8일이면 한 바퀴). 429를 받으면 그날 조회를 멈추고(`throttled`) 요약에 경고가 붙습니다. 쿠키가 없거나 만료된 날은 조회만 건너뛰고, 저장된 쿠폰 목록으로 쿠폰가는 계속 계산합니다. 브랜드×대분류 단위로 쿠폰을 추정하는 방식은 같은 키의 다른 상품을 맞힌 비율이 63%뿐이라 버렸습니다(`docs/verify/musinsa-coupon-price.md`).
+   - **이력과 `OUT_OF_SCOPE`**: **바뀔 때만** 남깁니다(신규·가격변동·재등장, 쿠폰가는 `coupon_price_changes`). 완전한 스캔에서 **2회 연속 보이지 않은 상품은 `OUT_OF_SCOPE`**(종료가 아님)로 바뀌고, 다시 보이면 `REVIVED`로 되살아납니다. 페이지를 끝까지 못 읽어 불완전하게 끝난 대분류는 미노출을 세지 않습니다.
+   - **저장소: GitHub Release**: `data/musinsa-wide.db`는 git에 커밋하지 않고(`.gitignore`) Release `data-musinsa`의 `musinsa-wide.db.gz`(최신본), `musinsa-wide.db.prev.gz`(직전본, 롤백용), `musinsa-wide.db.<YYYY-MM-DD>.gz`(날짜별 사본)로 보관합니다. 올리는 순서와 복구 방식은 `4910-db`와 같습니다.
+   - **실행**: workflow `Musinsa wide scan`(`.github/workflows/musinsa-wide.yml`)이 매일 11:30(KST)에 `musinsa-db pull` → `track-musinsa` → `musinsa-db push` 순서로 돌고, 텔레그램 요약을 하루 1통(스캔 요약, 쿠폰 조회 요약, 쿠폰가 10% 이상 하락 상위 10개) 보냅니다. 앞 단계가 실패하면 뒤 단계는 실행하지 않고, `daily`와 같은 `clot-daily` concurrency 그룹을 써서 두 workflow가 겹치지 않으며 쿠키 교체(rotation) 단계도 `daily`와 같습니다. 수동 실행의 `mode`는 `dry-run`(기본, 쓰기 없음) · `scan` · `init`(Release가 없을 때 첫 적재: `track-musinsa --init` 후 `musinsa-db push --allow-fresh`)입니다.
+   - **로컬 사용법**: ⚠️ **로컬(Mac)에서는 `--dry-run`으로만 실행하세요.** `node src/cli.js track-musinsa --dry-run [--category 001,002] [--depth 5]`는 DB에 쓰지 않고 텔레그램도 보내지 않으며 쿠폰 조회도 하지 않습니다. 쓰기 실행은 텔레그램 요약을 한 통 더 보내고, 로컬 DB를 `musinsa-db push`하면 Actions가 쌓은 이력을 덮어씁니다. `track-musinsa`는 `data/musinsa-wide.db`가 없으면 `--init` 없이는 실행을 거부합니다.
+   - ⚠️ **공개 범위**: 저장소가 공개이므로 Release `data-musinsa`의 `musinsa-wide.db.gz`에 들어 있는 **쿠폰가와 상품별 쿠폰 목록(쿠폰 이름 포함)이 누구에게나 공개됩니다.** 내 쿠폰함 내역이 그대로 드러나는 점에 유의하세요.
+
 ---
 
 ## 📁 디렉토리 구조
@@ -61,6 +71,7 @@
 ├── data/
 │   ├── prices.db            # SQLite 데이터베이스 (시계열 가격 로그 & 상품 메타데이터)
 │   ├── 4910.db              # (git 미추적) 4910 판매글 & 변동 이력 — Release data-4910에서 받아 씀
+│   ├── musinsa-wide.db      # (git 미추적) 무신사 와이드 스캔 상품·쿠폰가 이력 — Release data-musinsa에서 받아 씀
 │   └── latest_prices.json   # Git 저장소 공유용 최신 가격 스냅샷
 ├── logs/                    # 데몬 실행 로그 (daily.log)
 ├── src/
@@ -69,7 +80,8 @@
 │   ├── collector.js         # 상품 가격, 쿠폰, 품절 상태 수집기
 │   ├── sync.js              # 무신사 좋아요 목록 증분 동기화
 │   ├── notifier.js          # macOS 데스크톱 및 텔레그램 알림 발송
-│   └── site4910/            # 4910.kr 상위 브랜드 스캔 (client, store, track, sellers, coupons, release, digest)
+│   ├── site4910/            # 4910.kr 상위 브랜드 스캔 (client, store, track, sellers, coupons, release, digest)
+│   └── musinsaWide/         # 무신사 와이드 스캔 (client, store, track, coupons, release, digest)
 ├── package.json
 ├── .env.example             # 텔레그램/디스코드 웹훅 설정 템플릿
 └── README.md
