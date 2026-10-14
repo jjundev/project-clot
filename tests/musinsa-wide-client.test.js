@@ -1,0 +1,227 @@
+import './setup-env.js';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createMusinsaClient, scanCategory, toListingRow, CATEGORIES_MUSINSA, DEPTH_PAGES, REQUEST_TIMEOUT_MS } from '../src/musinsaWide/client.js';
+
+const noSleep = async () => {};
+const item = (n, extra = {}) => ({
+  goodsNo: n, goodsName: `g${n}`, goodsLinkUrl: `https://www.musinsa.com/products/${n}`, thumbnail: `//img/${n}.jpg`,
+  isSoldOut: false, normalPrice: 20000, price: 15000, couponPrice: 14000, extraDiscountAmount: 500, finalPrice: 14500,
+  brand: 'brandx', brandName: 'Brand X', reviewCount: 10, ...extra,
+});
+const htmlPage = (items, pagination) => ({
+  ok: true,
+  status: 200,
+  text: async () => `<script id="__NEXT_DATA__">${JSON.stringify({
+    props: { pageProps: { dehydratedState: { queries: [{ queryKey: ['x'], state: { data: { pages: [{ data: { list: items, pagination } }] } } }] } } },
+  })}</script>`,
+});
+const jsonPage = (items, pagination) => ({ ok: true, status: 200, json: async () => ({ data: { list: items, pagination } }) });
+const failRes = (status) => ({ ok: false, status });
+
+// First request is the HTML page; later ones are the plp JSON API (url contains /api2/dp/v2/plp/goods).
+function chainFetch(pages) {
+  const urls = [];
+  const fn = async (url) => {
+    urls.push(url);
+    const idx = urls.length - 1;
+    const p = pages[Math.min(idx, pages.length - 1)];
+    return typeof p === 'function' ? p() : p;
+  };
+  fn.urls = urls;
+  return fn;
+}
+const NEXT = (n) => `/api2/dp/v2/plp/goods?page=${n}&sortCode=REVIEW&gf=A&category=001`;
+
+test('constants', () => {
+  assert.deepEqual(CATEGORIES_MUSINSA, ['001', '002', '003', '103', '004']);
+  assert.equal(DEPTH_PAGES, 100);
+});
+
+test('scanCategory follows nextPageUrl and stops at maxPages as complete', async () => {
+  const fetchFn = chainFetch([
+    htmlPage([item(1), item(2)], { hasNext: true, nextPageUrl: NEXT(2) }),
+    jsonPage([item(3)], { hasNext: true, nextPageUrl: NEXT(3) }),
+    jsonPage([item(4)], { hasNext: false }),
+  ]);
+  const client = createMusinsaClient({ fetchFn, sleep: noSleep });
+  const res = await scanCategory(client, '001', { maxPages: 2 });
+  assert.equal(res.pages, 2);
+  assert.equal(res.complete, true);
+  assert.deepEqual([...res.rows.keys()], [1, 2, 3]);
+  assert.equal(fetchFn.urls.length, 2);
+});
+
+test('scanCategory reaches the end of the chain as complete', async () => {
+  const fetchFn = chainFetch([
+    htmlPage([item(1)], { hasNext: true, nextPageUrl: NEXT(2) }),
+    jsonPage([item(2)], { hasNext: false, nextPageUrl: NEXT(3) }),
+  ]);
+  const res = await scanCategory(createMusinsaClient({ fetchFn, sleep: noSleep }), '001');
+  assert.equal(res.pages, 2);
+  assert.equal(res.complete, true);
+  assert.deepEqual(res.problems, []);
+});
+
+test('scanCategory requests the REVIEW first page and never builds page URLs', async () => {
+  const fetchFn = chainFetch([
+    htmlPage([item(1)], { hasNext: true, nextPageUrl: NEXT(2) }),
+    jsonPage([item(2)], { hasNext: true, nextPageUrl: NEXT(3) }),
+    jsonPage([item(3)], { hasNext: false }),
+  ]);
+  await scanCategory(createMusinsaClient({ fetchFn, sleep: noSleep }), '103');
+  assert.equal(fetchFn.urls[0], 'https://www.musinsa.com/categories/item/103?gf=A&sortCode=REVIEW');
+  assert.equal(fetchFn.urls[1], `https://api.musinsa.com${NEXT(2)}`);
+  assert.equal(fetchFn.urls[2], `https://api.musinsa.com${NEXT(3)}`);
+});
+
+test('scanCategory skips items without goodsNo', async () => {
+  const fetchFn = chainFetch([htmlPage([item(1), { goodsName: 'banner tile' }, item(2)], { hasNext: false })]);
+  const res = await scanCategory(createMusinsaClient({ fetchFn, sleep: noSleep }), '001');
+  assert.deepEqual([...res.rows.keys()], [1, 2]);
+});
+
+test('a page that keeps failing ends the category incomplete with a problem', async () => {
+  const sleeps = [];
+  const fetchFn = chainFetch([
+    htmlPage([item(1)], { hasNext: true, nextPageUrl: NEXT(2) }),
+    failRes(403),
+  ]);
+  const client = createMusinsaClient({ fetchFn, pageDelayMs: 300, sleep: async (ms) => sleeps.push(ms) });
+  const res = await scanCategory(client, '001');
+  assert.equal(res.complete, false);
+  assert.equal(res.pages, 1);
+  assert.deepEqual([...res.rows.keys()], [1]);
+  assert.equal(res.problems.length, 1);
+  assert.match(res.problems[0], /403/);
+  assert.equal(fetchFn.urls.length, 4); // page 1 + 3 attempts at page 2
+  assert.deepEqual(sleeps.filter((ms) => ms >= 2000), [2000, 4000]);
+});
+
+test('a page recovers on retry', async () => {
+  let n = 0;
+  const fetchFn = chainFetch([
+    htmlPage([item(1)], { hasNext: true, nextPageUrl: NEXT(2) }),
+    () => (n++ === 0 ? failRes(500) : jsonPage([item(2)], { hasNext: false })),
+  ]);
+  const res = await scanCategory(createMusinsaClient({ fetchFn, sleep: noSleep }), '001');
+  assert.equal(res.complete, true);
+  assert.deepEqual([...res.rows.keys()], [1, 2]);
+});
+
+test('an empty page that still has nextPageUrl counts as a failure', async () => {
+  const fetchFn = chainFetch([htmlPage([], { hasNext: true, nextPageUrl: NEXT(2) })]);
+  const res = await scanCategory(createMusinsaClient({ fetchFn, sleep: noSleep }), '001');
+  assert.equal(res.complete, false);
+  assert.equal(res.pages, 0);
+  assert.equal(res.problems.length, 1);
+});
+
+test('an empty first page without a next page is incomplete, not an empty complete scan', async () => {
+  const sleeps = [];
+  const fetchFn = chainFetch([htmlPage([], { hasNext: false })]);
+  const client = createMusinsaClient({ fetchFn, sleep: async (ms) => sleeps.push(ms) });
+  const res = await scanCategory(client, '001');
+  assert.equal(res.complete, false);
+  assert.equal(res.pages, 0);
+  assert.equal(res.rows.size, 0);
+  assert.equal(res.problems.length, 1);
+  assert.match(res.problems[0], /empty first page/);
+  assert.equal(fetchFn.urls.length, 3);
+  assert.deepEqual(sleeps.filter((ms) => ms >= 2000), [2000, 4000]);
+});
+
+test('scanCategory past the deadline is incomplete', async () => {
+  const fetchFn = chainFetch([htmlPage([item(1)], { hasNext: true, nextPageUrl: NEXT(2) }), jsonPage([item(2)], { hasNext: false })]);
+  let t = 1000;
+  const res = await scanCategory(createMusinsaClient({ fetchFn, sleep: noSleep }), '001', { deadline: 1500, now: () => (t += 400) });
+  assert.equal(res.complete, false);
+  assert.equal(res.pages, 1);
+  assert.ok(res.problems.some((p) => p.includes('deadline')));
+});
+
+test('toListingRow maps listing fields', () => {
+  assert.deepEqual(toListingRow(item(7, { isSoldOut: true, extraDiscountAmount: undefined }), '002'), {
+    goods_no: 7, cat: '002', brand: 'brandx', brand_name: 'Brand X', name: 'g7',
+    url: 'https://www.musinsa.com/products/7', image_url: '//img/7.jpg',
+    sale_price: 15000, normal_price: 20000, extra_discount: 0, is_sold_out: 1,
+  });
+  assert.equal(toListingRow(item(8, { goodsLinkUrl: undefined }), '002').url, 'https://www.musinsa.com/products/8');
+  assert.equal(toListingRow({ goodsName: 'x' }, '002'), null);
+});
+
+test('toListingRow defaults a missing name to an empty string', () => {
+  assert.equal(toListingRow(item(9, { goodsName: undefined }), '001').name, '');
+  assert.equal(toListingRow(item(9, { goodsName: null }), '001').name, '');
+});
+
+test('every request, category pages and the coupon call, carries a timeout signal', async () => {
+  assert.equal(REQUEST_TIMEOUT_MS, 30_000);
+  const seen = [];
+  const fetchFn = async (url, opts) => {
+    seen.push(opts?.signal);
+    if (String(url).includes('getUsableCouponsByGoodsNo')) {
+      return { ok: true, status: 200, headers: { getSetCookie: () => [] }, json: async () => ({ data: { list: [] } }) };
+    }
+    return htmlPage([item(1)], { hasNext: false });
+  };
+  const client = createMusinsaClient({ fetchFn, sleep: noSleep });
+  await client.getCategoryPage('001');
+  await client.getUsableCoupons({ goodsNo: 1, brand: 'b', salePrice: 1 }, 'c=1');
+  assert.equal(seen.length, 2);
+  for (const signal of seen) assert.ok(signal instanceof AbortSignal);
+});
+
+test('getUsableCoupons sends the cookie, passes Set-Cookie on, and maps 401 to MEMBER_AUTH without the cookie in the message', async () => {
+  const calls = [];
+  const fetchFn = async (url, opts) => {
+    calls.push({ url, opts });
+    if (calls.length === 1) {
+      return { ok: true, status: 200, headers: { getSetCookie: () => ['a=1; Path=/'] }, json: async () => ({ data: { list: [{ couponNo: 1 }] } }) };
+    }
+    return { ok: false, status: 401, headers: { getSetCookie: () => [] } };
+  };
+  const client = createMusinsaClient({ fetchFn, sleep: noSleep });
+  const got = [];
+  const list = await client.getUsableCoupons({ goodsNo: 55, brand: 'brandx', salePrice: 15000 }, 'SECRET=cookie', { onSetCookie: (c) => got.push(...c) });
+  assert.deepEqual(list, [{ couponNo: 1 }]);
+  assert.deepEqual(got, ['a=1; Path=/']);
+  const u = new URL(calls[0].url);
+  assert.equal(u.origin + u.pathname, 'https://api.musinsa.com/api2/coupon/coupons/getUsableCouponsByGoodsNo');
+  assert.equal(u.searchParams.get('goodsNo'), '55');
+  assert.equal(u.searchParams.get('brand'), 'brandx');
+  assert.equal(u.searchParams.get('comId'), 'brandx');
+  assert.equal(u.searchParams.get('salePrice'), '15000');
+  assert.equal(u.searchParams.has('specialtyCodes'), false);
+  assert.equal(calls[0].opts.headers.Cookie, 'SECRET=cookie');
+  assert.equal(calls[0].opts.headers.Referer, 'https://www.musinsa.com/');
+  assert.ok(calls[0].opts.headers['User-Agent']);
+
+  await assert.rejects(
+    client.getUsableCoupons({ goodsNo: 55, brand: 'brandx', salePrice: 15000 }, 'SECRET=cookie'),
+    (err) => err.code === 'MEMBER_AUTH' && !err.message.includes('SECRET') && !String(err.stack).includes('SECRET=cookie')
+  );
+});
+
+test('getUsableCoupons throws a 429 with err.status 429 and no retry', async () => {
+  let n = 0;
+  const fetchFn = async () => { n++; return { ok: false, status: 429, headers: { getSetCookie: () => [] } }; };
+  const client = createMusinsaClient({ fetchFn, sleep: noSleep });
+  await assert.rejects(client.getUsableCoupons({ goodsNo: 1, brand: 'b', salePrice: 1 }, 'c=1'), (err) => err.status === 429 && err.code !== 'MEMBER_AUTH');
+  assert.equal(n, 1);
+});
+
+test('getUsableCoupons rejects a response without data.list', async () => {
+  const fetchFn = async () => ({ ok: true, status: 200, headers: { getSetCookie: () => [] }, json: async () => ({ data: {} }) });
+  const client = createMusinsaClient({ fetchFn, sleep: noSleep });
+  await assert.rejects(client.getUsableCoupons({ goodsNo: 1, brand: 'b', salePrice: 1 }, 'c=1'), /Unexpected coupon API response/);
+});
+
+test('coupon calls are spaced by couponDelayMs after the first', async () => {
+  const sleeps = [];
+  const fetchFn = async () => ({ ok: true, status: 200, headers: { getSetCookie: () => [] }, json: async () => ({ data: { list: [] } }) });
+  const client = createMusinsaClient({ fetchFn, couponDelayMs: 700, sleep: async (ms) => sleeps.push(ms) });
+  await client.getUsableCoupons({ goodsNo: 1, brand: 'b', salePrice: 1 }, 'c');
+  await client.getUsableCoupons({ goodsNo: 2, brand: 'b', salePrice: 1 }, 'c');
+  assert.deepEqual(sleeps, [700]);
+});

@@ -1,0 +1,108 @@
+name: Musinsa wide scan
+
+on:
+  schedule:
+    - cron: '30 2 * * *' # 11:30 KST, after the Musinsa daily (09:30) and the 4910 tracker (10:30)
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'dry-run = anonymous scan, no DB, no Telegram; scan = pull DB, scan + coupon checks, push DB; init = first run (fresh DB) + push --allow-fresh'
+        type: choice
+        options: [scan, dry-run, init]
+        default: dry-run
+
+permissions:
+  contents: write # Release asset upload (data-musinsa)
+
+# Shares the daily workflow's group: both read the Musinsa cookie and may rotate the MUSINSA_COOKIE secret, so they must not overlap.
+concurrency:
+  group: clot-daily
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MODE: ${{ github.event_name == 'schedule' && 'scan' || inputs.mode }}
+      GH_TOKEN: ${{ github.token }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24 # node:sqlite
+
+      # A missing or malformed secret must only cost the coupon checks (track-musinsa then reports memberStatus 'none'):
+      # continue-on-error keeps pull/track/push running, and the last step turns the job red afterwards.
+      - name: Restore Musinsa session
+        id: restore
+        continue-on-error: true
+        env:
+          MUSINSA_COOKIE: ${{ secrets.MUSINSA_COOKIE }}
+        run: node scripts/actions-session.js restore
+
+      # The steps below chain on success (no status function in their `if`): a failed pull must not reach track-musinsa
+      # (it would start from an empty DB), and a failed track-musinsa must not reach push (it would overwrite the Release history).
+      - name: Pull musinsa-wide.db from the data-musinsa Release
+        if: env.MODE == 'scan'
+        run: node src/cli.js musinsa-db pull
+
+      - name: Scan categories and check coupons
+        if: env.MODE == 'scan'
+        run: node src/cli.js track-musinsa
+
+      - name: Initial scan into a fresh DB
+        if: env.MODE == 'init'
+        run: node src/cli.js track-musinsa --init
+
+      - name: Dry run (anonymous scan, nothing is written)
+        if: env.MODE == 'dry-run'
+        run: node src/cli.js track-musinsa --dry-run
+
+      - name: Push musinsa-wide.db to the data-musinsa Release
+        if: env.MODE == 'scan'
+        run: node src/cli.js musinsa-db push
+
+      - name: Push the initial musinsa-wide.db to the data-musinsa Release
+        if: env.MODE == 'init'
+        run: node src/cli.js musinsa-db push --allow-fresh
+
+      - name: Check for token rotation
+        id: session
+        if: always() && steps.restore.outcome == 'success'
+        env:
+          MUSINSA_COOKIE: ${{ secrets.MUSINSA_COOKIE }}
+          CLOT_ROTATED_COOKIE_FILE: ${{ runner.temp }}/musinsa-cookie
+        run: node scripts/actions-session.js check
+
+      - name: Store rotated tokens in the secret
+        if: always() && steps.session.outputs.status == 'rotated'
+        env:
+          # Fine-grained PAT for this repo with "Secrets: read and write".
+          GH_TOKEN: ${{ secrets.CLOT_SECRETS_PAT }}
+          COOKIE_FILE: ${{ runner.temp }}/musinsa-cookie
+        run: |
+          trap 'rm -f "$COOKIE_FILE"' EXIT
+          if [ -z "$GH_TOKEN" ]; then
+            echo '::error::Tokens rotated but CLOT_SECRETS_PAT is not set; update MUSINSA_COOKIE by hand or the next run uses stale tokens.'
+            exit 1
+          fi
+          gh secret set MUSINSA_COOKIE --repo "$GITHUB_REPOSITORY" < "$COOKIE_FILE"
+          echo 'MUSINSA_COOKIE updated with the rotated tokens.'
+
+      - name: Fail when the session is gone
+        if: always() && steps.session.outputs.status == 'cleared'
+        run: |
+          echo '::error::Musinsa session expired or was revoked. Log in on the Mac, then update the MUSINSA_COOKIE secret.'
+          exit 1
+
+      # steps.restore.outcome is the real result (conclusion is forced to success by continue-on-error). The scan and
+      # push above already ran; this only makes the missing secret visible, the same way a cleared session is.
+      - name: Fail when the session could not be restored
+        if: always() && steps.restore.outcome == 'failure'
+        run: |
+          echo '::error::MUSINSA_COOKIE could not be restored (empty or malformed): the scan ran without coupon checks. Update the MUSINSA_COOKIE secret.'
+          exit 1
