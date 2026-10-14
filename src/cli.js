@@ -32,6 +32,11 @@ import { pullDb, pushDb } from './site4910/release.js';
 import { track4910 } from './site4910/track.js';
 import { format4910Digest } from './site4910/digest.js';
 import { syncLiked4910, readAblyToken } from './site4910/liked.js';
+import { createMusinsaClient, CATEGORIES_MUSINSA, DEPTH_PAGES } from './musinsaWide/client.js';
+import { MusinsaWideStore, defaultMusinsaWideDbPath } from './musinsaWide/store.js';
+import { pullDb as pullDbMusinsa, pushDb as pushDbMusinsa } from './musinsaWide/release.js';
+import { trackMusinsa } from './musinsaWide/track.js';
+import { formatMusinsaWideDigest } from './musinsaWide/digest.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -47,7 +52,7 @@ export function parseArgs(rawArgs = process.argv.slice(2)) {
   const command = args[0] || 'help';
   const flags = {};
   const positional = [];
-  const BOOLEAN_FLAGS = new Set(['force', 'with-discovery', 'no-open', 'help', 'skip-opencli', 'assume-awake', 'json', 'skip-4910', 'dry-run', 'allow-fresh']);
+  const BOOLEAN_FLAGS = new Set(['force', 'with-discovery', 'no-open', 'help', 'skip-opencli', 'assume-awake', 'json', 'skip-4910', 'dry-run', 'allow-fresh', 'init']);
 
   for (let i = 1; i < args.length; i++) {
     const a = args[i];
@@ -609,6 +614,106 @@ export function run4910Db({ sub, allowFresh = false, dbPath = default4910DbPath(
     return { ok: true, bytes };
   } catch (err) {
     log(`⚠️ [4910-db] ${sub} failed: ${err.message}`);
+    return { ok: false, error: err.message };
+  }
+}
+
+// `--category a,b` (each one of CATEGORIES_MUSINSA) and `--depth n` (integer 1-100); either one makes the run partial.
+function parseMusinsaScope(flags) {
+  let categories = CATEGORIES_MUSINSA;
+  let depthPages = DEPTH_PAGES;
+  if (flags.category !== undefined) {
+    const list = typeof flags.category === 'string' ? [...new Set(flags.category.split(',').map((c) => c.trim()))] : [];
+    const unknown = list.filter((c) => !CATEGORIES_MUSINSA.includes(c));
+    if (!list.length || unknown.length) {
+      return { error: `unknown category '${unknown.length ? unknown.join(',') : flags.category}' (use ${CATEGORIES_MUSINSA.join(',')})` };
+    }
+    categories = list;
+  }
+  if (flags.depth !== undefined) {
+    const n = typeof flags.depth === 'string' && /^\d+$/.test(flags.depth) ? Number(flags.depth) : NaN;
+    if (!(n >= 1 && n <= 100)) return { error: `invalid --depth '${flags.depth}' (use an integer 1-100)` };
+    depthPages = n;
+  }
+  return { categories, depthPages, partial: flags.category !== undefined || flags.depth !== undefined };
+}
+
+/**
+ * Scans the Musinsa top-level categories into data/musinsa-wide.db, checks goods coupons and sends one digest.
+ * Run by `track-musinsa` (the musinsa-wide workflow), not by `daily`. Never throws; a failing track sends nothing.
+ * The session provider is made for write runs only (a dry run is anonymous).
+ */
+export async function runMusinsaWideStep({
+  flags = {},
+  today,
+  openStore = () => new MusinsaWideStore(),
+  dbExists = () => fs.existsSync(defaultMusinsaWideDbPath()),
+  makeClient = () => createMusinsaClient(),
+  makeProvider = () => makeSessionProvider({ allowBridge: false }),
+  trackFn = trackMusinsa,
+  notify = sendTelegramMessage,
+  log = console.log,
+} = {}) {
+  const { categories, depthPages, partial, error: scopeError } = parseMusinsaScope(flags);
+  if (scopeError) {
+    log(`⚠️ [무신사] ${scopeError}`);
+    return { ran: false, ok: false, error: scopeError };
+  }
+  const concurrency = Math.min(parseConcurrency(flags.concurrency, 3), 4);
+  const dryRun = Boolean(flags['dry-run']);
+
+  // Opening the store would create an empty DB, the scan would fill it with one day, and a push would then replace the
+  // release history. The DB has to come from `musinsa-db pull` first (or be created on purpose with --init).
+  if (!dryRun && !flags.init && !dbExists()) {
+    const error = 'musinsa-wide.db 없음 — 먼저 `node src/cli.js musinsa-db pull`';
+    log(`⚠️ [무신사] ${error}`);
+    return { ran: false, ok: false, error };
+  }
+
+  let store = null;
+  try {
+    if (!dryRun) store = openStore();
+    const sessionProvider = dryRun ? null : makeProvider();
+    const result = await trackFn({ makeClient, store, date: today, categories, depthPages, partial, concurrency, dryRun, sessionProvider, log });
+    if (dryRun) {
+      log(formatMusinsaWideDigest(result));
+      return { ran: true, ok: true, result };
+    }
+    const { diff } = result;
+    log(`🛍 [무신사] ${result.categoryCounts.length}개 대분류 스캔 — 신규 ${diff.added.length}, 가격변동 ${diff.priceChanged}, 범위이탈 ${diff.outOfScope}`);
+    await notify(formatMusinsaWideDigest(result, { lookup: (goodsNo) => store.getGoods(goodsNo) }));
+    return { ran: true, ok: true, result };
+  } catch (err) {
+    log(`⚠️ [무신사] 수집 실패 (${err.message})`);
+    return { ran: true, ok: false, error: err.message };
+  } finally {
+    if (store) {
+      try {
+        store.checkpoint(); // otherwise today's rows can sit in the ignored -wal file
+      } catch (err) {
+        log(`⚠️ [무신사] WAL checkpoint failed; the musinsa-wide.db pushed to the release may lag (${err.message})`);
+      }
+      try {
+        store.close();
+      } catch {}
+    }
+  }
+}
+
+/** `musinsa-db pull|push`: moves data/musinsa-wide.db (or CLOT_MUSINSA_WIDE_DB_PATH) to and from the data-musinsa Release asset. */
+export function runMusinsaDb({ sub, allowFresh = false, dbPath = defaultMusinsaWideDbPath(), pullFn = pullDbMusinsa, pushFn = pushDbMusinsa, log = console.log } = {}) {
+  if (sub !== 'pull' && sub !== 'push') {
+    log('Usage: node src/cli.js musinsa-db pull|push [--allow-fresh]');
+    return { ok: false };
+  }
+  try {
+    const { bytes, source } = sub === 'pull' ? pullFn({ dest: dbPath }) : pushFn({ src: dbPath, allowFresh });
+    log(sub === 'pull' ? `⬇️ [musinsa-db] pulled ${bytes.toLocaleString('en-US')} bytes into ${dbPath}` : `⬆️ [musinsa-db] pushed ${bytes.toLocaleString('en-US')} gzipped bytes from ${dbPath}`);
+    // musinsa-wide.db.gz was missing (an upload that died after gh deleted it): today runs on the day-before DB.
+    if (source === 'prev') log('⚠️ [musinsa-db] musinsa-wide.db.gz 없음 — 직전본 musinsa-wide.db.prev.gz를 받음 (Release 확인 필요)');
+    return { ok: true, bytes };
+  } catch (err) {
+    log(`⚠️ [musinsa-db] ${sub} failed: ${err.message}`);
     return { ok: false, error: err.message };
   }
 }
@@ -1180,6 +1285,17 @@ async function main() {
       if (!res.ok) process.exitCode = 1;
       break;
     }
+    case 'track-musinsa': {
+      const today = new Date().toISOString().split('T')[0];
+      const res = await runMusinsaWideStep({ flags, today });
+      if (!res.ok) process.exitCode = 1;
+      break;
+    }
+    case 'musinsa-db': {
+      const res = runMusinsaDb({ sub: positional[0], allowFresh: Boolean(flags['allow-fresh']) });
+      if (!res.ok) process.exitCode = 1;
+      break;
+    }
     case 'skip': {
       const targetDate = positional[0] || new Date().toISOString().split('T')[0];
       const result = await skipDailyRun({
@@ -1210,6 +1326,10 @@ Commands:
                          Scan the top 4910.kr brands into data/4910.db (--dry-run writes nothing)
   4910-db pull|push [--allow-fresh]
                          Download / upload data/4910.db as the data-4910 GitHub Release asset (gh CLI)
+  track-musinsa [--category <codes>] [--depth <pages>] [--concurrency=1-4] [--dry-run] [--init]
+                         Scan the Musinsa top-level categories into data/musinsa-wide.db (--dry-run writes nothing)
+  musinsa-db pull|push [--allow-fresh]
+                         Download / upload data/musinsa-wide.db as the data-musinsa GitHub Release asset (gh CLI)
   sync                   Sync liked items from Musinsa account
   track [goodsNo] [--concurrency=1-5]  Track active items or promote discovery item to VIP
   watch <url/goodsNo>    Manually add a product to track
