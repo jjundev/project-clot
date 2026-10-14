@@ -1,7 +1,7 @@
 import './setup-env.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatMusinsaWideDigest } from '../src/musinsaWide/digest.js';
+import { formatMusinsaWideDigest, formatBackfillDigest } from '../src/musinsaWide/digest.js';
 
 const row = (goods_no, { name = `상품 ${goods_no}`, brand = '나이키' } = {}) => ({
   goods_no, brand_name: brand, name, url: `https://www.musinsa.com/products/${goods_no}`,
@@ -19,8 +19,20 @@ const categoryCounts = (incomplete = false) => [
 const diff = (over = {}) => ({
   initial: false, added: [row(1), row(2), row(3)], priceChanged: 12, drops: [drop(10, 50000, 45000)], revived: [row(4)], outOfScope: 5, ...over,
 });
-const coupons = (over = {}) => ({ memberStatus: 'ok', checked: 200, failed: 2, priced: 150, stale: 30, drops: [], ...over });
-const result = (over = {}) => ({ date: '2026-10-14', categoryCounts: categoryCounts(), diff: diff(), coupons: coupons(), durationMs: 1000, ...over });
+const coupons = (over = {}) => ({
+  memberStatus: 'ok', checked: 200, failed: 2, priced: 150, withCoupon: 140, drops: [], lateDrops: 0, dropsSuppressed: false, ready: true, ...over,
+});
+const registry = (over = {}) => ({
+  enum: { probed: 1500, hits: 40, newCoupons: 7, highest: 345123, stop: null },
+  recheck: { probed: 30, newPositive: 2, stop: null },
+  classify: { calls: 1234, usable: 5, other: 3, outOfScope: 1, pending: 12 },
+  neighbors: { probed: 0, hits: 0, stop: null },
+  walk: { walked: 1500, failed: 3, suspectEmpty: 0, calls: 2600, stop: null },
+  sample: { checked: 200, exact: 187, under: 8, over: 5 },
+  counts: { usable: 2345, added: 6, expiredYesterday: 4, retired: 1 },
+  ...over,
+});
+const result = (over = {}) => ({ date: '2026-10-14', categoryCounts: categoryCounts(), diff: diff(), coupons: coupons(), registry: null, durationMs: 1000, ...over });
 const lookup = (goodsNo) => row(goodsNo, { name: `쿠폰상품 ${goodsNo}` });
 
 test('digest shows scan, change, coupon lines and coupon drops', () => {
@@ -31,7 +43,7 @@ test('digest shows scan, change, coupon lines and coupon drops', () => {
   assert.ok(text.startsWith('<b>🛍 [Project-Clot] 무신사 와이드 리포트 (2026-10-14)</b>'));
   assert.match(text, /대분류 2개 스캔 \(불완전 0\) · 상품 1,234/);
   assert.match(text, /신규 3 · 가격변동 12 · 범위이탈 5 · 재등장 1/);
-  assert.match(text, /🎟 쿠폰 조회 200개 \(실패 2\) · 쿠폰가 150개 · 미확인·오래됨 30개/);
+  assert.match(text, /🎟 회원 조회 200개 \(실패 2\) · 쿠폰가 150개 · 쿠폰 적용 140개/);
   assert.doesNotMatch(text, /⚠️/);
   assert.match(text, /<b>📉 쿠폰가 10% 이상 하락 \(상위 1\):<\/b>/);
   assert.match(text, /🔻 \[나이키\] 쿠폰상품 20 — 100,000→80,000원 \(-20%\)\n {2}• <a href="https:\/\/www\.musinsa\.com\/products\/20">바로가기<\/a>/);
@@ -100,4 +112,93 @@ test('escapes HTML in names and stays within 4096 chars by dropping drop lines',
   const n = Number(text.match(/판매가 10% 이상 하락 \(상위 (\d+)\)/)[1]);
   assert.ok(n > 0 && n < 60);
   assert.equal((text.match(/🔻/g) ?? []).length, n);
+});
+
+test('registry lines appear in order with formatted numbers and sample percent', () => {
+  const text = formatMusinsaWideDigest(result({ registry: registry() }), { lookup });
+  const lines = [
+    '🎟 회원 조회 200개 (실패 2) · 쿠폰가 150개 · 쿠폰 적용 140개',
+    '🔢 번호 순회 1,500개 · 최대 345,123 · 새 쿠폰 7 · 0→양수 2',
+    '🧮 판별 1,234회 · 쓸 수 있음 5 · 대상 아님 3 · 범위 밖 1 · 대기 12',
+    '📒 쓸 수 있는 쿠폰 2,345종 (새로 6 · 만료 4 · 퇴출 1)',
+    '🚶 목록 순회 1,500종 · 호출 2,600 · 실패 3',
+    '🎯 표본 200개 · 정확 187 (93.5%) · 낮게 8 · 높게 5',
+  ];
+  let at = -1;
+  for (const line of lines) {
+    const i = text.indexOf(line);
+    assert.ok(i > at, `missing or out of order: ${line}`);
+    at = i;
+  }
+  assert.doesNotMatch(text, /⚠️/);
+  assert.doesNotMatch(text, /미확인/);
+  const empty = formatMusinsaWideDigest(result({ registry: registry({ enum: { probed: 0, hits: 0, newCoupons: 0, highest: null, stop: null }, sample: { checked: 0, exact: 0, under: 0, over: 0 } }) }), { lookup });
+  assert.match(empty, /최대 - · 새 쿠폰 0/);
+  assert.match(empty, /🎯 표본 0개 · 정확 0 \(-\) · 낮게 0 · 높게 0/);
+});
+
+test('not ready shows the backfill warning and no registry lines', () => {
+  const text = formatMusinsaWideDigest(result({ coupons: coupons({ ready: false, memberStatus: 'skipped', checked: 0, failed: 0, priced: 0, withCoupon: 0 }) }), { lookup });
+  assert.match(text, /⚠️ 쿠폰 등록부 미완성 — backfill 필요/);
+  assert.doesNotMatch(text, /🔢|🧮|📒|🚶|🎯/);
+  assert.doesNotMatch(text, /로그인 만료|조회 제한|조회 실패/);
+  assert.match(text, /<b>📉 판매가 10% 이상 하락/);
+  const ready = formatMusinsaWideDigest(result({ registry: registry() }), { lookup });
+  assert.doesNotMatch(ready, /등록부 미완성/);
+});
+
+test('a throttled walk and a failed enumeration each add their warning', () => {
+  const text = formatMusinsaWideDigest(result({
+    registry: registry({ walk: { walked: 10, failed: 0, suspectEmpty: 0, calls: 20, stop: 'throttled' }, enum: { probed: 5, hits: 0, newCoupons: 0, highest: 1, stop: 'error' } }),
+  }), { lookup });
+  assert.match(text, /⚠️ 무신사 비로그인 쿠폰 API 제한\(429\) — 목록 순회 중단/);
+  assert.match(text, /⚠️ 무신사 번호 순회 실패 — Actions 로그 확인/);
+  const neighbors = formatMusinsaWideDigest(result({ registry: registry({ neighbors: { probed: 3, hits: 0, stop: 'throttled' } }) }), { lookup });
+  assert.match(neighbors, /⚠️ 무신사 비로그인 쿠폰 API 제한\(429\) — 이웃 조회 중단/);
+  const deadline = formatMusinsaWideDigest(result({ registry: registry({ walk: { walked: 1, failed: 0, suspectEmpty: 0, calls: 1, stop: 'deadline' } }) }), { lookup });
+  assert.doesNotMatch(deadline, /⚠️/);
+});
+
+test('late drops are excluded with a count line; suppressed drops show the first-day line and no sale-price fallback', () => {
+  const late = formatMusinsaWideDigest(
+    result({ registry: registry(), coupons: coupons({ lateDrops: 3, drops: [couponDrop(20, 100000, 80000)] }) }),
+    { lookup }
+  );
+  assert.match(late, /늦게 찾은 쿠폰 하락 3건 제외\n<b>📉 쿠폰가 10% 이상 하락/);
+  const none = formatMusinsaWideDigest(result({ registry: registry() }), { lookup });
+  assert.doesNotMatch(none, /늦게 찾은/);
+
+  const suppressed = formatMusinsaWideDigest(result({ registry: registry(), coupons: coupons({ dropsSuppressed: true }) }), { lookup });
+  assert.match(suppressed, /등록부 전환 첫날 — 쿠폰가 하락 알림 생략/);
+  assert.doesNotMatch(suppressed, /📉|🔻/);
+});
+
+const backfill = (over = {}) => ({
+  date: '2026-10-15', from: 345000, next: 351000, probed: 6000, hits: 80, seeded: 2300,
+  classify: { calls: 1500, usable: 900, other: 400, outOfScope: 100, pending: 20 },
+  done: true, memberStatus: 'ok', stop: null, neighbors: { probed: 0, hits: 0 }, ...over,
+});
+
+test('formatBackfillDigest shows done and resume variants', () => {
+  const done = formatBackfillDigest(backfill());
+  assert.equal(done.split('\n')[0], '<b>🗂 [Project-Clot] 무신사 쿠폰 등록부 전환 (2026-10-15)</b>');
+  assert.match(done, /번호 345,000–350,999 \(6,000개\) · 상품 있음 80 · 기존 쿠폰 등록 2,300/);
+  assert.match(done, /🧮 판별 1,500회 · 쓸 수 있음 900 · 대상 아님 400 · 범위 밖 100 · 대기 20/);
+  assert.match(done, /✅ 전환 완료 — 내일 실행부터 등록부로 계산/);
+  assert.doesNotMatch(done, /⏸|⚠️/);
+
+  const resume = formatBackfillDigest(backfill({ done: false, stop: 'deadline', next: 351000 }));
+  assert.match(resume, /⏸ 351,000에서 멈춤 — backfill을 다시 실행해 이어서/);
+  assert.doesNotMatch(resume, /✅/);
+
+  const expired = formatBackfillDigest(backfill({ done: false, memberStatus: 'expired', stop: 'expired' }));
+  assert.match(expired, /⚠️ 무신사 로그인 만료 — MUSINSA_COOKIE 갱신 필요/);
+  assert.match(expired, /⏸/);
+  assert.doesNotMatch(expired, /번호 순회/);
+  const throttled = formatBackfillDigest(backfill({ done: false, stop: 'throttled' }));
+  assert.match(throttled, /⚠️ 무신사 비로그인 쿠폰 API 제한\(429\) — 번호 순회 중단/);
+  const failed = formatBackfillDigest(backfill({ done: false, stop: 'error' }));
+  assert.match(failed, /⚠️ 무신사 번호 순회 실패 — Actions 로그 확인/);
+  const skipped = formatBackfillDigest(backfill({ done: false, memberStatus: 'none', stop: 'none' }));
+  assert.match(skipped, /로그인 만료/);
 });

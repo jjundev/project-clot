@@ -16,19 +16,46 @@ function scanLine(categoryCounts) {
   return line;
 }
 
-// Warnings by coupon-check status: 'ok' adds nothing; 'none' (no cookie) reads like an expiry.
-function couponWarning(coupons) {
-  switch (coupons.memberStatus) {
+// Warnings by member-checker status: 'ok' adds nothing; 'none' (no cookie) reads like an expiry; 'skipped' (a registry
+// not yet ready never reads the session) adds nothing, the not-ready line covers it.
+function couponWarning(memberStatus, checked) {
+  switch (memberStatus) {
     case 'expired':
     case 'none':
       return EXPIRED_LINE;
     case 'throttled':
-      return `⚠️ 무신사 쿠폰 조회 제한(429) — ${fmt(coupons.checked)}개에서 중단`;
+      return `⚠️ 무신사 쿠폰 조회 제한(429) — ${fmt(checked)}개에서 중단`;
     case 'error':
       return '⚠️ 무신사 쿠폰 조회 실패 — Actions 로그 확인';
     default:
       return null;
   }
+}
+
+// An anonymous-API phase that stopped on a 429 or an error; any other stop (deadline, null) adds no warning.
+function phaseWarning(name, stop) {
+  if (stop === 'throttled') return `⚠️ 무신사 비로그인 쿠폰 API 제한(429) — ${name} 중단`;
+  if (stop === 'error') return `⚠️ 무신사 ${name} 실패 — Actions 로그 확인`;
+  return null;
+}
+
+const classifyLine = (c) => (
+  `🧮 판별 ${fmt(c.calls)}회 · 쓸 수 있음 ${fmt(c.usable)} · 대상 아님 ${fmt(c.other)} · 범위 밖 ${fmt(c.outOfScope)} · 대기 ${fmt(c.pending)}`
+);
+
+function registryLines(reg) {
+  const { enum: en, recheck, classify, neighbors, walk, sample, counts } = reg;
+  const pct = sample.checked > 0 ? `${((sample.exact / sample.checked) * 100).toFixed(1)}%` : '-';
+  return [
+    `🔢 번호 순회 ${fmt(en.probed)}개 · 최대 ${en.highest == null ? '-' : fmt(en.highest)} · 새 쿠폰 ${fmt(en.newCoupons)} · 0→양수 ${fmt(recheck.newPositive)}`,
+    classifyLine(classify),
+    `📒 쓸 수 있는 쿠폰 ${fmt(counts.usable)}종 (새로 ${fmt(counts.added)} · 만료 ${fmt(counts.expiredYesterday)} · 퇴출 ${fmt(counts.retired)})`,
+    `🚶 목록 순회 ${fmt(walk.walked)}종 · 호출 ${fmt(walk.calls)} · 실패 ${fmt(walk.failed)}`,
+    `🎯 표본 ${fmt(sample.checked)}개 · 정확 ${fmt(sample.exact)} (${pct}) · 낮게 ${fmt(sample.under)} · 높게 ${fmt(sample.over)}`,
+    phaseWarning('번호 순회', en.stop ?? recheck.stop),
+    phaseWarning('목록 순회', walk.stop),
+    phaseWarning('이웃 조회', neighbors?.stop),
+  ].filter(Boolean);
 }
 
 function dropLine(row, prevPrice, currentPrice, dropRate) {
@@ -53,7 +80,7 @@ const saleDropLines = (drops, limit) => drops.slice(0, limit).map((d) => dropLin
 
 export function formatMusinsaWideDigest(result, { limit = 10, lookup = () => undefined } = {}) {
   const head = [`<b>🛍 [Project-Clot] 무신사 와이드 리포트 (${result.date})</b>\n`, scanLine(result.categoryCounts)];
-  const { diff, coupons } = result;
+  const { diff, coupons, registry } = result;
   if (!diff) return head.join('\n');
 
   head.push(
@@ -63,17 +90,27 @@ export function formatMusinsaWideDigest(result, { limit = 10, lookup = () => und
   );
 
   if (coupons) {
-    head.push(`🎟 쿠폰 조회 ${fmt(coupons.checked)}개 (실패 ${fmt(coupons.failed)}) · 쿠폰가 ${fmt(coupons.priced)}개 · 미확인·오래됨 ${fmt(coupons.stale)}개`);
-    const warning = couponWarning(coupons);
+    head.push(`🎟 회원 조회 ${fmt(coupons.checked)}개 (실패 ${fmt(coupons.failed)}) · 쿠폰가 ${fmt(coupons.priced)}개 · 쿠폰 적용 ${fmt(coupons.withCoupon)}개`);
+    const warning = couponWarning(coupons.memberStatus, coupons.checked);
     if (warning) head.push(warning);
+    if (!coupons.ready) head.push('⚠️ 쿠폰 등록부 미완성 — backfill 필요');
   }
+  if (registry) head.push(...registryLines(registry));
+  // A suppressed first day shows no drops at all: the sale-price list would stand in for coupon prices that moved at once.
+  if (coupons?.dropsSuppressed) head.push('등록부 전환 첫날 — 쿠폰가 하락 알림 생략');
 
   const couponMode = coupons?.drops?.length > 0;
   const title = couponMode ? '쿠폰가' : '판매가';
-  const lines = couponMode ? couponDropLines(coupons.drops, lookup, limit) : saleDropLines(diff.drops, limit);
+  let lines = [];
+  if (couponMode) lines = couponDropLines(coupons.drops, lookup, limit);
+  else if (!coupons?.dropsSuppressed) lines = saleDropLines(diff.drops, limit);
+  const lateLine = coupons?.lateDrops > 0 ? `늦게 찾은 쿠폰 하락 ${fmt(coupons.lateDrops)}건 제외` : null;
   const build = () => {
     const out = [...head];
-    if (lines.length) out.push('', `<b>📉 ${title} 10% 이상 하락 (상위 ${lines.length}):</b>`, ...lines);
+    const tail = [];
+    if (lateLine) tail.push(lateLine);
+    if (lines.length) tail.push(`<b>📉 ${title} 10% 이상 하락 (상위 ${lines.length}):</b>`, ...lines);
+    if (tail.length) out.push('', ...tail);
     return out.join('\n');
   };
   let text = build();
@@ -82,4 +119,24 @@ export function formatMusinsaWideDigest(result, { limit = 10, lookup = () => und
     text = build();
   }
   return text.length > TELEGRAM_MAX ? text.slice(0, TELEGRAM_MAX) : text;
+}
+
+// One message per backfill run. A run that is not done keeps the resume line whatever the cause; the member-session and
+// enumeration warnings say which. `stop` 'throttled'/'error' with a healthy session is the number enumeration.
+export function formatBackfillDigest(result) {
+  const { date, from, next, probed, hits, seeded, classify, done, memberStatus, stop } = result;
+  const out = [
+    `<b>🗂 [Project-Clot] 무신사 쿠폰 등록부 전환 (${date})</b>`,
+    '',
+    `번호 ${fmt(from)}–${fmt(next - 1)} (${fmt(probed)}개) · 상품 있음 ${fmt(hits)} · 기존 쿠폰 등록 ${fmt(seeded)}`,
+    classifyLine(classify),
+  ];
+  const warning = memberStatus === 'ok' ? null : couponWarning(memberStatus, classify.calls);
+  if (warning) out.push(warning);
+  if (memberStatus === 'ok') {
+    const enumWarning = phaseWarning('번호 순회', stop);
+    if (enumWarning) out.push(enumWarning);
+  }
+  out.push(done ? '✅ 전환 완료 — 내일 실행부터 등록부로 계산' : `⏸ ${fmt(next)}에서 멈춤 — backfill을 다시 실행해 이어서`);
+  return out.join('\n');
 }
