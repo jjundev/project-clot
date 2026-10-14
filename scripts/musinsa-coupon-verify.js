@@ -3,13 +3,14 @@
 // listing-page values only (goodsNo, brand, comId=brand, salePrice=price) as with product-page values
 // (brand, comId, specialtyCodes, salePrice from the product page)?
 // Writes raw coupon objects to logs/musinsa-coupon-verify.json (gitignored). Never prints or stores the cookie.
-// Usage: musinsa-coupon-verify.js dump
+// Usage: musinsa-coupon-verify.js dump | evaluate   (evaluate is offline: it only reads the dump)
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fetchCategoryGoodsPage } from '../src/discovery.js';
 import { extractProductDetail, USER_AGENT } from '../src/myprice.js';
 import { readSessionCookie } from '../src/session.js';
+import { parseCoupon, couponDiscountMusinsa, keyCouponSet } from '../src/musinsaWide/coupons.js';
 
 const CATEGORIES = ['001', '002', '003', '103', '004'];
 const PAGES_PER_CATEGORY = 3;
@@ -180,13 +181,69 @@ async function dump() {
   console.log(`발급 사본 수까지 같음: ${strictEqual}/${total}`);
 }
 
+const dedupeById = (parsed) => [...new Map(parsed.map((c) => [c.id, c])).values()];
+
+// Offline: reads the dump and prints (1) how often the discount formula reproduces the API's per-product discount,
+// (2) how often the key coupon set learned from a key's high and low goods predicts the best discount of its mid good.
+// Mismatching examples follow the two lines.
+function evaluate() {
+  const { goods } = JSON.parse(fs.readFileSync(OUT_PATH, 'utf8'));
+  const ok = goods.filter((g) => !g.error && Array.isArray(g.listingParamsCoupons));
+
+  let formulaOk = 0;
+  let formulaTotal = 0;
+  const formulaMiss = [];
+  for (const g of ok) {
+    for (const raw of g.listingParamsCoupons) {
+      const c = parseCoupon(raw);
+      const got = couponDiscountMusinsa(g.salePrice, c);
+      formulaTotal++;
+      if (got === c.discount) formulaOk++;
+      else formulaMiss.push(`${g.goodsNo} ${c.id} ${c.name}: 식 ${got} / API ${c.discount} (가격 ${g.salePrice}, ${c.percent ?? c.price}${c.type === 'PERCENT' ? '%' : '원'}, max ${c.max}, min ${c.min})`);
+    }
+  }
+
+  const byKey = new Map();
+  for (const g of ok) {
+    if (!byKey.has(g.key)) byKey.set(g.key, {});
+    byKey.get(g.key)[g.rank] = g;
+  }
+  let keyOk = 0;
+  let keyTotal = 0;
+  let hidden = 0;
+  const keyMiss = [];
+  for (const [key, { high, mid, low }] of byKey) {
+    if (!high || !mid || !low) continue;
+    const set = keyCouponSet(
+      [high, low].map((g) => ({ salePrice: g.salePrice, coupons: dedupeById(g.listingParamsCoupons.map(parseCoupon)) })),
+    );
+    if (!set) {
+      hidden++;
+      continue;
+    }
+    keyTotal++;
+    const predicted = Math.max(0, ...set.map((c) => couponDiscountMusinsa(mid.salePrice, c)));
+    const actual = Math.max(0, ...mid.listingParamsCoupons.map((c) => Number(c.salePrice) || 0));
+    if (predicted === actual) keyOk++;
+    else keyMiss.push(`${key} mid ${mid.goodsNo} (가격 ${mid.salePrice}): 예측 ${predicted} / 실제 ${actual} (high ${high.salePrice}, low ${low.salePrice})`);
+  }
+
+  const pct = (n, d) => (d ? ` (${((100 * n) / d).toFixed(1)}%)` : '');
+  console.log(`식 재현: ${formulaOk}/${formulaTotal}${pct(formulaOk, formulaTotal)}`);
+  console.log(`키 예측: ${keyOk}/${keyTotal} (숨김 ${hidden})${pct(keyOk, keyTotal)}, 숨김 ${hidden}/${hidden + keyTotal}${pct(hidden, hidden + keyTotal)}`);
+  for (const m of formulaMiss) console.log(`  식 불일치: ${m}`);
+  for (const m of keyMiss) console.log(`  키 불일치: ${m}`);
+}
+
 const cmd = process.argv[2];
 if (cmd === 'dump') {
   dump().catch((err) => {
     console.error(`실패: ${err.message}`);
     process.exit(1);
   });
+} else if (cmd === 'evaluate') {
+  evaluate();
 } else {
-  console.log('사용법: musinsa-coupon-verify.js dump');
+  console.log('사용법: musinsa-coupon-verify.js dump | evaluate');
   process.exit(cmd ? 1 : 0);
 }
