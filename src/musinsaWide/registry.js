@@ -56,7 +56,7 @@ export async function probeNumbers({ withClient, store, date, numbers, deadline 
  * row, once it is past `mustReach`, unless one of the ENUM_PROBES past the last hit has goods; then it walks on up to
  * that number. `highest` (the last number with goods, null if none) lifts meta.frontier. With recordEmpties, the empty
  * numbers below `highest` are remembered for a later re-check; a backfill leaves that off.
- * `next` is where the walk would go on (the cursor); `stop` is null when the walk finished by itself.
+ * `next` is where the walk would go on (the cursor): the first number of a batch that a stop cut short, else past the last batch; `stop` is null when the walk finished by itself.
  */
 export async function enumerateNumbers({ withClient, store, date, from, mustReach = null, deadline = Infinity, recordEmpties = true, onCursor = null, now = Date.now }) {
   let n = from;
@@ -90,12 +90,13 @@ export async function enumerateNumbers({ withClient, store, date, from, mustReac
         empties.push(no);
       }
     }
-    n += ENUM_BATCH;
-    onCursor?.(n);
+    // A batch cut short stays the cursor, so a resumed walk probes it again (idempotent) instead of skipping its rest.
     if (r.stop) {
       stop = r.stop;
       break;
     }
+    n += ENUM_BATCH;
+    onCursor?.(n);
     if (run >= ENUM_EMPTY_STOP && n > reach) {
       const probes = ENUM_PROBES.map((d) => lastHit + d).filter((p) => p >= n);
       const pr = await probeNumbers({ withClient, store, date, numbers: probes, deadline, now });

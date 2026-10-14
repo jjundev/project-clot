@@ -152,14 +152,16 @@ test('a new number\'s first page sets PENDING with ACTIVE goods, OUT_OF_SCOPE wi
 });
 
 test('429 stops with throttled and keeps what was recorded', async () => {
+  const cursors = [];
   const f = fakeClient({ counts: countsOf([101, 102, 103]), throw429: [110] });
-  const r = await enumerateNumbers({ withClient: f.withClient, store, date: DATE, from: 100 });
+  const r = await enumerateNumbers({ withClient: f.withClient, store, date: DATE, from: 100, onCursor: (c) => cursors.push(c) });
   assert.equal(r.stop, 'throttled');
   assert.ok(store.getCoupon(101));
   assert.ok(store.getCoupon(103));
   assert.ok(r.probed < ENUM_BATCH);
   assert.ok(!f.calls.count.includes(150), 'the next batch is not started');
-  assert.equal(r.next, 150);
+  assert.equal(r.next, 100); // the cut-short batch stays the cursor
+  assert.deepEqual(cursors, []);
   // a 429 is not retried
   assert.equal(f.calls.count.filter((n) => n === 110).length, 1);
   assert.deepEqual(f.calls.sleeps, []);
@@ -250,4 +252,17 @@ test('probeNeighbors probes ±50 of each center, skips known numbers, caps at 30
   assert.ok(g.calls.count.includes(950) && g.calls.count.includes(1070));
   assert.ok(!g.calls.count.includes(20000));
   s2.close();
+});
+
+test('a stop mid-batch leaves next and the cursor at that batch\'s first number', async () => {
+  const f = fakeClient({ counts: countsOf([120, 160, 230]), throw429: [260] });
+  const cursors = [];
+  const r = await enumerateNumbers({ withClient: f.withClient, store, date: DATE, from: 100, onCursor: (c) => cursors.push(c) });
+  assert.equal(r.stop, 'throttled');
+  // batches 100-149, 150-199, 200-249 completed; 250-299 was cut short by the 429 at 260
+  assert.equal(r.next, 250);
+  assert.deepEqual(cursors, [150, 200, 250]);
+  assert.ok(cursors.every((c) => c <= 250));
+  assert.ok(store.getCoupon(230));
+  assert.equal(r.highest, 230);
 });
