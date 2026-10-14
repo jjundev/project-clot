@@ -3,6 +3,9 @@
 // NEW, PRICE and REVIVED, and a goods row is rewritten only when something in it changed.
 // Coupons are checked per goods on a rotation (pickCouponChecks); each goods keeps its own coupon list and the
 // date/price it was last checked at.
+// The coupon registry (coupons, coupon_empty_numbers, coupon_goods, coupon_observations, meta) lists every coupon
+// number found by walking the anonymous coupon API, with its state (USABLE, OTHER, PENDING, OUT_OF_SCOPE, RETIRED).
+// Old DBs (Release data) gain the new columns through PRAGMA table_info + ALTER TABLE in the constructor.
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,12 +20,26 @@ export const DROP_ALERT_RATE = 0.1;
 // it comes back through applyScan as REVIVED.
 export const STATUS_OUT_OF_SCOPE = 'OUT_OF_SCOPE';
 
+// Coupon registry states.
+export const COUPON_STATE = {
+  USABLE: 'USABLE', OTHER: 'OTHER', PENDING: 'PENDING', OUT_OF_SCOPE: 'OUT_OF_SCOPE', RETIRED: 'RETIRED',
+};
+
+// Empty coupon numbers are asked again for this many days after they were first seen.
+const EMPTY_RECHECK_DAYS = 3;
+
+const addDays = (date, n) => new Date(Date.parse(`${date}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+
 // Row fields copied into goods on every sighting; a row is rewritten only when one of them differs.
-const UPDATABLE = ['cat', 'brand', 'brand_name', 'name', 'url', 'image_url', 'sale_price', 'normal_price', 'extra_discount', 'is_sold_out'];
+const UPDATABLE = ['cat', 'brand', 'brand_name', 'name', 'url', 'image_url', 'sale_price', 'normal_price', 'extra_discount', 'is_sold_out', 'review_count'];
 
 // The env var is read per call, not at module load, so tests can set it after import.
 export function defaultMusinsaWideDbPath() {
   return process.env.CLOT_MUSINSA_WIDE_DB_PATH || path.join(ROOT_DIR, 'data', 'musinsa-wide.db');
+}
+
+function toRegistryCoupon({ scope_goods_json, ...r }) {
+  return { ...r, scope_goods: scope_goods_json == null ? null : JSON.parse(scope_goods_json) };
 }
 
 export class MusinsaWideStore {
@@ -35,7 +52,7 @@ export class MusinsaWideStore {
       CREATE TABLE IF NOT EXISTS goods (
         goods_no INTEGER PRIMARY KEY, cat TEXT, brand TEXT, brand_name TEXT, name TEXT NOT NULL, url TEXT NOT NULL, image_url TEXT,
         status TEXT NOT NULL DEFAULT 'ACTIVE', sale_price INTEGER, normal_price INTEGER, extra_discount INTEGER NOT NULL DEFAULT 0,
-        is_sold_out INTEGER NOT NULL DEFAULT 0, coupon_price INTEGER, coupons_json TEXT, coupon_checked_date TEXT,
+        is_sold_out INTEGER NOT NULL DEFAULT 0, review_count INTEGER, coupon_price INTEGER, coupons_json TEXT, coupon_checked_date TEXT,
         coupon_checked_sale_price INTEGER, coupon_checked_extra INTEGER,
         lowest_price INTEGER, lowest_price_date TEXT, first_seen_date TEXT NOT NULL,
         misses INTEGER NOT NULL DEFAULT 0, last_miss_date TEXT
@@ -51,12 +68,37 @@ export class MusinsaWideStore {
       );
       CREATE TABLE IF NOT EXISTS scan_runs (
         date TEXT PRIMARY KEY, category_counts_json TEXT, complete INTEGER, changed INTEGER, added INTEGER, out_of_scope INTEGER,
-        duration_ms INTEGER, completed_at TEXT NOT NULL, coupons_ok INTEGER, coupon_checks INTEGER
+        duration_ms INTEGER, completed_at TEXT NOT NULL, coupons_ok INTEGER, coupon_checks INTEGER, coupon_metrics_json TEXT
       );
+      CREATE TABLE IF NOT EXISTS coupons (
+        coupon_no INTEGER PRIMARY KEY, state TEXT NOT NULL, name TEXT, type TEXT, percent REAL, price INTEGER, max INTEGER, min INTEGER,
+        start_date TEXT, until_date TEXT, last_count INTEGER, scope_goods_json TEXT,
+        first_seen_date TEXT NOT NULL, last_member_seen_date TEXT, classified_date TEXT
+      );
+      CREATE TABLE IF NOT EXISTS coupon_empty_numbers (coupon_no INTEGER PRIMARY KEY, first_seen_date TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS coupon_goods (
+        coupon_no INTEGER NOT NULL, goods_no INTEGER NOT NULL, PRIMARY KEY (coupon_no, goods_no)
+      );
+      CREATE TABLE IF NOT EXISTS coupon_observations (
+        coupon_no INTEGER NOT NULL, goods_no INTEGER NOT NULL, date TEXT NOT NULL, seen INTEGER NOT NULL,
+        PRIMARY KEY (coupon_no, goods_no, date)
+      );
+      CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS idx_price_changes_goods_date ON price_changes (goods_no, date);
       CREATE INDEX IF NOT EXISTS idx_goods_cat_status ON goods (cat, status);
       CREATE INDEX IF NOT EXISTS idx_goods_status_coupon_checked ON goods (status, coupon_checked_date);
+      CREATE INDEX IF NOT EXISTS idx_coupons_state ON coupons (state);
     `);
+    this.#addMissingColumns('goods', [['review_count', 'INTEGER']]);
+    this.#addMissingColumns('scan_runs', [['coupon_metrics_json', 'TEXT']]);
+  }
+
+  // DBs created before a column existed (the Release copy) get it by ALTER TABLE; CREATE TABLE IF NOT EXISTS leaves them as is.
+  #addMissingColumns(table, columns) {
+    const have = new Set(this.db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+    for (const [name, type] of columns) {
+      if (!have.has(name)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+    }
   }
 
   // LIMIT 1, not COUNT(*): goods runs to ~30k+ rows.
@@ -90,12 +132,12 @@ export class MusinsaWideStore {
       );
       const insert = this.db.prepare(`
         INSERT INTO goods (goods_no, cat, brand, brand_name, name, url, image_url, sale_price, normal_price, extra_discount,
-          is_sold_out, lowest_price, lowest_price_date, first_seen_date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          is_sold_out, review_count, lowest_price, lowest_price_date, first_seen_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const update = this.db.prepare(`
         UPDATE goods SET cat = ?, brand = ?, brand_name = ?, name = ?, url = ?, image_url = ?, status = 'ACTIVE',
-          sale_price = ?, normal_price = ?, extra_discount = ?, is_sold_out = ?,
+          sale_price = ?, normal_price = ?, extra_discount = ?, is_sold_out = ?, review_count = ?,
           lowest_price = ?, lowest_price_date = COALESCE(?, lowest_price_date),
           misses = 0, last_miss_date = NULL
         WHERE goods_no = ?
@@ -111,7 +153,7 @@ export class MusinsaWideStore {
         const soldOut = r.is_sold_out ? 1 : 0;
         if (!prev) {
           insert.run(r.goods_no, r.cat ?? cat, r.brand ?? null, r.brand_name ?? null, r.name, r.url, r.image_url ?? null,
-            r.sale_price ?? null, r.normal_price ?? null, extra, soldOut, r.sale_price ?? null, r.sale_price == null ? null : date, date);
+            r.sale_price ?? null, r.normal_price ?? null, extra, soldOut, r.review_count ?? null, r.sale_price ?? null, r.sale_price == null ? null : date, date);
           logChange.run(r.goods_no, date, r.sale_price ?? null, r.normal_price ?? null, 'NEW');
           diff.added.push(r);
           continue;
@@ -124,7 +166,7 @@ export class MusinsaWideStore {
           UPDATABLE.every((col) => prev[col] === (next[col] ?? null));
         if (unchanged) continue;
         update.run(next.cat, next.brand ?? null, next.brand_name ?? null, next.name, next.url, next.image_url ?? null,
-          next.sale_price ?? null, next.normal_price ?? null, extra, soldOut,
+          next.sale_price ?? null, next.normal_price ?? null, extra, soldOut, next.review_count ?? null,
           isNewLowest ? r.sale_price : prev.lowest_price, isNewLowest ? date : null, r.goods_no);
 
         if (prev.status === STATUS_OUT_OF_SCOPE) {
@@ -266,18 +308,169 @@ export class MusinsaWideStore {
 
   // coupons_ok sticks across same-day reruns (a later non-ok rerun leaves the refreshed prices alone), and
   // coupon_checks adds up (pickCouponChecks never re-picks a goods checked that day, so nothing is counted twice).
-  recordScanRun({ date, categoryCounts, complete, changed, added, outOfScope, durationMs, couponsOk = false, couponChecks = 0 }) {
+  recordScanRun({ date, categoryCounts, complete, changed, added, outOfScope, durationMs, couponsOk = false, couponChecks = 0, couponMetrics = null }) {
     this.db
       .prepare(`
-        INSERT INTO scan_runs (date, category_counts_json, complete, changed, added, out_of_scope, duration_ms, completed_at, coupons_ok, coupon_checks)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO scan_runs (date, category_counts_json, complete, changed, added, out_of_scope, duration_ms, completed_at, coupons_ok, coupon_checks, coupon_metrics_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (date) DO UPDATE SET category_counts_json = excluded.category_counts_json, complete = excluded.complete,
           changed = excluded.changed, added = excluded.added, out_of_scope = excluded.out_of_scope, duration_ms = excluded.duration_ms,
           completed_at = excluded.completed_at, coupons_ok = MAX(COALESCE(scan_runs.coupons_ok, 0), excluded.coupons_ok),
-          coupon_checks = COALESCE(scan_runs.coupon_checks, 0) + excluded.coupon_checks
+          coupon_checks = COALESCE(scan_runs.coupon_checks, 0) + excluded.coupon_checks,
+          coupon_metrics_json = excluded.coupon_metrics_json
       `)
       .run(date, JSON.stringify(categoryCounts), complete ? 1 : 0, changed, added, outOfScope, durationMs, new Date().toISOString(),
-        couponsOk ? 1 : 0, couponChecks);
+        couponsOk ? 1 : 0, couponChecks, couponMetrics == null ? null : JSON.stringify(couponMetrics));
+  }
+
+  // --- coupon registry ---
+
+  getMeta(key) {
+    return this.db.prepare('SELECT value FROM meta WHERE key = ?').get(key)?.value ?? null;
+  }
+
+  // null deletes the key.
+  setMeta(key, value) {
+    if (value == null) this.db.prepare('DELETE FROM meta WHERE key = ?').run(key);
+    else this.db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(key, String(value));
+  }
+
+  getCoupon(couponNo) {
+    const r = this.db.prepare('SELECT * FROM coupons WHERE coupon_no = ?').get(Number(couponNo));
+    return r && toRegistryCoupon(r);
+  }
+
+  maxCouponNo() {
+    return this.db.prepare('SELECT MAX(coupon_no) AS n FROM coupons').get().n ?? null;
+  }
+
+  // The ACTIVE ones of `goodsNos`, in the order given.
+  filterActive(goodsNos) {
+    const active = new Set(
+      this.db
+        .prepare("SELECT goods_no FROM goods WHERE status = 'ACTIVE' AND goods_no IN (SELECT value FROM json_each(?))")
+        .all(JSON.stringify(goodsNos.map(Number)))
+        .map((r) => r.goods_no)
+    );
+    return goodsNos.map(Number).filter((n) => active.has(n));
+  }
+
+  /**
+   * A coupon number the walk found goods for. New: PENDING when `scopeGoods` (the in-scope goods of its first page) is
+   * non-empty, else OUT_OF_SCOPE. Known: only last_count moves. The number leaves coupon_empty_numbers either way.
+   */
+  recordHit(couponNo, date, count, { scopeGoods = null } = {}) {
+    const no = Number(couponNo);
+    const known = this.db.prepare('SELECT 1 FROM coupons WHERE coupon_no = ?').get(no);
+    if (known) {
+      this.db.prepare('UPDATE coupons SET last_count = ? WHERE coupon_no = ?').run(count, no);
+    } else {
+      const inScope = scopeGoods && scopeGoods.length > 0;
+      this.db
+        .prepare('INSERT INTO coupons (coupon_no, state, last_count, scope_goods_json, first_seen_date) VALUES (?, ?, ?, ?, ?)')
+        .run(no, inScope ? COUPON_STATE.PENDING : COUPON_STATE.OUT_OF_SCOPE, count, inScope ? JSON.stringify(scopeGoods) : null, date);
+    }
+    this.db.prepare('DELETE FROM coupon_empty_numbers WHERE coupon_no = ?').run(no);
+    return known ? 'known' : 'new';
+  }
+
+  // The first-seen date of an empty number is kept, so the recheck window runs from the first sighting.
+  recordEmpty(couponNo, date) {
+    this.db.prepare('INSERT OR IGNORE INTO coupon_empty_numbers (coupon_no, first_seen_date) VALUES (?, ?)').run(Number(couponNo), date);
+  }
+
+  // Empty numbers first seen within the last EMPTY_RECHECK_DAYS days, not today.
+  emptyNumbersToRecheck(date) {
+    return this.db
+      .prepare('SELECT coupon_no FROM coupon_empty_numbers WHERE first_seen_date >= ? AND first_seen_date < ? ORDER BY coupon_no')
+      .all(addDays(date, -EMPTY_RECHECK_DAYS), date)
+      .map((r) => r.coupon_no);
+  }
+
+  pendingCoupons() {
+    return this.db
+      .prepare('SELECT * FROM coupons WHERE state = ? ORDER BY coupon_no')
+      .all(COUPON_STATE.PENDING)
+      .map(toRegistryCoupon);
+  }
+
+  /**
+   * Coupons a member call returned (parseCoupon results, string ids) are USABLE by definition. `added` were not in the
+   * registry, `revived` were in it in another state.
+   */
+  upsertMemberCoupons(date, coupons) {
+    const added = [];
+    const revived = [];
+    this.db.exec('BEGIN');
+    try {
+      const prev = this.db.prepare('SELECT state FROM coupons WHERE coupon_no = ?');
+      const insert = this.db.prepare(`
+        INSERT INTO coupons (coupon_no, state, name, type, percent, price, max, min, start_date, until_date, first_seen_date, last_member_seen_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const update = this.db.prepare(`
+        UPDATE coupons SET state = ?, name = ?, type = ?, percent = ?, price = ?, max = ?, min = ?, start_date = ?, until_date = ?,
+          last_member_seen_date = ?
+        WHERE coupon_no = ?
+      `);
+      for (const c of coupons) {
+        const no = Number(c.id);
+        const cond = [c.name ?? null, c.type ?? null, c.percent ?? null, c.price ?? null, c.max ?? null, c.min ?? null, c.start ?? null, c.until ?? null];
+        const old = prev.get(no);
+        if (!old) {
+          insert.run(no, COUPON_STATE.USABLE, ...cond, date, date);
+          added.push(no);
+          continue;
+        }
+        if (old.state !== COUPON_STATE.USABLE) revived.push(no);
+        update.run(COUPON_STATE.USABLE, ...cond, date, no);
+      }
+      this.db.exec('COMMIT');
+    } catch (e) {
+      this.db.exec('ROLLBACK');
+      throw e;
+    }
+    return { added, revived };
+  }
+
+  // Only PENDING rows move; a coupon a member call already made USABLE (or anything else) is left alone.
+  markClassified(couponNos, date, state) {
+    this.db
+      .prepare(`
+        UPDATE coupons SET state = ?, classified_date = ?
+        WHERE state = '${COUPON_STATE.PENDING}' AND coupon_no IN (SELECT value FROM json_each(?))
+      `)
+      .run(state, date, JSON.stringify(couponNos.map(Number)));
+  }
+
+  // USABLE and not expired on `date` (until_date is the last day it works).
+  usableCoupons(date) {
+    return this.db
+      .prepare(`SELECT * FROM coupons WHERE state = '${COUPON_STATE.USABLE}' AND (until_date IS NULL OR until_date >= ?) ORDER BY coupon_no`)
+      .all(date)
+      .map(toRegistryCoupon);
+  }
+
+  // Registers the unexpired coupons already stored in goods.coupons_json (the old per-goods rotation) as USABLE.
+  seedFromGoodsCoupons(date) {
+    const byId = new Map();
+    for (const { coupons_json } of this.db.prepare('SELECT coupons_json FROM goods WHERE coupons_json IS NOT NULL').all()) {
+      for (const c of JSON.parse(coupons_json)) {
+        if (c.until == null || c.until >= date) byId.set(String(c.id), c);
+      }
+    }
+    this.upsertMemberCoupons(date, [...byId.values()]);
+    return byId.size;
+  }
+
+  // usable counts only coupons that still work on `date`; expiredYesterday are USABLE rows whose last day was yesterday.
+  registryCounts(date) {
+    const count = (where, ...args) => this.db.prepare(`SELECT COUNT(*) AS n FROM coupons WHERE ${where}`).get(...args).n;
+    return {
+      usable: count(`state = '${COUPON_STATE.USABLE}' AND (until_date IS NULL OR until_date >= ?)`, date),
+      pending: count(`state = '${COUPON_STATE.PENDING}'`),
+      expiredYesterday: count(`state = '${COUPON_STATE.USABLE}' AND until_date = ?`, addDays(date, -1)),
+    };
   }
 
   getGoods(goodsNo) {

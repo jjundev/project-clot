@@ -4,8 +4,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import {
-  MusinsaWideStore, defaultMusinsaWideDbPath, OUT_AFTER_MISSES, DROP_ALERT_RATE, STATUS_OUT_OF_SCOPE,
+  MusinsaWideStore, defaultMusinsaWideDbPath, OUT_AFTER_MISSES, DROP_ALERT_RATE, STATUS_OUT_OF_SCOPE, COUPON_STATE,
 } from '../src/musinsaWide/store.js';
 
 const row = (goods_no, price, cat = '001', extra = {}) => ({
@@ -360,4 +361,202 @@ test('a goods listed twice in one scan is inserted once', () => {
   assert.equal(d.added.length, 1);
   assert.equal(s.getGoods(1).sale_price, 49000);
   assert.equal(s.getChanges(1).length, 1);
+});
+
+// --- coupon registry ---
+
+const mc = (id, extra = {}) => ({
+  id: String(id), name: `coupon ${id}`, type: 'PERCENT', percent: 10, price: null, max: 5000, min: 30000,
+  discount: 0, start: '2026-10-01', until: '2026-12-31', ...extra,
+});
+const setState = (couponNo, state) => s.db.prepare('UPDATE coupons SET state = ? WHERE coupon_no = ?').run(state, couponNo);
+const stateOf = (couponNo) => s.getCoupon(couponNo)?.state;
+
+test('opening a DB with the 2026-10-14 schema adds the new columns and tables and keeps rows', () => {
+  const oldPath = path.join(dir, 'old.db');
+  const old = new DatabaseSync(oldPath);
+  old.exec(`
+    CREATE TABLE goods (
+      goods_no INTEGER PRIMARY KEY, cat TEXT, brand TEXT, brand_name TEXT, name TEXT NOT NULL, url TEXT NOT NULL, image_url TEXT,
+      status TEXT NOT NULL DEFAULT 'ACTIVE', sale_price INTEGER, normal_price INTEGER, extra_discount INTEGER NOT NULL DEFAULT 0,
+      is_sold_out INTEGER NOT NULL DEFAULT 0, coupon_price INTEGER, coupons_json TEXT, coupon_checked_date TEXT,
+      coupon_checked_sale_price INTEGER, coupon_checked_extra INTEGER,
+      lowest_price INTEGER, lowest_price_date TEXT, first_seen_date TEXT NOT NULL,
+      misses INTEGER NOT NULL DEFAULT 0, last_miss_date TEXT
+    );
+    CREATE TABLE scan_runs (
+      date TEXT PRIMARY KEY, category_counts_json TEXT, complete INTEGER, changed INTEGER, added INTEGER, out_of_scope INTEGER,
+      duration_ms INTEGER, completed_at TEXT NOT NULL, coupons_ok INTEGER, coupon_checks INTEGER
+    );
+    INSERT INTO goods (goods_no, name, url, sale_price, first_seen_date) VALUES (1, 'old goods', 'u', 1000, '2026-10-14');
+  `);
+  old.close();
+
+  const migrated = new MusinsaWideStore(oldPath);
+  try {
+    assert.equal(migrated.getGoods(1).review_count, null);
+    assert.equal(migrated.getGoods(1).name, 'old goods');
+    migrated.recordScanRun({ date: D1, categoryCounts: {}, complete: true, changed: 0, added: 0, outOfScope: 0, durationMs: 1, couponMetrics: { a: 1 } });
+    assert.deepEqual(JSON.parse(migrated.db.prepare('SELECT coupon_metrics_json AS m FROM scan_runs').get().m), { a: 1 });
+    const tables = migrated.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name);
+    for (const t of ['coupons', 'coupon_empty_numbers', 'coupon_goods', 'coupon_observations', 'meta']) assert.ok(tables.includes(t), t);
+  } finally {
+    migrated.close();
+  }
+});
+
+test('applyScan stores review_count and rewrites a row when only review_count changed', () => {
+  s.applyScan(D1, [row(1, 50000, '001', { review_count: 10 })], scan('001'));
+  assert.equal(s.getGoods(1).review_count, 10);
+  const d = s.applyScan(D2, [row(1, 50000, '001', { review_count: 25 })], scan('001'));
+  assert.equal(s.getGoods(1).review_count, 25);
+  assert.equal(d.priceChanged, 0);
+  assert.equal(s.getChanges(1).length, 1);
+  s.applyScan(D3, [row(1, 50000)], scan('001'));
+  assert.equal(s.getGoods(1).review_count, null);
+});
+
+test('meta round-trips and null deletes', () => {
+  assert.equal(s.getMeta('frontier'), null);
+  s.setMeta('frontier', '123');
+  assert.equal(s.getMeta('frontier'), '123');
+  s.setMeta('frontier', '456');
+  assert.equal(s.getMeta('frontier'), '456');
+  s.setMeta('frontier', null);
+  assert.equal(s.getMeta('frontier'), null);
+});
+
+test('recordHit puts PENDING with scope goods, OUT_OF_SCOPE without, and only updates last_count when known', () => {
+  assert.deepEqual(COUPON_STATE, { USABLE: 'USABLE', OTHER: 'OTHER', PENDING: 'PENDING', OUT_OF_SCOPE: 'OUT_OF_SCOPE', RETIRED: 'RETIRED' });
+  assert.equal(s.recordHit(100, D1, 40, { scopeGoods: [7, 8] }), 'new');
+  assert.equal(s.recordHit(101, D1, 5), 'new');
+  const a = s.getCoupon(100);
+  assert.equal(a.state, 'PENDING');
+  assert.equal(a.last_count, 40);
+  assert.deepEqual(a.scope_goods, [7, 8]);
+  assert.equal(a.first_seen_date, D1);
+  assert.equal(s.getCoupon(101).state, 'OUT_OF_SCOPE');
+  assert.equal(s.getCoupon(101).scope_goods, null);
+  assert.equal(s.getCoupon(999), undefined);
+
+  assert.equal(s.recordHit(100, D2, 55, { scopeGoods: [9] }), 'known');
+  const b = s.getCoupon(100);
+  assert.equal(b.state, 'PENDING');
+  assert.equal(b.last_count, 55);
+  assert.equal(b.first_seen_date, D1);
+  assert.deepEqual(b.scope_goods, [7, 8]);
+
+  s.markClassified([100], D2, 'OTHER');
+  assert.equal(s.recordHit(100, D3, 60, { scopeGoods: [9] }), 'known');
+  assert.equal(stateOf(100), 'OTHER');
+});
+
+test('recordHit clears an empty number; emptyNumbersToRecheck keeps 3 days and excludes today', () => {
+  const D = '2026-10-15';
+  s.recordEmpty(1, '2026-10-11');
+  s.recordEmpty(2, '2026-10-12');
+  s.recordEmpty(3, '2026-10-14');
+  s.recordEmpty(4, D);
+  assert.deepEqual(s.emptyNumbersToRecheck(D), [2, 3]);
+  s.recordEmpty(2, D);
+  assert.deepEqual(s.emptyNumbersToRecheck(D), [2, 3], 'first-seen date is kept');
+  s.recordHit(2, D, 12, { scopeGoods: [5] });
+  assert.deepEqual(s.emptyNumbersToRecheck(D), [3]);
+  assert.equal(s.db.prepare('SELECT COUNT(*) AS n FROM coupon_empty_numbers WHERE coupon_no = 2').get().n, 0);
+});
+
+test('upsertMemberCoupons registers USABLE with conditions and reports added and revived', () => {
+  const first = s.upsertMemberCoupons(D1, [mc(10), mc(11, { type: 'PRICE', percent: null, price: 3000, max: null, min: 0, until: null, start: null })]);
+  assert.deepEqual(first, { added: [10, 11], revived: [] });
+  const c10 = s.getCoupon(10);
+  assert.equal(c10.coupon_no, 10);
+  assert.equal(c10.state, 'USABLE');
+  assert.equal(c10.name, 'coupon 10');
+  assert.equal(c10.type, 'PERCENT');
+  assert.equal(c10.percent, 10);
+  assert.equal(c10.price, null);
+  assert.equal(c10.max, 5000);
+  assert.equal(c10.min, 30000);
+  assert.equal(c10.start_date, '2026-10-01');
+  assert.equal(c10.until_date, '2026-12-31');
+  assert.equal(c10.last_member_seen_date, D1);
+  assert.equal(c10.first_seen_date, D1);
+  const c11 = s.getCoupon(11);
+  assert.equal(c11.price, 3000);
+  assert.equal(c11.max, null);
+  assert.equal(c11.until_date, null);
+
+  // Known USABLE: neither added nor revived, but conditions and last seen refresh.
+  const again = s.upsertMemberCoupons(D2, [mc(10, { max: 7000 })]);
+  assert.deepEqual(again, { added: [], revived: [] });
+  assert.equal(s.getCoupon(10).max, 7000);
+  assert.equal(s.getCoupon(10).last_member_seen_date, D2);
+  assert.equal(s.getCoupon(10).first_seen_date, D1);
+
+  s.recordHit(20, D1, 3, { scopeGoods: [1] });
+  s.recordHit(21, D1, 3);
+  s.recordHit(22, D1, 3, { scopeGoods: [1] });
+  s.markClassified([20], D1, 'OTHER');
+  setState(22, 'RETIRED');
+  const mixed = s.upsertMemberCoupons(D3, [mc(20), mc(21), mc(22), mc(23), mc(10)]);
+  assert.deepEqual(mixed, { added: [23], revived: [20, 21, 22] });
+  for (const n of [20, 21, 22, 23]) assert.equal(stateOf(n), 'USABLE');
+  assert.equal(s.getCoupon(20).first_seen_date, D1);
+});
+
+test('markClassified changes only PENDING rows', () => {
+  s.recordHit(1, D1, 3, { scopeGoods: [1] });
+  s.recordHit(2, D1, 3, { scopeGoods: [1] });
+  s.recordHit(3, D1, 3);
+  s.upsertMemberCoupons(D1, [mc(4)]);
+  assert.deepEqual(s.pendingCoupons().map((c) => c.coupon_no), [1, 2]);
+  s.markClassified([1, 3, 4, 99], D2, 'USABLE');
+  assert.equal(stateOf(1), 'USABLE');
+  assert.equal(s.getCoupon(1).classified_date, D2);
+  assert.equal(stateOf(2), 'PENDING');
+  assert.equal(stateOf(3), 'OUT_OF_SCOPE');
+  assert.equal(s.getCoupon(3).classified_date, null);
+  assert.equal(stateOf(4), 'USABLE');
+  assert.equal(s.getCoupon(4).classified_date, null);
+  s.markClassified([], D2, 'OTHER');
+  assert.deepEqual(s.pendingCoupons().map((c) => c.coupon_no), [2]);
+});
+
+test('usableCoupons excludes expired and non-USABLE', () => {
+  s.upsertMemberCoupons(D2, [
+    mc(1, { until: '2026-10-11' }), mc(2, { until: '2026-10-10' }), mc(3, { until: null }), mc(4), mc(5),
+  ]);
+  setState(5, 'OTHER');
+  assert.deepEqual(s.usableCoupons(D2).map((c) => c.coupon_no), [1, 3, 4]);
+});
+
+test('seedFromGoodsCoupons registers unexpired stored coupons once', () => {
+  s.applyScan(D1, [row(1, 50000), row(2, 40000), row(3, 30000)], scan('001'));
+  s.putGoodsCoupons(1, D1, [mc(10), mc(11, { until: '2026-10-09' })], { sale_price: 50000, extra_discount: 0 });
+  s.putGoodsCoupons(2, D1, [mc(10), mc(12, { until: null })], { sale_price: 40000, extra_discount: 0 });
+  assert.equal(s.seedFromGoodsCoupons(D1), 2);
+  assert.deepEqual(s.usableCoupons(D1).map((c) => c.coupon_no), [10, 12]);
+  assert.equal(s.getCoupon(11), undefined);
+  assert.equal(s.seedFromGoodsCoupons(D1), 2);
+  assert.equal(s.db.prepare('SELECT COUNT(*) AS n FROM coupons').get().n, 2);
+});
+
+test('registryCounts reports usable, pending and coupons that expired yesterday', () => {
+  const D = '2026-10-15';
+  s.upsertMemberCoupons(D, [mc(1, { until: '2026-10-14' }), mc(2, { until: '2026-10-14' }), mc(3, { until: '2026-10-13' }), mc(4, { until: '2026-10-15' }), mc(5, { until: null })]);
+  setState(2, 'OTHER');
+  s.recordHit(6, D, 3, { scopeGoods: [1] });
+  assert.deepEqual(s.registryCounts(D), { usable: 2, pending: 1, expiredYesterday: 1 });
+});
+
+test('maxCouponNo and filterActive', () => {
+  assert.equal(s.maxCouponNo(), null);
+  s.recordHit(5, D1, 1);
+  s.recordHit(50, D1, 1);
+  assert.equal(s.maxCouponNo(), 50);
+  s.applyScan(D1, [row(1, 1000), row(2, 1000), row(3, 1000)], scan('001'));
+  s.applyScan(D2, [row(1, 1000)], scan('001'));
+  s.applyScan(D3, [row(1, 1000)], scan('001'));
+  assert.deepEqual(s.filterActive([1, 2, 3, 4]), [1]);
+  assert.deepEqual(s.filterActive([]), []);
 });
