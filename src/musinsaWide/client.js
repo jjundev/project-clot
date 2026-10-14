@@ -10,6 +10,7 @@ export const GENDER_MUSINSA = 'A';
 export const DEPTH_PAGES = 100; // 60 goods per page
 
 const COUPON_API = 'https://api.musinsa.com/api2/coupon/coupons/getUsableCouponsByGoodsNo';
+export const REQUEST_TIMEOUT_MS = 30_000; // per request; undici's default would let a stalled connection wait ~300 s
 const PAGE_ATTEMPTS = 3;
 const PAGE_BACKOFF_MS = [2000, 4000]; // waits before attempt 2 and 3
 
@@ -19,8 +20,9 @@ export function firstPageUrl(cat) {
   return `https://www.musinsa.com/categories/item/${cat}?gf=${GENDER_MUSINSA}&sortCode=${SORT_MUSINSA}`;
 }
 
-export function createMusinsaClient({ fetchFn = fetch, pageDelayMs = 300, couponDelayMs = 700, sleep = realSleep } = {}) {
+export function createMusinsaClient({ fetchFn: baseFetch = fetch, pageDelayMs = 300, couponDelayMs = 700, sleep = realSleep } = {}) {
   let couponCalls = 0;
+  const fetchFn = (url, opts = {}) => baseFetch(url, { ...opts, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
 
   // pageUrl null = first page (built here); later pages must be the nextPageUrl the API returned (never built: 403).
   async function getCategoryPage(cat, pageUrl = null) {
@@ -73,7 +75,7 @@ export function toListingRow(item, cat) {
     cat,
     brand: item.brand ?? null,
     brand_name: item.brandName ?? null,
-    name: item.goodsName ?? null,
+    name: item.goodsName ?? '', // goods.name is NOT NULL: one nameless listing must not abort the run
     url: item.goodsLinkUrl || `https://www.musinsa.com/products/${goodsNo}`,
     image_url: item.thumbnail ?? null,
     sale_price: item.price,

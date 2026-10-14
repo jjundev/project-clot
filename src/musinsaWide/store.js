@@ -67,7 +67,8 @@ export class MusinsaWideStore {
   /**
    * Applies one day's scan of one top-level category (`cat`). A miss counts only when `complete` (the whole category was
    * read), only for that category's ACTIVE rows, and at most once per date, so a same-day rerun or a half-failed
-   * category never pushes listings toward OUT_OF_SCOPE. coupon_price and the coupon columns are never touched here.
+   * category never pushes listings toward OUT_OF_SCOPE. The coupon columns are never touched here, except that a goods
+   * leaving scope drops its coupon_price (the published DB must not keep a price nothing refreshes).
    */
   applyScan(date, scanRows, { cat, complete = false } = {}) {
     // The listing can show a goods twice (it moves between pages while paging); the last sighting wins.
@@ -154,7 +155,7 @@ export class MusinsaWideStore {
           .run(date, cat, JSON.stringify(rows.map((r) => r.goods_no)), date);
         diff.outOfScope = Number(
           this.db
-            .prepare(`UPDATE goods SET status = '${STATUS_OUT_OF_SCOPE}' WHERE status = 'ACTIVE' AND cat = ? AND misses >= ?`)
+            .prepare(`UPDATE goods SET status = '${STATUS_OUT_OF_SCOPE}', coupon_price = NULL WHERE status = 'ACTIVE' AND cat = ? AND misses >= ?`)
             .run(cat, OUT_AFTER_MISSES).changes
         );
       }
@@ -168,7 +169,8 @@ export class MusinsaWideStore {
   }
 
   /**
-   * The next `n` goods whose coupons should be checked on `date`: never checked first, then those whose sale_price or
+   * The next `n` goods whose coupons should be checked on `date`: never checked first, then those whose stored list has
+   * a coupon already expired on `date` (they price as stale until re-checked), then those whose sale_price or
    * extra_discount changed since their check, then the longest-unchecked; ties by goods_no. Only ACTIVE, in-stock,
    * priced listings, and never one already checked on `date`.
    */
@@ -181,13 +183,14 @@ export class MusinsaWideStore {
         ORDER BY
           CASE
             WHEN coupon_checked_date IS NULL THEN 0
-            WHEN sale_price IS NOT coupon_checked_sale_price OR extra_discount IS NOT coupon_checked_extra THEN 1
-            ELSE 2
+            WHEN EXISTS (SELECT 1 FROM json_each(goods.coupons_json) WHERE json_extract(value, '$.until') < ?) THEN 1
+            WHEN sale_price IS NOT coupon_checked_sale_price OR extra_discount IS NOT coupon_checked_extra THEN 2
+            ELSE 3
           END,
           coupon_checked_date, goods_no
         LIMIT ?
       `)
-      .all(date, n)
+      .all(date, date, n)
       .map((r) => ({ ...r }));
   }
 

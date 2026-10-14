@@ -185,8 +185,10 @@ export async function checkGoodsCoupons({
 
 /**
  * Prices every ACTIVE goods from its stored coupon list, locally (no session needed): a list checked within
- * COUPON_TTL_DAYS of `date` gives couponPriceMusinsa over the coupons not yet expired on `date`; a goods never
- * checked or checked longer ago gets null (stale). Then logs the price changes; drops are biggest first.
+ * COUPON_TTL_DAYS of `date` gives couponPriceMusinsa; a goods never checked, checked longer ago, or whose stored list
+ * holds a coupon that has since expired (monthly coupons all lapse together: pricing the rest would inflate the price
+ * and fake a drop at the re-check) gets null (stale) until it is re-checked. Then logs the price changes; drops are
+ * biggest first.
  */
 export function applyCouponPrices({ store, date }) {
   const today = dayNumber(date);
@@ -195,9 +197,10 @@ export function applyCouponPrices({ store, date }) {
   let stale = 0;
   const rows = store.getActivePriceRows();
   for (const row of rows) {
-    const fresh = row.coupons != null && row.coupon_checked_date != null && today - dayNumber(row.coupon_checked_date) <= COUPON_TTL_DAYS;
+    const fresh = row.coupons != null && row.coupon_checked_date != null && today - dayNumber(row.coupon_checked_date) <= COUPON_TTL_DAYS &&
+      !row.coupons.some((c) => c.until && c.until < date);
     if (!fresh) stale++;
-    const price = fresh ? couponPriceMusinsa(row, row.coupons.filter((c) => !c.until || c.until >= date)) : null;
+    const price = fresh ? couponPriceMusinsa(row, row.coupons) : null;
     if (price != null) priced++;
     prices.set(row.goods_no, price);
   }

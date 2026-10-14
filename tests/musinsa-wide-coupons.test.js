@@ -309,15 +309,21 @@ test('a check 11 days old is stale and priced null; 9 days old is priced', async
   assert.equal(store.getGoods(4).coupon_price, null);
 });
 
-test('an expired coupon (until before date) is left out of the price', () => {
-  store.applyScan('2026-10-01', [goodsRow(1, 100000)], { cat: '001', complete: true });
+test('a coupon expiring on date is still valid; one that expired the day before makes the goods stale', () => {
+  store.applyScan('2026-10-01', [goodsRow(1, 100000), goodsRow(2, 100000)], { cat: '001', complete: true });
+  const info = { sale_price: 100000, extra_discount: 0 };
   store.putGoodsCoupons(1, '2026-10-13', [
-    parseCoupon(raw({ id: 11, rate: '20', max: 0, min: 0, until: '2026-10-13T23:59:59+09:00' })), // expired on DAY
     parseCoupon(raw({ id: 12, rate: '5', max: 0, min: 0, until: '2026-10-14T23:59:59+09:00' })), // last day: still valid
     parseCoupon(raw({ id: 13, rate: '7', max: 0, min: 0, until: undefined })), // no expiry
-  ], { sale_price: 100000, extra_discount: 0 });
-  applyCouponPrices({ store, date: DAY });
+  ], info);
+  store.putGoodsCoupons(2, '2026-10-13', [
+    parseCoupon(raw({ id: 11, rate: '20', max: 0, min: 0, until: '2026-10-13T23:59:59+09:00' })), // expired on DAY
+    parseCoupon(raw({ id: 13, rate: '7', max: 0, min: 0, until: undefined })),
+  ], info);
+  const out = applyCouponPrices({ store, date: DAY });
+  assert.deepEqual([out.priced, out.stale], [1, 1]);
   assert.equal(store.getGoods(1).coupon_price, 93000);
+  assert.equal(store.getGoods(2).coupon_price, null);
 });
 
 test('applyCouponPrices logs price changes and returns drops, biggest first', () => {
@@ -332,4 +338,27 @@ test('applyCouponPrices logs price changes and returns drops, biggest first', ()
   const out = applyCouponPrices({ store, date: DAY });
   assert.deepEqual(out.drops.map((d) => [d.goods_no, d.prevPrice, d.currentPrice]), [[2, 95000, 60000], [1, 95000, 80000]]);
   assert.ok(out.drops[0].dropRate > out.drops[1].dropRate);
+});
+
+test('a goods whose stored coupon expired is priced null and stale until re-checked; the re-check logs no drop', () => {
+  store.applyScan('2026-10-25', [goodsRow(1, 100000), goodsRow(2, 100000)], { cat: '001', complete: true });
+  const info = { sale_price: 100000, extra_discount: 0 };
+  const monthly = [parseCoupon(raw({ id: 11, rate: '10', max: 0, min: 0, until: '2026-10-31T23:59:59+09:00' }))];
+  const open = [parseCoupon(raw({ id: 12, rate: '10', max: 0, min: 0, until: '2026-12-31T23:59:59+09:00' }))];
+  store.putGoodsCoupons(1, '2026-10-30', monthly, info);
+  store.putGoodsCoupons(2, '2026-10-30', open, info);
+  const before = applyCouponPrices({ store, date: '2026-10-31' });
+  assert.deepEqual([before.priced, before.stale], [2, 0]);
+  // Rollover: goods 1's coupon is gone, goods 2's is not. 1 must not fall back to the bare sale price.
+  const rolled = applyCouponPrices({ store, date: '2026-11-01' });
+  assert.deepEqual([rolled.priced, rolled.stale], [1, 1]);
+  assert.equal(store.getGoods(1).coupon_price, null);
+  assert.equal(store.getGoods(2).coupon_price, 90000);
+  assert.deepEqual(rolled.drops, []);
+  // The re-check brings a fresh (cheaper) price back; the null before it means no drop is reported.
+  store.putGoodsCoupons(1, '2026-11-02', [parseCoupon(raw({ id: 13, rate: '30', max: 0, min: 0, until: '2026-11-30T23:59:59+09:00' }))], info);
+  const after = applyCouponPrices({ store, date: '2026-11-02' });
+  assert.equal(store.getGoods(1).coupon_price, 70000);
+  assert.deepEqual([after.priced, after.stale], [2, 0]);
+  assert.deepEqual(after.drops, []);
 });

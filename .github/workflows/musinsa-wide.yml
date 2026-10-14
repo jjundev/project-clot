@@ -35,8 +35,11 @@ jobs:
         with:
           node-version: 24 # node:sqlite
 
+      # A missing or malformed secret must only cost the coupon checks (track-musinsa then reports memberStatus 'none'):
+      # continue-on-error keeps pull/track/push running, and the last step turns the job red afterwards.
       - name: Restore Musinsa session
         id: restore
+        continue-on-error: true
         env:
           MUSINSA_COOKIE: ${{ secrets.MUSINSA_COOKIE }}
         run: node scripts/actions-session.js restore
@@ -94,4 +97,12 @@ jobs:
         if: always() && steps.session.outputs.status == 'cleared'
         run: |
           echo '::error::Musinsa session expired or was revoked. Log in on the Mac, then update the MUSINSA_COOKIE secret.'
+          exit 1
+
+      # steps.restore.outcome is the real result (conclusion is forced to success by continue-on-error). The scan and
+      # push above already ran; this only makes the missing secret visible, the same way a cleared session is.
+      - name: Fail when the session could not be restored
+        if: always() && steps.restore.outcome == 'failure'
+        run: |
+          echo '::error::MUSINSA_COOKIE could not be restored (empty or malformed): the scan ran without coupon checks. Update the MUSINSA_COOKIE secret.'
           exit 1

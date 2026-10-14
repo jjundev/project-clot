@@ -7,7 +7,7 @@ const fmt = (n) => Number(n).toLocaleString('en-US');
 const MAX_INCOMPLETE_NAMES = 5;
 const EXPIRED_LINE = '⚠️ 무신사 로그인 만료 — MUSINSA_COOKIE 갱신 필요';
 
-// 29 top-level categories: one summary line, never a per-category list.
+// 5 top-level categories: one summary line, never a per-category list.
 function scanLine(categoryCounts) {
   const incomplete = categoryCounts.filter((c) => !c.complete);
   const rows = categoryCounts.reduce((sum, c) => sum + (c.scanned || 0), 0);

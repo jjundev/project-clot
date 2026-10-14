@@ -1,7 +1,7 @@
 import './setup-env.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createMusinsaClient, scanCategory, toListingRow, CATEGORIES_MUSINSA, DEPTH_PAGES } from '../src/musinsaWide/client.js';
+import { createMusinsaClient, scanCategory, toListingRow, CATEGORIES_MUSINSA, DEPTH_PAGES, REQUEST_TIMEOUT_MS } from '../src/musinsaWide/client.js';
 
 const noSleep = async () => {};
 const item = (n, extra = {}) => ({
@@ -148,6 +148,28 @@ test('toListingRow maps listing fields', () => {
   });
   assert.equal(toListingRow(item(8, { goodsLinkUrl: undefined }), '002').url, 'https://www.musinsa.com/products/8');
   assert.equal(toListingRow({ goodsName: 'x' }, '002'), null);
+});
+
+test('toListingRow defaults a missing name to an empty string', () => {
+  assert.equal(toListingRow(item(9, { goodsName: undefined }), '001').name, '');
+  assert.equal(toListingRow(item(9, { goodsName: null }), '001').name, '');
+});
+
+test('every request, category pages and the coupon call, carries a timeout signal', async () => {
+  assert.equal(REQUEST_TIMEOUT_MS, 30_000);
+  const seen = [];
+  const fetchFn = async (url, opts) => {
+    seen.push(opts?.signal);
+    if (String(url).includes('getUsableCouponsByGoodsNo')) {
+      return { ok: true, status: 200, headers: { getSetCookie: () => [] }, json: async () => ({ data: { list: [] } }) };
+    }
+    return htmlPage([item(1)], { hasNext: false });
+  };
+  const client = createMusinsaClient({ fetchFn, sleep: noSleep });
+  await client.getCategoryPage('001');
+  await client.getUsableCoupons({ goodsNo: 1, brand: 'b', salePrice: 1 }, 'c=1');
+  assert.equal(seen.length, 2);
+  for (const signal of seen) assert.ok(signal instanceof AbortSignal);
 });
 
 test('getUsableCoupons sends the cookie, passes Set-Cookie on, and maps 401 to MEMBER_AUTH without the cookie in the message', async () => {
