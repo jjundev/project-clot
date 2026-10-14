@@ -19,6 +19,13 @@ if (!process.env.CLOT_4910_DB_PATH) {
   process.on('exit', () => fs.rmSync(tmpDir, { recursive: true, force: true }));
 }
 
+// And the Musinsa wide store: never let a test open data/musinsa-wide.db.
+if (!process.env.CLOT_MUSINSA_WIDE_DB_PATH) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-test-musinsa-wide-'));
+  process.env.CLOT_MUSINSA_WIDE_DB_PATH = path.join(tmpDir, 'musinsa-wide.db');
+  process.on('exit', () => fs.rmSync(tmpDir, { recursive: true, force: true }));
+}
+
 // Never notify for real: skip the repo's .env (src/notifier.js) and macOS banners, and drop any
 // Telegram/Discord credentials (and the 4910 member token) inherited from the shell. Tests that need creds set them explicitly.
 process.env.CLOT_NOTIFY_SANDBOX = '1';
