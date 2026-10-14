@@ -494,7 +494,7 @@ test('a backfill cut by the enumeration deadline saves enum_cursor and is not do
 
   // The next run resumes at the saved cursor, does not seed again and finishes.
   const api2 = { counts: { 345300: 4 } };
-  const resumed = await backfill({ makeClient: fakeMakeClient({}, api2), date: DAY2 });
+  const resumed = await backfill({ makeClient: fakeMakeClient({}, api2), date: DAY2, sessionProvider: session() });
   assert.equal(resumed.from, cut.next);
   assert.equal(resumed.seeded, 0);
   assert.equal(resumed.done, true);
@@ -537,7 +537,7 @@ test('the cursor is saved every 1000 numbers during the walk', async () => {
     if (key === 'enum_cursor') saves.push(value);
     setMeta(key, value);
   };
-  const res = await backfill({ makeClient: fakeMakeClient({}, { counts }) });
+  const res = await backfill({ makeClient: fakeMakeClient({}, { counts }), sessionProvider: session() });
   assert.equal(res.done, true);
   // The end of the enumeration is saved too, and cleared once the classification has returned.
   assert.deepEqual(saves.slice(-2), [res.next, null]);
@@ -549,13 +549,15 @@ test('the cursor is saved every 1000 numbers during the walk', async () => {
 test('backfill records no empty numbers', async () => {
   addGoods(1);
   store.putGoodsCoupons(1, DAY0, [parseCoupon(rawCoupon(345300, 10))], goodsRow(1));
-  const res = await backfill({ makeClient: fakeMakeClient({}, { counts: { 345010: 3, 345300: 4 }, lists: { 345010: [1] } }) });
+  const res = await backfill({
+    makeClient: fakeMakeClient({}, { counts: { 345010: 3, 345300: 4 }, lists: { 345010: [1] } }), sessionProvider: session(),
+  });
   assert.equal(res.done, true);
   assert.ok(res.probed > 300);
   assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM coupon_empty_numbers').get().n, 0);
 });
 
-test('backfill classification is capped at 1500', async () => {
+test('backfill classification is capped at 1500, and reaching the cap still counts as done', async () => {
   const goods = Array.from({ length: 1600 }, (_, i) => i + 1);
   addGoods(...goods);
   // 1600 pending coupons, each covering its own goods.
@@ -581,16 +583,70 @@ test('done sets backfill_done and clears enum_cursor; a following trackMusinsa i
   assert.notEqual(tracked.registry, null);
 });
 
-test('without a member session the classification is skipped but the enumeration still finishes', async () => {
+test('without a member session the classification is skipped, the enumeration finishes, but the backfill is not done', async () => {
   addGoods(1);
   const api = { counts: { 345010: 1 }, lists: { 345010: [1] } };
   const res = await backfill({ makeClient: fakeMakeClient({}, api) });
   assert.equal(res.memberStatus, 'none');
-  assert.equal(res.done, true);
+  assert.equal(res.done, false);
+  assert.equal(res.stop, 'none');
   assert.equal(res.classify.calls, 0);
   assert.equal(res.classify.pending, 1);
   assert.deepEqual(ofKind(api.calls, 'member'), []);
-  assert.equal(store.getMeta('backfill_done'), DAY1);
+  assert.equal(store.getMeta('backfill_done'), null);
+  assert.equal(store.getMeta('enum_cursor'), String(res.next)); // a rerun goes straight to the classification
+});
+
+test('a member session that expires during the classification leaves the backfill not done', async () => {
+  addGoods(1, 2);
+  store.recordHit(345010, DAY0, 1, { scopeGoods: [1] });
+  store.recordHit(345020, DAY0, 1, { scopeGoods: [2] });
+  const makeClient = fakeMakeClient({}, {});
+  const expiring = () => ({
+    ...makeClient(),
+    getUsableCoupons: async () => { throw Object.assign(new Error('401'), { code: 'MEMBER_AUTH' }); },
+  });
+  const res = await backfill({ makeClient: expiring, sessionProvider: session() });
+  assert.equal(res.memberStatus, 'expired');
+  assert.equal(res.stop, 'expired');
+  assert.equal(res.done, false);
+  assert.equal(res.classify.pending, 2);
+  assert.equal(store.getMeta('backfill_done'), null);
+  assert.equal(store.getMeta('enum_cursor'), String(res.next));
+});
+
+test('a classification that runs into its deadline leaves the backfill not done', async () => {
+  const goods = [1, 2, 3, 4, 5, 6];
+  addGoods(...goods);
+  for (const g of goods) store.recordHit(345000 + g, DAY0, 1, { scopeGoods: [g] });
+  const api = { tick: { member: MIN } };
+  const res = await backfill({
+    makeClient: fakeMakeClient({}, api), sessionProvider: session(), concurrency: 1, budgetMs: Math.round(2.5 * MIN),
+  });
+  assert.equal(res.memberStatus, 'ok');
+  assert.ok(res.classify.calls > 0 && res.classify.calls < 6);
+  assert.ok(res.classify.pending > 0);
+  assert.equal(res.stop, 'deadline');
+  assert.equal(res.done, false);
+  assert.equal(store.getMeta('backfill_done'), null);
+  assert.equal(store.getMeta('enum_cursor'), String(res.next));
+});
+
+test('after the classification the neighbours of a coupon found below enum_floor are counted; hits stay PENDING and done is unaffected', async () => {
+  addGoods(1);
+  const api = {
+    counts: { 345010: 1, 344995: 2 }, lists: { 345010: [1], 344995: [1] }, members: { 1: [rawCoupon(344990, 10)] },
+  };
+  const res = await backfill({ makeClient: fakeMakeClient({}, api), sessionProvider: session() });
+  assert.equal(res.done, true);
+  assert.equal(store.getCoupon(344990).state, 'USABLE'); // below the floor 345000 and new to the registry: a centre
+  const below = ofKind(api.calls, 'count').map((c) => c.no).filter((no) => no < 345000);
+  assert.ok(below.length > 50);
+  assert.ok(below.every((no) => no >= 344940 && no <= 345040));
+  assert.ok(!below.includes(344990)); // the centre is known
+  // 344940..345040 without the centre and the known 345010; the numbers from 345000 up were counted by the walk as well.
+  assert.deepEqual(res.neighbors, { probed: 101 - 2, hits: 1 });
+  assert.equal(store.getCoupon(344995).state, 'PENDING');
 });
 
 test('an enumeration that throws is stop error: not done, the cursor kept, and the classification still runs', async () => {

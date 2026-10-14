@@ -6,7 +6,9 @@ import { CATEGORIES_MUSINSA, DEPTH_PAGES, scanCategory } from './client.js';
 import {
   createMemberChecker, applyCouponPrices, sampleAccuracy, CLASSIFY_CAP, SAMPLE_PER_DAY, BACKFILL_CLASSIFY_CAP,
 } from './coupons.js';
-import { enumerateNumbers, recheckEmpties, probeNeighbors, classifyPending, BACKFILL_FROM } from './registry.js';
+import {
+  enumerateNumbers, recheckEmpties, probeNeighbors, classifyPending, BACKFILL_FROM, NEIGHBOR_CAP,
+} from './registry.js';
 import { walkCouponLists } from './walk.js';
 import { mapConcurrent, clientPool } from '../pool.js';
 
@@ -294,10 +296,12 @@ export async function trackMusinsa({
  * the registry from the coupons already stored on the goods and records enum_floor; a run cut short by its enumeration
  * deadline (or a throttle, an error) keeps enum_cursor at the next number to probe and is not done, so running it again
  * resumes there. Done (backfill_done = date, cursor cleared, both only after the classification has returned) means the
- * enumeration finished by itself and the classification did not throw; the coupons it left PENDING (cap, deadline, no
- * session) are classified by the daily runs. The cursor is saved at `next` as soon as the enumeration ends, so a run
- * killed during the classification resumes at the end. Without a member session
- * the classification is skipped.
+ * enumeration finished by itself, the classification did not throw, the member session is still ok and the classification
+ * deadline has not passed (`stop` says which failed: the checker status or 'deadline'). The cap and single-goods failures
+ * still count as done; the coupons left PENDING are classified by the daily runs. The cursor is saved at `next` as soon
+ * as the enumeration ends, so a run killed during the classification resumes at the end. Without a member session the
+ * classification is skipped and the backfill is not done. Afterwards the neighbours of any coupon the member calls found
+ * below enum_floor are counted (their hits stay PENDING; this does not affect done).
  */
 export async function backfillMusinsaCoupons({
   makeClient, store, date, sessionProvider = null, from = null, concurrency = 3, budgetMs = BACKFILL_BUDGET_MS,
@@ -345,20 +349,33 @@ export async function backfillMusinsaCoupons({
   ));
   const { neighborCenters, checks, added, stop: classifyStop, ...classify } = classified;
 
-  // A classification that threw is not done: the daily run must not price from a registry still full of PENDING coupons.
-  const done = stop === null && classifyStop == null;
+  // Done needs the classification to have really run: an enumeration that finished, a classification that did not throw,
+  // a member session still ok (not absent, expired, throttled or failed) and the classification deadline not passed.
+  // The cap and failures on single goods still count as done: the daily runs classify the rest. Otherwise the daily run
+  // would price from a registry still full of PENDING coupons.
+  const classifyDeadline = started + budgetMs;
+  let finalStop = stop ?? classifyStop ?? null;
+  if (finalStop === null && checker.status !== 'ok') finalStop = checker.status;
+  if (finalStop === null && now() >= classifyDeadline) finalStop = 'deadline';
+  const done = finalStop === null;
   if (done) {
     store.setMeta('backfill_done', date);
     store.setMeta('enum_cursor', null);
   }
-  const finalStop = stop ?? classifyStop ?? null;
+
+  // Neighbours of the coupons the member calls found below enum_floor: their centres are not stored anywhere, so no later
+  // run would probe them. Hits stay PENDING for the daily classification; this does not affect `done`.
+  const neighbors = await phase('이웃 조회', { probed: 0, hits: 0 }, () => (
+    probeNeighbors({ withClient, store, date, centers: neighborCenters, cap: NEIGHBOR_CAP, deadline: classifyDeadline, now })
+  ));
 
   log(
     `[무신사] 전환: 번호 ${start}~${next} (${enumerated.probed}개, 쿠폰 ${enumerated.hits}종) · 시드 ${seeded}`
     + ` · 판별 ${classify.calls}회 (대기 ${classify.pending}) · ${done ? '완료' : `중단 (${finalStop})`}`,
   );
   return {
-    date, from: start, next, probed: enumerated.probed, hits: enumerated.hits, seeded, classify, done,
+    date, from: start, next, probed: enumerated.probed, hits: enumerated.hits, seeded, classify,
+    neighbors: { probed: neighbors.probed, hits: neighbors.hits }, done,
     memberStatus: checker.status, stop: finalStop,
   };
 }
