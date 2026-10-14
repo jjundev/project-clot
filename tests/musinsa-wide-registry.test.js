@@ -7,7 +7,7 @@ import path from 'node:path';
 import { MusinsaWideStore, COUPON_STATE } from '../src/musinsaWide/store.js';
 import {
   ENUM_BATCH, ENUM_EMPTY_STOP, ENUM_PROBES, NEIGHBOR_RADIUS, NEIGHBOR_CAP, BACKFILL_FROM, ANON_CONCURRENCY,
-  probeNumbers, enumerateNumbers, recheckEmpties, probeNeighbors,
+  probeNumbers, enumerateNumbers, recheckEmpties, probeNeighbors, planClassification, classifyPending,
 } from '../src/musinsaWide/registry.js';
 
 const DATE = '2026-10-15';
@@ -288,4 +288,173 @@ test('a probe hit recorded before a 429 counts as a hit but does not lift highes
   assert.equal(next.highest, 700);
   assert.equal(next.stop, null);
   assert.equal(store.getMeta('frontier'), '700');
+});
+
+// --- classification of new coupons ---
+
+const info = (entries) => new Map(Object.entries(entries).map(([g, v]) => [Number(g), { review_count: 0, is_sold_out: 0, status: 'ACTIVE', ...v }]));
+const pendingOf = (couponNo, scope_goods) => ({ coupon_no: couponNo, scope_goods });
+const memberCoupon = (id) => ({ id: String(id), name: `coupon ${id}`, type: 'PERCENT', percent: 10, price: null, max: 5000, min: 0, start: null, until: '2026-12-31' });
+
+// Stands in for createMemberChecker: answers each goods from `answers` (goods_no -> coupon ids), in order, and stops
+// after `stopAfter` goods when given. Records the goods it was asked about.
+function fakeChecker({ answers = {}, stopAfter = Infinity, status = 'ok' } = {}) {
+  const checker = {
+    asked: [],
+    calls: 0,
+    get status() { return status; },
+    async check(goodsList, { deadline, onResult } = {}) {
+      checker.deadline = deadline;
+      for (const goods of goodsList) {
+        if (checker.calls >= stopAfter) {
+          status = 'throttled';
+          return;
+        }
+        checker.asked.push(goods);
+        await onResult?.(goods, (answers[goods.goods_no] ?? []).map(memberCoupon));
+        checker.calls++;
+      }
+    },
+  };
+  return checker;
+}
+
+// Active goods with the given review counts; couponScopes: couponNo -> goodsNos of its first page.
+function seedPending(reviews, couponScopes) {
+  store.applyScan(DATE, Object.entries(reviews).map(([g, review_count]) => ({ ...goodsRow(Number(g)), review_count })), { cat: '001', complete: true });
+  for (const [no, scope] of Object.entries(couponScopes)) store.recordHit(Number(no), DATE, 10, { scopeGoods: scope });
+}
+const stateOf = (no) => store.getCoupon(no).state;
+
+test('planClassification picks the goods covering most pending coupons, ties by reviews then goods_no', () => {
+  const pending = [pendingOf(10, [1, 2]), pendingOf(20, [2, 3]), pendingOf(30, [4]), pendingOf(40, [5, 6])];
+  const goods = info({ 1: { review_count: 20 }, 2: { review_count: 10 }, 3: { review_count: 5 }, 4: { review_count: 1 }, 5: { review_count: 7 }, 6: { review_count: 7 } });
+  const { plan, unclassifiable } = planClassification(pending, goods);
+  // 2 covers two coupons; then 30 (goods 4, 1 review), 40 (goods 5 and 6 tie on reviews: smaller goods_no); 1 and 3 are spent.
+  assert.deepEqual(plan, [
+    { goods_no: 2, couponNos: [10, 20] },
+    { goods_no: 5, couponNos: [40] },
+    { goods_no: 4, couponNos: [30] },
+  ]);
+  assert.deepEqual(unclassifiable, []);
+});
+
+test('planClassification never picks a sold-out or non-ACTIVE goods', () => {
+  const pending = [pendingOf(10, [1, 2]), pendingOf(20, [1, 3])];
+  const goods = info({ 1: { is_sold_out: 1, review_count: 99 }, 2: { review_count: 1 }, 3: { status: 'OUT_OF_SCOPE', review_count: 50 } });
+  const { plan, unclassifiable } = planClassification(pending, goods);
+  assert.deepEqual(plan, [{ goods_no: 2, couponNos: [10] }]);
+  assert.deepEqual(unclassifiable, [20]);
+});
+
+test('a pending coupon whose scope goods are all sold out or gone is unclassifiable', () => {
+  const pending = [pendingOf(10, [1, 2]), pendingOf(20, [9]), pendingOf(30, [3])];
+  const goods = info({ 1: { is_sold_out: 1 }, 2: { status: 'OUT_OF_SCOPE' }, 3: {} }); // 9 is not in goods at all
+  const { plan, unclassifiable } = planClassification(pending, goods);
+  assert.deepEqual(unclassifiable, [10, 20]);
+  assert.deepEqual(plan, [{ goods_no: 3, couponNos: [30] }]);
+});
+
+test('classifyPending marks returned coupons USABLE and the rest of the covered ones OTHER', async () => {
+  seedPending({ 1: 10, 2: 5 }, { 100: [1], 101: [1], 102: [1], 200: [2], 300: [99] });
+  const checker = fakeChecker({ answers: { 1: [100, 102], 2: [] } });
+  const r = await classifyPending({ store, checker, date: DATE });
+  assert.equal(stateOf(100), COUPON_STATE.USABLE);
+  assert.equal(stateOf(102), COUPON_STATE.USABLE);
+  assert.equal(stateOf(101), COUPON_STATE.OTHER);
+  assert.equal(stateOf(200), COUPON_STATE.OTHER);
+  assert.equal(stateOf(300), COUPON_STATE.OUT_OF_SCOPE);
+  assert.equal(r.calls, 2);
+  assert.equal(r.usable, 2);
+  assert.equal(r.other, 2);
+  assert.equal(r.outOfScope, 1);
+  assert.equal(r.pending, 0);
+  assert.deepEqual(r.added, []);
+  assert.deepEqual(r.checks.map((c) => c.goods_no).sort(), [1, 2]);
+  assert.deepEqual(r.checks.find((c) => c.goods_no === 1).couponNos, [100, 102]);
+  assert.deepEqual(r.checks.find((c) => c.goods_no === 2).couponNos, []);
+  // The result is stored on the goods, priced at the checked values.
+  const g = store.getGoods(1);
+  assert.equal(g.coupon_checked_date, DATE);
+  assert.deepEqual(JSON.parse(g.coupons_json).map((c) => c.id), ['100', '102']);
+  assert.equal(g.coupon_checked_sale_price, 50000);
+});
+
+test('classifyPending hands the checker full goods rows and its deadline', async () => {
+  seedPending({ 1: 10 }, { 100: [1] });
+  const checker = fakeChecker({ answers: { 1: [100] } });
+  await classifyPending({ store, checker, date: DATE, deadline: 12345 });
+  assert.equal(checker.deadline, 12345);
+  assert.equal(checker.asked[0].goods_no, 1);
+  assert.equal(checker.asked[0].brand, 'nike');
+  assert.equal(checker.asked[0].sale_price, 50000);
+  assert.equal(checker.asked[0].extra_discount, 0);
+});
+
+test('classifyPending stops at cap; leftovers stay PENDING and are counted', async () => {
+  seedPending({ 1: 30, 2: 20, 3: 10 }, { 100: [1], 200: [2], 300: [3] });
+  const checker = fakeChecker({ answers: {} });
+  const r = await classifyPending({ store, checker, date: DATE, cap: 2 });
+  assert.deepEqual(checker.asked.map((g) => g.goods_no), [1, 2]); // ties on coverage go to more reviews
+  assert.equal(r.calls, 2);
+  assert.equal(r.other, 2);
+  assert.equal(r.pending, 1);
+  assert.equal(stateOf(300), COUPON_STATE.PENDING);
+});
+
+test('a checker that stops mid-way leaves the coupons of unchecked goods PENDING', async () => {
+  seedPending({ 1: 30, 2: 20 }, { 100: [1], 200: [2] });
+  const checker = fakeChecker({ answers: { 1: [100] }, stopAfter: 1 });
+  const r = await classifyPending({ store, checker, date: DATE });
+  assert.equal(r.calls, 1);
+  assert.equal(r.usable, 1);
+  assert.equal(r.pending, 1);
+  assert.equal(stateOf(100), COUPON_STATE.USABLE);
+  assert.equal(stateOf(200), COUPON_STATE.PENDING);
+  assert.deepEqual(r.checks.map((c) => c.goods_no), [1]);
+});
+
+test('a coupon a member result returns before its own goods is checked becomes USABLE, not OTHER', async () => {
+  seedPending({ 1: 30, 2: 20 }, { 100: [1], 200: [2], 201: [2] });
+  // goods 2 (covers 200, 201) goes first; its result also holds 100, which goods 1 was planned for.
+  const checker = fakeChecker({ answers: { 2: [200, 100], 1: [] } });
+  await classifyPending({ store, checker, date: DATE });
+  assert.equal(stateOf(100), COUPON_STATE.USABLE);
+  assert.equal(stateOf(200), COUPON_STATE.USABLE);
+  assert.equal(stateOf(201), COUPON_STATE.OTHER);
+});
+
+test('an old-numbered coupon newly seen in a member result becomes a neighbour centre', async () => {
+  seedPending({ 1: 10 }, { 350001: [1] });
+  store.setMeta('enum_floor', 345000);
+  // 334342 is not in the registry and sits below the floor, 360000 is new but above it, 350001 is known.
+  const checker = fakeChecker({ answers: { 1: [350001, 334342, 360000] } });
+  const r = await classifyPending({ store, checker, date: DATE });
+  assert.deepEqual(r.neighborCenters, [334342]);
+  assert.deepEqual(r.added.sort((a, b) => a - b), [334342, 360000]);
+  assert.equal(stateOf(334342), COUPON_STATE.USABLE);
+  assert.deepEqual(r.checks[0].couponNos, [350001, 334342, 360000]);
+  assert.equal(r.usable, 1); // only the pending coupon the check settled
+});
+
+test('without enum_floor no neighbour centres are produced', async () => {
+  seedPending({ 1: 10 }, { 350001: [1] });
+  const checker = fakeChecker({ answers: { 1: [350001, 334342] } });
+  const r = await classifyPending({ store, checker, date: DATE });
+  assert.deepEqual(r.neighborCenters, []);
+  assert.deepEqual(r.added, [334342]);
+});
+
+test('a non-ok checker classifies nothing', async () => {
+  seedPending({ 1: 10 }, { 100: [1], 200: [99] });
+  const checker = fakeChecker({ answers: { 1: [100] }, status: 'none' });
+  const r = await classifyPending({ store, checker, date: DATE });
+  assert.equal(r.calls, 0);
+  assert.equal(r.usable + r.other + r.outOfScope, 0);
+  assert.deepEqual(r.checks, []);
+  assert.deepEqual(r.neighborCenters, []);
+  assert.deepEqual(r.added, []);
+  assert.equal(checker.asked.length, 0);
+  assert.equal(stateOf(100), COUPON_STATE.PENDING);
+  assert.equal(stateOf(200), COUPON_STATE.PENDING); // not even the unclassifiable one is touched
 });

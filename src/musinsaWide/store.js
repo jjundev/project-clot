@@ -354,6 +354,14 @@ export class MusinsaWideStore {
     return goodsNos.map(Number).filter((n) => active.has(n));
   }
 
+  // What the classify plan needs of each goods it knows: goods_no -> { review_count, is_sold_out, status }.
+  goodsInfo(goodsNos) {
+    const rows = this.db
+      .prepare('SELECT goods_no, review_count, is_sold_out, status FROM goods WHERE goods_no IN (SELECT value FROM json_each(?))')
+      .all(JSON.stringify(goodsNos.map(Number)));
+    return new Map(rows.map(({ goods_no, ...info }) => [goods_no, info]));
+  }
+
   /**
    * A coupon number the walk found goods for. New: PENDING when `scopeGoods` (the in-scope goods of its first page) is
    * non-empty, else OUT_OF_SCOPE. Known: only last_count moves. The number leaves coupon_empty_numbers either way.

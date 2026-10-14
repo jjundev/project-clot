@@ -658,3 +658,16 @@ test('goodsHasDirectCoupon finds a coupon in stored coupon lists', () => {
   assert.equal(s.goodsHasDirectCoupon(1), false);
   assert.equal(s.goodsHasDirectCoupon(12), false);
 });
+
+test('goodsInfo returns review_count, is_sold_out and status for the goods it knows', () => {
+  s.applyScan(D1, [row(1, 1000, '001', { review_count: 7 }), row(2, 1000, '001', { is_sold_out: 1, review_count: 3 })], scan('001'));
+  s.applyScan(D2, [row(1, 1000, '001', { review_count: 7 })], scan('001'));
+  s.applyScan(D3, [row(1, 1000, '001', { review_count: 7 })], scan('001'));
+  const info = s.goodsInfo([1, 2, 3]);
+  assert.ok(info instanceof Map);
+  assert.deepEqual(info.get(1), { review_count: 7, is_sold_out: 0, status: 'ACTIVE' });
+  assert.equal(info.get(2).status, 'OUT_OF_SCOPE');
+  assert.equal(info.get(2).is_sold_out, 1);
+  assert.equal(info.has(3), false);
+  assert.equal(s.goodsInfo([]).size, 0);
+});

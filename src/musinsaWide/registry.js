@@ -1,5 +1,7 @@
 import { anonCall } from './client.js';
 import { mapConcurrent } from '../pool.js';
+import { COUPON_STATE } from './store.js';
+import { CLASSIFY_CAP } from './coupons.js';
 
 export const ENUM_BATCH = 50;
 export const ENUM_EMPTY_STOP = 200; // empties in a row past the last hit that end the walk
@@ -139,4 +141,129 @@ export async function probeNeighbors({ withClient, store, date, centers, cap = N
   }
   const r = await probeNumbers({ withClient, store, date, numbers: [...picked], deadline, now });
   return { probed: r.probed, hits: r.hits.length, stop: r.stop };
+}
+
+/**
+ * Greedy plan for the member calls that classify PENDING coupons: the ACTIVE, not sold out goods that sits in the scope of
+ * the most still-untested pending coupons goes first (ties: more reviews, then the smaller goods_no); a call settles every
+ * coupon covering that goods. A pending coupon no candidate goods covers is `unclassifiable`. Pure.
+ * `goodsInfo` is goods_no -> { review_count, is_sold_out, status }; a goods missing from it is not a candidate.
+ */
+export function planClassification(pending, goodsInfo) {
+  const byGoods = new Map(); // goods_no -> coupon numbers whose scope holds it
+  const covered = new Set();
+  for (const c of pending) {
+    for (const g of new Set(c.scope_goods ?? [])) {
+      const gi = goodsInfo.get(g);
+      if (!gi || gi.status !== 'ACTIVE' || gi.is_sold_out) continue;
+      if (!byGoods.has(g)) byGoods.set(g, []);
+      byGoods.get(g).push(c.coupon_no);
+      covered.add(c.coupon_no);
+    }
+  }
+  const unclassifiable = pending.map((c) => c.coupon_no).filter((n) => !covered.has(n));
+
+  // Lazy greedy: a goods' untested count only ever falls, so a stale queue entry is an upper bound; re-count the best
+  // one and, if it fell, put it back.
+  const better = (a, b) =>
+    a.k !== b.k ? a.k > b.k : a.reviews !== b.reviews ? a.reviews > b.reviews : a.goods_no < b.goods_no;
+  const heap = [];
+  const push = (e) => {
+    heap.push(e);
+    for (let i = heap.length - 1; i > 0;) {
+      const up = (i - 1) >> 1;
+      if (!better(heap[i], heap[up])) break;
+      [heap[i], heap[up]] = [heap[up], heap[i]];
+      i = up;
+    }
+  };
+  const pop = () => {
+    const top = heap[0];
+    const last = heap.pop();
+    if (heap.length > 0) {
+      heap[0] = last;
+      for (let i = 0; ;) {
+        let m = i;
+        for (const ch of [2 * i + 1, 2 * i + 2]) if (ch < heap.length && better(heap[ch], heap[m])) m = ch;
+        if (m === i) break;
+        [heap[i], heap[m]] = [heap[m], heap[i]];
+        i = m;
+      }
+    }
+    return top;
+  };
+  for (const [goods_no, nos] of byGoods) push({ goods_no, k: nos.length, reviews: goodsInfo.get(goods_no).review_count ?? 0 });
+
+  const untested = new Set(covered);
+  const plan = [];
+  while (heap.length > 0) {
+    const top = pop();
+    const couponNos = byGoods.get(top.goods_no).filter((n) => untested.has(n));
+    if (couponNos.length === 0) continue;
+    if (couponNos.length < top.k) {
+      push({ ...top, k: couponNos.length });
+      continue;
+    }
+    for (const n of couponNos) untested.delete(n);
+    plan.push({ goods_no: top.goods_no, couponNos: couponNos.sort((a, b) => a - b) });
+  }
+  return { plan, unclassifiable };
+}
+
+/**
+ * Classifies the PENDING coupons with member calls, at most `cap` of them. Coupons no usable goods covers are
+ * OUT_OF_SCOPE. Each checked goods stores its result, registers what it returned as USABLE (a number below enum_floor that
+ * the registry did not know is a neighbour centre) and turns the pending coupons it covered but did not return into
+ * OTHER. Goods the checker never got to (cap, deadline, throttle) leave their coupons PENDING. `checks` is the record of
+ * what each goods returned, for recordObservations; `added` the numbers newly registered by the results.
+ * A checker that is not 'ok' does nothing.
+ */
+export async function classifyPending({ store, checker, date, cap = CLASSIFY_CAP, deadline = Infinity }) {
+  const result = { calls: 0, usable: 0, other: 0, outOfScope: 0, pending: 0, neighborCenters: [], checks: [], added: [] };
+  if (checker.status !== 'ok') {
+    result.pending = store.pendingCoupons().length;
+    return result;
+  }
+
+  const pending = store.pendingCoupons();
+  const goodsInfo = store.goodsInfo([...new Set(pending.flatMap((c) => c.scope_goods ?? []))]);
+  const { plan, unclassifiable } = planClassification(pending, goodsInfo);
+  if (unclassifiable.length > 0) {
+    store.markClassified(unclassifiable, date, COUPON_STATE.OUT_OF_SCOPE);
+    result.outOfScope = unclassifiable.length;
+  }
+
+  const covers = new Map();
+  const goodsList = [];
+  for (const { goods_no, couponNos } of plan.slice(0, cap)) {
+    const goods = store.getGoods(goods_no);
+    if (!goods) continue;
+    covers.set(goods_no, couponNos);
+    goodsList.push(goods);
+  }
+
+  const enumFloor = store.getMeta('enum_floor');
+  const floor = enumFloor == null ? null : Number(enumFloor);
+  const callsBefore = checker.calls;
+  await checker.check(goodsList, {
+    deadline,
+    onResult: async (goods, coupons) => {
+      const couponNos = coupons.map((c) => Number(c.id));
+      const returned = new Set(couponNos);
+      // Counted from what is still PENDING: an earlier result may already have settled some of these.
+      const stillPending = covers.get(goods.goods_no).filter((n) => store.getCoupon(n)?.state === COUPON_STATE.PENDING);
+      store.putGoodsCoupons(goods.goods_no, date, coupons, goods);
+      const { added } = store.upsertMemberCoupons(date, coupons);
+      result.added.push(...added);
+      if (floor != null) result.neighborCenters.push(...added.filter((n) => n < floor));
+      const rest = stillPending.filter((n) => !returned.has(n));
+      store.markClassified(rest, date, COUPON_STATE.OTHER);
+      result.usable += stillPending.length - rest.length;
+      result.other += rest.length;
+      result.checks.push({ goods_no: goods.goods_no, couponNos });
+    },
+  });
+  result.calls = checker.calls - callsBefore;
+  result.pending = store.pendingCoupons().length;
+  return result;
 }
