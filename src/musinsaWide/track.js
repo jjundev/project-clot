@@ -377,5 +377,7 @@ export async function backfillMusinsaCoupons({
     date, from: start, next, probed: enumerated.probed, hits: enumerated.hits, seeded, classify,
     neighbors: { probed: neighbors.probed, hits: neighbors.hits }, done,
     memberStatus: checker.status, stop: finalStop,
+    // Which phase failed, for the digest: `stop` merges the enumeration, the classification and the member session.
+    enumStop: stop ?? null, classifyStop: classifyStop === 'error' ? 'error' : null,
   };
 }

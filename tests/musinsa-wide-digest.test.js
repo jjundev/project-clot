@@ -194,11 +194,50 @@ test('formatBackfillDigest shows done and resume variants', () => {
   const expired = formatBackfillDigest(backfill({ done: false, memberStatus: 'expired', stop: 'expired' }));
   assert.match(expired, /⚠️ 무신사 로그인 만료 — MUSINSA_COOKIE 갱신 필요/);
   assert.match(expired, /⏸/);
-  assert.doesNotMatch(expired, /번호 순회/);
-  const throttled = formatBackfillDigest(backfill({ done: false, stop: 'throttled' }));
+  assert.doesNotMatch(expired, /번호 순회|판별 실패/);
+  const throttled = formatBackfillDigest(backfill({ done: false, stop: 'throttled', enumStop: 'throttled' }));
   assert.match(throttled, /⚠️ 무신사 비로그인 쿠폰 API 제한\(429\) — 번호 순회 중단/);
-  const failed = formatBackfillDigest(backfill({ done: false, stop: 'error' }));
-  assert.match(failed, /⚠️ 무신사 번호 순회 실패 — Actions 로그 확인/);
-  const skipped = formatBackfillDigest(backfill({ done: false, memberStatus: 'none', stop: 'none' }));
-  assert.match(skipped, /로그인 만료/);
+  const enumError = formatBackfillDigest(backfill({ done: false, stop: 'error', enumStop: 'error' }));
+  assert.match(enumError, /⚠️ 무신사 번호 순회 실패 — Actions 로그 확인/);
+  assert.doesNotMatch(enumError, /판별 실패/);
+  const none = formatBackfillDigest(backfill({ done: false, memberStatus: 'none', stop: 'none' }));
+  assert.match(none, /로그인 만료/);
+});
+
+test('a classification error names the 판별 phase, never the enumeration', () => {
+  const text = formatBackfillDigest(backfill({ done: false, stop: 'error', classifyStop: 'error' }));
+  assert.match(text, /⚠️ 무신사 판별 실패 — Actions 로그 확인/);
+  assert.doesNotMatch(text, /번호 순회 (실패|중단)/);
+  assert.match(text, /⏸/);
+});
+
+test('an enumeration throttle and an expired member session show both warnings', () => {
+  const text = formatBackfillDigest(backfill({ done: false, memberStatus: 'expired', stop: 'throttled', enumStop: 'throttled' }));
+  assert.match(text, /⚠️ 무신사 비로그인 쿠폰 API 제한\(429\) — 번호 순회 중단/);
+  assert.match(text, /⚠️ 무신사 로그인 만료 — MUSINSA_COOKIE 갱신 필요/);
+});
+
+test('a suppressed day prints no coupon drops even when some exist', () => {
+  const text = formatMusinsaWideDigest(
+    result({ registry: registry(), coupons: coupons({ dropsSuppressed: true, drops: [couponDrop(20, 100000, 80000)] }) }),
+    { lookup }
+  );
+  assert.match(text, /등록부 전환 첫날/);
+  assert.doesNotMatch(text, /📉|🔻/);
+});
+
+test('trimming drop lines keeps every head line, registry and warning lines included', () => {
+  const many = Array.from({ length: 60 }, (_, i) => couponDrop(i + 1, 100000, 50000));
+  const long = (n) => ({ ...row(n), name: 'x'.repeat(100) });
+  const text = formatMusinsaWideDigest(
+    result({
+      registry: registry({ walk: { walked: 1, failed: 0, suspectEmpty: 0, calls: 1, stop: 'throttled' } }),
+      coupons: coupons({ drops: many, lateDrops: 2 }),
+    }),
+    { limit: 60, lookup: long }
+  );
+  assert.ok(text.length <= 4096, `length ${text.length}`);
+  for (const mark of ['🎟', '🔢', '🧮', '📒', '🚶', '🎯', '목록 순회 중단', '늦게 찾은 쿠폰 하락 2건 제외']) assert.ok(text.includes(mark), mark);
+  const n = Number(text.match(/쿠폰가 10% 이상 하락 \(상위 (\d+)\)/)[1]);
+  assert.ok(n > 0 && n < 60);
 });

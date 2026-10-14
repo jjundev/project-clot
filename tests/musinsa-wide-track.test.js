@@ -458,6 +458,8 @@ test('first backfill seeds stored coupons, sets enum_floor and walks from 345000
   assert.equal(res.from, 345000);
   assert.equal(res.done, true);
   assert.equal(res.stop, null);
+  assert.equal(res.enumStop, null);
+  assert.equal(res.classifyStop, null);
   assert.equal(res.hits, 3);
   assert.equal(res.memberStatus, 'ok');
   assert.deepEqual(backfillMeta(), { enum_floor: '345000', enum_cursor: null, backfill_done: DAY1 });
@@ -483,6 +485,8 @@ test('a backfill cut by the enumeration deadline saves enum_cursor and is not do
   const cut = await backfill({ makeClient: fakeMakeClient({}, api1), enumBudgetMs: 3 * MIN, concurrency: 1 });
   assert.equal(cut.done, false);
   assert.equal(cut.stop, 'deadline');
+  assert.equal(cut.enumStop, 'deadline');
+  assert.equal(cut.classifyStop, null);
   assert.equal(cut.seeded, 1);
   assert.equal(cut.memberStatus, 'none');
   assert.equal(cut.classify.calls, 0);
@@ -627,6 +631,8 @@ test('a classification that runs into its deadline leaves the backfill not done'
   assert.ok(res.classify.calls > 0 && res.classify.calls < 6);
   assert.ok(res.classify.pending > 0);
   assert.equal(res.stop, 'deadline');
+  assert.equal(res.enumStop, null);
+  assert.equal(res.classifyStop, null);
   assert.equal(res.done, false);
   assert.equal(store.getMeta('backfill_done'), null);
   assert.equal(store.getMeta('enum_cursor'), String(res.next));
@@ -658,6 +664,8 @@ test('an enumeration that throws is stop error: not done, the cursor kept, and t
   const api = { members: { 1: [rawCoupon(345010, 10)] } };
   const res = await backfill({ makeClient: fakeMakeClient({}, api), sessionProvider: session(), log: (m) => lines.push(m) });
   assert.equal(res.stop, 'error');
+  assert.equal(res.enumStop, 'error'); // the enumeration threw; the classification itself ran fine
+  assert.equal(res.classifyStop, null);
   assert.equal(res.done, false);
   assert.equal(res.next, 345200);
   assert.equal(store.getMeta('enum_cursor'), '345200');
@@ -680,6 +688,8 @@ test('a throttled backfill keeps its place: the cursor is the first number of th
   };
   const res = await backfill({ makeClient: throttled });
   assert.equal(res.stop, 'throttled');
+  assert.equal(res.enumStop, 'throttled');
+  assert.equal(res.classifyStop, null);
   assert.equal(res.done, false);
   assert.equal(res.next, 345100);
   assert.equal(store.getMeta('enum_cursor'), '345100');
@@ -695,6 +705,8 @@ test('a classification that fails after a finished enumeration leaves the cursor
   const first = await backfill({ makeClient: fakeMakeClient({}, { counts, lists }), sessionProvider: session() });
   assert.equal(first.done, false);
   assert.equal(first.stop, 'error');
+  assert.equal(first.enumStop, null); // the enumeration finished; the classification is what threw
+  assert.equal(first.classifyStop, 'error');
   assert.equal(store.getMeta('backfill_done'), null);
   assert.equal(store.getMeta('enum_cursor'), String(first.next));
   assert.ok(first.next > 345300);

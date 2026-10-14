@@ -102,8 +102,9 @@ export function formatMusinsaWideDigest(result, { limit = 10, lookup = () => und
   const couponMode = coupons?.drops?.length > 0;
   const title = couponMode ? '쿠폰가' : '판매가';
   let lines = [];
-  if (couponMode) lines = couponDropLines(coupons.drops, lookup, limit);
-  else if (!coupons?.dropsSuppressed) lines = saleDropLines(diff.drops, limit);
+  if (coupons?.dropsSuppressed) lines = [];
+  else if (couponMode) lines = couponDropLines(coupons.drops, lookup, limit);
+  else lines = saleDropLines(diff.drops, limit);
   const lateLine = coupons?.lateDrops > 0 ? `늦게 찾은 쿠폰 하락 ${fmt(coupons.lateDrops)}건 제외` : null;
   const build = () => {
     const out = [...head];
@@ -121,22 +122,20 @@ export function formatMusinsaWideDigest(result, { limit = 10, lookup = () => und
   return text.length > TELEGRAM_MAX ? text.slice(0, TELEGRAM_MAX) : text;
 }
 
-// One message per backfill run. A run that is not done keeps the resume line whatever the cause; the member-session and
-// enumeration warnings say which. `stop` 'throttled'/'error' with a healthy session is the number enumeration.
+// One message per backfill run. A run that is not done keeps the resume line whatever the cause; the warnings say which
+// phase failed. Phases are read from `enumStop` and `classifyStop`, never from the merged `stop`, and the member-session
+// line comes from `memberStatus`.
 export function formatBackfillDigest(result) {
-  const { date, from, next, probed, hits, seeded, classify, done, memberStatus, stop } = result;
+  const { date, from, next, probed, hits, seeded, classify, done, memberStatus, enumStop, classifyStop } = result;
   const out = [
     `<b>🗂 [Project-Clot] 무신사 쿠폰 등록부 전환 (${date})</b>`,
     '',
     `번호 ${fmt(from)}–${fmt(next - 1)} (${fmt(probed)}개) · 상품 있음 ${fmt(hits)} · 기존 쿠폰 등록 ${fmt(seeded)}`,
     classifyLine(classify),
+    couponWarning(memberStatus, classify.calls),
+    phaseWarning('번호 순회', enumStop),
+    phaseWarning('판별', classifyStop),
+    done ? '✅ 전환 완료 — 내일 실행부터 등록부로 계산' : `⏸ ${fmt(next)}에서 멈춤 — backfill을 다시 실행해 이어서`,
   ];
-  const warning = memberStatus === 'ok' ? null : couponWarning(memberStatus, classify.calls);
-  if (warning) out.push(warning);
-  if (memberStatus === 'ok') {
-    const enumWarning = phaseWarning('번호 순회', stop);
-    if (enumWarning) out.push(enumWarning);
-  }
-  out.push(done ? '✅ 전환 완료 — 내일 실행부터 등록부로 계산' : `⏸ ${fmt(next)}에서 멈춤 — backfill을 다시 실행해 이어서`);
-  return out.join('\n');
+  return out.filter((line) => line != null).join('\n');
 }
