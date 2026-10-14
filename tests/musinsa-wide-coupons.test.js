@@ -205,6 +205,32 @@ test('MEMBER_AUTH refreshes once and retries; a second failure is expired and ne
   assert.equal(res3.memberStatus, 'expired');
 });
 
+test('a 401 that rotated the cookie, then a 401 on the rotated cookie, still refreshes once before expiring', async () => {
+  store.applyScan('2026-10-13', [goodsRow(1, 10000), goodsRow(2, 20000)], { cat: '001', complete: true });
+  const ROTATED = 'sid=SECRET-ROTATED-VALUE';
+  const make = (acceptFresh) => {
+    const sp = provider();
+    sp.absorb = () => ({ cookie: ROTATED, revoked: false }); // every response rotates the cached cookie
+    const calls = [];
+    const client = fakeClient({ 1: (c) => (c === NEW_COOKIE && acceptFresh ? [] : authError()), 2: [] }, calls);
+    return { sp, calls, client };
+  };
+
+  const rejected = make(false);
+  const res = await run({ withClient: withClientOf(rejected.client), sessionProvider: rejected.sp });
+  assert.equal(res.memberStatus, 'expired');
+  assert.equal(rejected.sp.calls.filter((c) => c.refresh).length, 1);
+  assert.deepEqual(rejected.calls.map((c) => c.cookie), [COOKIE, ROTATED, NEW_COOKIE]); // the refreshed cookie is tried once
+
+  logs = [];
+  const accepted = make(true);
+  const res2 = await checkGoodsCoupons({ store, date: '2026-10-15', log, concurrency: 1, withClient: withClientOf(accepted.client), sessionProvider: accepted.sp });
+  assert.equal(res2.memberStatus, 'ok');
+  assert.equal(res2.checked, 2);
+  assert.equal(accepted.sp.calls.filter((c) => c.refresh).length, 1);
+  assert.ok(![COOKIE, ROTATED, NEW_COOKIE].some((c) => logs.join().includes(c)));
+});
+
 test('concurrent MEMBER_AUTH triggers a single refresh', async () => {
   store.applyScan('2026-10-13', [goodsRow(1, 10000), goodsRow(2, 20000), goodsRow(3, 30000)], { cat: '001', complete: true });
   const client = fakeClient({ 1: (c) => (c === COOKIE ? authError() : []), 2: (c) => (c === COOKIE ? authError() : []), 3: (c) => (c === COOKIE ? authError() : []) });

@@ -119,10 +119,13 @@ export async function checkGoodsCoupons({
   };
 
   async function checkOne(client, goods) {
-    let retried = false;
+    let renewed = false; // this goods already went through the run's refresh: another rejection ends the run
+    let rotated = false; // this goods already retried on a cookie another response rotated in
+    let next = null; // the cookie to retry with, when it is not simply the current one
     for (;;) {
       if (stop) return;
-      const used = cookie;
+      const used = next ?? cookie;
+      next = null;
       try {
         const raw = await client.getUsableCoupons(
           { goodsNo: goods.goods_no, brand: goods.brand, salePrice: goods.sale_price }, used, { onSetCookie: absorb },
@@ -133,17 +136,23 @@ export async function checkGoodsCoupons({
         return;
       } catch (err) {
         if (err.code === 'MEMBER_AUTH') {
-          if (retried) {
+          if (renewed) {
             stop ??= 'expired';
             return;
           }
-          retried = true;
-          // Another worker may have refreshed since this call started: retry with that cookie without a refresh.
-          const fresh = used !== cookie ? cookie : await renew(used);
+          // The cookie moved on since this call started (an absorbed Set-Cookie rotated it, possibly on this very
+          // 401): try the current one once before spending the run's refresh.
+          if (!rotated && used !== cookie) {
+            rotated = true;
+            continue;
+          }
+          const fresh = await renew(used);
+          renewed = true;
           if (!fresh || fresh === used) {
             stop ??= 'expired';
             return;
           }
+          next = fresh;
           continue;
         }
         if (err.status === 429) {
