@@ -90,8 +90,10 @@ async function fetchPageWithRetry(client, cat, url, sleep) {
     if (attempt > 0) await sleep(PAGE_BACKOFF_MS[attempt - 1]);
     try {
       const page = await client.getCategoryPage(cat, url);
-      if (page.items.length === 0 && page.nextPageUrl) {
-        lastMessage = 'empty page with a next page';
+      // An empty first page is never a real end of chain: fetchCategoryGoodsPage returns it silently for a changed
+      // __NEXT_DATA__ shape or a block page served with HTTP 200. Later empty pages only fail when a next page is promised.
+      if (page.items.length === 0 && (url === null || page.nextPageUrl)) {
+        lastMessage = url === null ? 'empty first page' : 'empty page with a next page';
         continue;
       }
       return { page };

@@ -117,6 +117,20 @@ test('an empty page that still has nextPageUrl counts as a failure', async () =>
   assert.equal(res.problems.length, 1);
 });
 
+test('an empty first page without a next page is incomplete, not an empty complete scan', async () => {
+  const sleeps = [];
+  const fetchFn = chainFetch([htmlPage([], { hasNext: false })]);
+  const client = createMusinsaClient({ fetchFn, sleep: async (ms) => sleeps.push(ms) });
+  const res = await scanCategory(client, '001');
+  assert.equal(res.complete, false);
+  assert.equal(res.pages, 0);
+  assert.equal(res.rows.size, 0);
+  assert.equal(res.problems.length, 1);
+  assert.match(res.problems[0], /empty first page/);
+  assert.equal(fetchFn.urls.length, 3);
+  assert.deepEqual(sleeps.filter((ms) => ms >= 2000), [2000, 4000]);
+});
+
 test('scanCategory past the deadline is incomplete', async () => {
   const fetchFn = chainFetch([htmlPage([item(1)], { hasNext: true, nextPageUrl: NEXT(2) }), jsonPage([item(2)], { hasNext: false })]);
   let t = 1000;
