@@ -1,7 +1,9 @@
 // Musinsa coupon math for the wide scan (docs/verify/musinsa-coupon-price.md). A product's coupon price is its
 // sale price − the extra discount − the single best coupon (a percent coupon floors to 10 won, capped by the
-// coupon's max). Which coupons a brand|category key has is learned from a high and a low sample of the key.
+// coupon's max). Each goods keeps the coupon list its own coupon call returned; checkGoodsCoupons rotates those calls
+// over the goods, and applyCouponPrices prices every ACTIVE goods locally from the stored lists.
 import { floor10 } from '../discovery.js';
+import { mapConcurrent } from '../pool.js';
 
 // Raw coupon field names of getUsableCouponsByGoodsNo (§2). No fixed-amount field exists, so `amount` is null.
 export const COUPON_FIELDS = {
@@ -69,26 +71,130 @@ export function couponPriceMusinsa({ sale_price, extra_discount }, coupons) {
   return sale_price - (extra_discount ?? 0) - best;
 }
 
+export const COUPON_CHECKS_PER_DAY = 4000;
+// A stored coupon list prices a goods for this many days after the check; older ones are too stale to trust.
+export const COUPON_TTL_DAYS = 10;
+
+const dayNumber = (date) => Date.parse(`${date}T00:00:00Z`) / 86400000;
+
 /**
- * The coupons of a key from samples ({ salePrice, coupons }), united by id. A coupon missing from a sample that is
- * cheaper than every sample having it is read as a minimum purchase (min = that price + 1); one missing from a
- * sample that is not cheaper contradicts that, so the key's coupons are unknown: null (hide the key, 'scope').
+ * Rotating coupon check: up to `limit` goods (store.pickCouponChecks order) each get their own coupon call and keep
+ * the parsed, id-deduped list. Goods run `concurrency` at a time, each on a client of its own from `withClient`.
+ * Past `deadline` no new goods start. A rejected member session is refreshed once per run (concurrent workers share
+ * that one refresh) and the goods retried; a second rejection ends the run as 'expired'. HTTP 429 ends it as
+ * 'throttled' with what was checked kept. Any other failure skips just that goods ('error' only when every goods
+ * attempted failed). Logs carry goods numbers and statuses only, never the cookie.
  */
-export function keyCouponSet(samples) {
-  const byId = new Map();
-  for (const s of samples) {
-    for (const c of s.coupons) if (!byId.has(c.id)) byId.set(c.id, { ...c });
+export async function checkGoodsCoupons({
+  withClient, store, date, sessionProvider, limit = COUPON_CHECKS_PER_DAY, concurrency = 3, deadline = Infinity, log = console.log,
+}) {
+  const result = { memberStatus: 'none', checked: 0, failed: 0 };
+  if (!sessionProvider) return result;
+  let cookie;
+  try {
+    cookie = await sessionProvider();
+  } catch {
+    log('⚠️ [무신사] 회원 세션 확인 실패 — 쿠폰 조회 생략');
+    return { ...result, memberStatus: 'error' };
   }
-  const out = [];
-  for (const [id, coupon] of byId) {
-    const has = samples.filter((s) => s.coupons.some((c) => c.id === id)).map((s) => s.salePrice);
-    const lacks = samples.filter((s) => !s.coupons.some((c) => c.id === id)).map((s) => s.salePrice);
-    if (lacks.length) {
-      const absent = Math.max(...lacks);
-      if (absent >= Math.min(...has)) return null;
-      coupon.min = Math.max(coupon.min, absent + 1);
+  if (!cookie) return result;
+  result.memberStatus = 'ok';
+
+  const picks = store.pickCouponChecks(limit, date);
+  let stop = null; // 'expired' | 'throttled' once the run must end
+  let refresh = null; // the run's one refresh: a promise of the new cookie (or null)
+  const absorb = (headers) => {
+    const absorbed = sessionProvider.absorb?.(headers);
+    if (absorbed?.cookie) cookie = absorbed.cookie;
+  };
+  const renew = (failedCookie) => {
+    refresh ??= Promise.resolve()
+      .then(() => sessionProvider({ refresh: true, failedCookie }))
+      .then((fresh) => {
+        if (fresh) cookie = fresh;
+        return fresh || null;
+      })
+      .catch(() => null);
+    return refresh;
+  };
+
+  async function checkOne(client, goods) {
+    let retried = false;
+    for (;;) {
+      if (stop) return;
+      const used = cookie;
+      try {
+        const raw = await client.getUsableCoupons(
+          { goodsNo: goods.goods_no, brand: goods.brand, salePrice: goods.sale_price }, used, { onSetCookie: absorb },
+        );
+        const coupons = [...new Map(raw.map(parseCoupon).map((c) => [c.id, c])).values()];
+        store.putGoodsCoupons(goods.goods_no, date, coupons, goods);
+        result.checked++;
+        return;
+      } catch (err) {
+        if (err.code === 'MEMBER_AUTH') {
+          if (retried) {
+            stop ??= 'expired';
+            return;
+          }
+          retried = true;
+          // Another worker may have refreshed since this call started: retry with that cookie without a refresh.
+          const fresh = used !== cookie ? cookie : await renew(used);
+          if (!fresh || fresh === used) {
+            stop ??= 'expired';
+            return;
+          }
+          continue;
+        }
+        if (err.status === 429) {
+          stop ??= 'throttled';
+          return;
+        }
+        result.failed++;
+        log(`⚠️ [무신사] 쿠폰 조회 실패 goods ${goods.goods_no} (HTTP ${err.status ?? '?'})`);
+        return;
+      }
     }
-    out.push(coupon);
   }
-  return out;
+
+  await mapConcurrent(picks, concurrency, async (goods) => {
+    if (stop || Date.now() > deadline) return;
+    try {
+      await withClient((client) => checkOne(client, goods));
+    } catch {
+      result.failed++; // the store or the pool broke for this goods, not the API
+      log(`⚠️ [무신사] 쿠폰 저장 실패 goods ${goods.goods_no}`);
+    }
+  });
+
+  if (stop === 'expired') log('⚠️ [무신사] 회원 세션 만료 — 쿠폰 조회 중단');
+  else if (stop === 'throttled') log('⚠️ [무신사] 쿠폰 API 요청 제한(429) — 쿠폰 조회 중단');
+  if (stop) result.memberStatus = stop;
+  else if (result.checked === 0 && result.failed > 0) result.memberStatus = 'error';
+  return result;
+}
+
+/**
+ * Prices every ACTIVE goods from its stored coupon list, locally (no session needed): a list checked within
+ * COUPON_TTL_DAYS of `date` gives couponPriceMusinsa over the coupons not yet expired on `date`; a goods never
+ * checked or checked longer ago gets null (stale). Then logs the price changes; drops are biggest first.
+ */
+export function applyCouponPrices({ store, date }) {
+  const today = dayNumber(date);
+  const prices = new Map();
+  let priced = 0;
+  let stale = 0;
+  const rows = store.getActivePriceRows();
+  for (const row of rows) {
+    const fresh = row.coupons != null && row.coupon_checked_date != null && today - dayNumber(row.coupon_checked_date) <= COUPON_TTL_DAYS;
+    if (!fresh) stale++;
+    const price = fresh ? couponPriceMusinsa(row, row.coupons.filter((c) => !c.until || c.until >= date)) : null;
+    if (price != null) priced++;
+    prices.set(row.goods_no, price);
+  }
+  store.setCouponPrices(prices);
+  const { drops } = store.logCouponPriceChanges(
+    date, rows.map((r) => ({ goods_no: r.goods_no, sale_price: r.sale_price, coupon_price: prices.get(r.goods_no) })),
+  );
+  return { priced, stale, drops };
 }

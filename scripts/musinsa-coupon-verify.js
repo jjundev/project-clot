@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { fetchCategoryGoodsPage } from '../src/discovery.js';
 import { extractProductDetail, USER_AGENT } from '../src/myprice.js';
 import { readSessionCookie } from '../src/session.js';
-import { parseCoupon, couponDiscountMusinsa, keyCouponSet } from '../src/musinsaWide/coupons.js';
+import { parseCoupon, couponDiscountMusinsa } from '../src/musinsaWide/coupons.js';
 
 const CATEGORIES = ['001', '002', '003', '103', '004'];
 const PAGES_PER_CATEGORY = 3;
@@ -179,6 +179,30 @@ async function dump() {
   if (failed) console.log(`실패 ${failed}건 제외`);
   console.log(`동등: ${equal}/${total} (쿠폰 id 집합과 각 쿠폰 할인액이 같은 상품)`);
   console.log(`발급 사본 수까지 같음: ${strictEqual}/${total}`);
+}
+
+/**
+ * The coupons of a key from samples ({ salePrice, coupons }), united by id. A coupon missing from a sample that is
+ * cheaper than every sample having it is read as a minimum purchase (min = that price + 1); one missing from a
+ * sample that is not cheaper contradicts that, so the key's coupons are unknown: null (hide the key, 'scope').
+ */
+export function keyCouponSet(samples) {
+  const byId = new Map();
+  for (const s of samples) {
+    for (const c of s.coupons) if (!byId.has(c.id)) byId.set(c.id, { ...c });
+  }
+  const out = [];
+  for (const [id, coupon] of byId) {
+    const has = samples.filter((s) => s.coupons.some((c) => c.id === id)).map((s) => s.salePrice);
+    const lacks = samples.filter((s) => !s.coupons.some((c) => c.id === id)).map((s) => s.salePrice);
+    if (lacks.length) {
+      const absent = Math.max(...lacks);
+      if (absent >= Math.min(...has)) return null;
+      coupon.min = Math.max(coupon.min, absent + 1);
+    }
+    out.push(coupon);
+  }
+  return out;
 }
 
 const dedupeById = (parsed) => [...new Map(parsed.map((c) => [c.id, c])).values()];
