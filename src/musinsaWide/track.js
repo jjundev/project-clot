@@ -83,7 +83,9 @@ export async function trackMusinsa({
     checked = { memberStatus: 'error', checked: 0, failed: 0 };
   }
   if (checked.memberStatus !== 'ok') log(`⚠️ [무신사] 쿠폰 조회 ${checked.memberStatus} — 저장된 쿠폰 목록으로 계산`);
-  const { priced, stale, drops } = applyCouponPrices({ store, date });
+  // Not ready until the registry flow lands (the next task): every price is null, so every goods counts as unpriced.
+  const { priced, drops, best } = applyCouponPrices({ store, date });
+  const stale = best.size - priced;
 
   const durationMs = Date.now() - started;
   store.recordScanRun({

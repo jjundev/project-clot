@@ -1,9 +1,10 @@
 // Musinsa coupon math for the wide scan (docs/verify/musinsa-coupon-price.md). A product's coupon price is its
 // sale price − the extra discount − the single best coupon (a percent coupon floors to 10 won, capped by the
 // coupon's max). Each goods keeps the coupon list its own coupon call returned (createMemberChecker makes those calls),
-// and applyCouponPrices prices every ACTIVE goods locally from the stored lists.
+// and applyCouponPrices prices every ACTIVE goods locally from the coupon registry's goods lists plus those fresh checks.
 import { floor10 } from '../discovery.js';
 import { mapConcurrent } from '../pool.js';
+import { COUPON_STATE } from './store.js';
 
 // Raw coupon field names of getUsableCouponsByGoodsNo (§2). No fixed-amount field exists, so `amount` is null.
 export const COUPON_FIELDS = {
@@ -210,30 +211,127 @@ export function createMemberChecker({ withClient, sessionProvider, concurrency =
   };
 }
 
+// A registry row as the coupon math sees it. The id is the coupon number as a string, the same id parseCoupon gives a
+// member-checked coupon, so a coupon on a goods' list and the same one in a direct check dedupe and compare as one.
+export function registryCouponToCalc(c) {
+  return { id: String(c.coupon_no), type: c.type, percent: c.percent, price: c.price, max: c.max, min: c.min, until: c.until_date };
+}
+
+// The coupon taking the most off salePrice, as { id, discount }; null when none takes anything off (or the price is unknown).
+// A tie keeps the earlier coupon.
+export function bestCoupon(salePrice, coupons) {
+  if (salePrice == null) return null;
+  let best = null;
+  for (const c of coupons) {
+    const discount = couponDiscountMusinsa(salePrice, c);
+    if (Number.isFinite(discount) && discount > 0 && (!best || discount > best.discount)) best = { id: c.id, discount };
+  }
+  return best;
+}
+
 /**
- * Prices every ACTIVE goods from its stored coupon list, locally (no session needed): a list checked within
- * COUPON_TTL_DAYS of `date` gives couponPriceMusinsa; a goods never checked, checked longer ago, or whose stored list
- * holds a coupon that has since expired (monthly coupons all lapse together: pricing the rest would inflate the price
- * and fake a drop at the re-check) gets null (stale) until it is re-checked. Then logs the price changes; drops are
- * biggest first.
+ * Prices every ACTIVE goods from the coupon registry: sale price − extra discount − the single best coupon, from
+ *  1. the usable, unexpired registry coupons whose goods list holds the goods and that have started (start_date NULL or
+ *     ≤ date), and
+ *  2. the goods' own direct member check, when made within COUPON_TTL_DAYS and for each coupon in it only while it is
+ *     unexpired (until NULL or ≥ date) and the registry has not RETIRED it. A coupon the registry never saw still counts.
+ * A coupon that fails any of these is skipped on its own; the goods' other coupons still apply. A goods in no list and
+ * with no direct coupon is priced sale − extra.
+ * Not `ready` (the registry is still being built) or no coupon list stored yet: every price is null, nothing is
+ * logged (an unknown price is not "no coupon") and there are no drops.
+ * Returns the changes logged by logCouponPriceChanges, biggest drop first, with the drops whose best coupon was first
+ * seen today yet started earlier moved to `lateDrops` (we found it late: it is not news of today). `best` maps every
+ * ACTIVE goods to the id of its best coupon, null when none applies.
  */
-export function applyCouponPrices({ store, date }) {
-  const today = dayNumber(date);
-  const prices = new Map();
-  let priced = 0;
-  let stale = 0;
+export function applyCouponPrices({ store, date, ready = false }) {
   const rows = store.getActivePriceRows();
+  const best = new Map();
+  const prices = new Map();
+  if (!ready || store.couponGoodsCount() === 0) {
+    for (const row of rows) {
+      best.set(row.goods_no, null);
+      prices.set(row.goods_no, null);
+    }
+    store.setCouponPrices(prices);
+    return { priced: 0, withCoupon: 0, drops: [], lateDrops: [], best };
+  }
+
+  const today = dayNumber(date);
+  const calcById = new Map(store.usableCoupons(date).filter((c) => c.start_date == null || c.start_date <= date).map((c) => [c.coupon_no, registryCouponToCalc(c)]));
+  const listed = store.couponsByGoods();
+  const retired = new Map(); // direct-check coupon id → is it RETIRED in the registry
+  const isRetired = (id) => {
+    if (!retired.has(id)) retired.set(id, store.getCoupon(Number(id))?.state === COUPON_STATE.RETIRED);
+    return retired.get(id);
+  };
+  let priced = 0;
+  let withCoupon = 0;
   for (const row of rows) {
-    const fresh = row.coupons != null && row.coupon_checked_date != null && today - dayNumber(row.coupon_checked_date) <= COUPON_TTL_DAYS &&
-      !row.coupons.some((c) => c.until && c.until < date);
-    if (!fresh) stale++;
-    const price = fresh ? couponPriceMusinsa(row, row.coupons) : null;
+    const byId = new Map();
+    for (const no of listed.get(row.goods_no) ?? []) {
+      const c = calcById.get(no);
+      if (c) byId.set(c.id, c);
+    }
+    if (row.coupons != null && row.coupon_checked_date != null && today - dayNumber(row.coupon_checked_date) <= COUPON_TTL_DAYS) {
+      for (const c of row.coupons) {
+        if (byId.has(c.id) || (c.until && c.until < date) || isRetired(c.id)) continue;
+        byId.set(c.id, c);
+      }
+    }
+    // A coupon whose discount is not a number (a registry row without its terms) must not poison the whole price.
+    const coupons = [...byId.values()].filter((c) => row.sale_price == null || Number.isFinite(couponDiscountMusinsa(row.sale_price, c)));
+    const price = couponPriceMusinsa(row, coupons);
+    const top = bestCoupon(row.sale_price, coupons);
     if (price != null) priced++;
+    if (top) withCoupon++;
     prices.set(row.goods_no, price);
+    best.set(row.goods_no, top?.id ?? null);
   }
   store.setCouponPrices(prices);
-  const { drops } = store.logCouponPriceChanges(
+  const logged = store.logCouponPriceChanges(
     date, rows.map((r) => ({ goods_no: r.goods_no, sale_price: r.sale_price, coupon_price: prices.get(r.goods_no) })),
   );
-  return { priced, stale, drops };
+  const drops = [];
+  const lateDrops = [];
+  for (const drop of logged.drops) {
+    const id = best.get(drop.goods_no);
+    const c = id == null ? null : store.getCoupon(Number(id));
+    (c && c.first_seen_date === date && c.start_date != null && c.start_date < date ? lateDrops : drops).push(drop);
+  }
+  return { priced, withCoupon, drops, lateDrops, best };
+}
+
+/**
+ * How well the registry predicted a day's member-checked sample. For each { goods, coupons } (the coupons a member call
+ * returned, parseCoupon results) the prediction is the biggest discount among the goods' listed coupons that were USABLE
+ * in `before` (coupon_no → state, taken when classification ended) and unexpired; the actual is the biggest among the
+ * returned unexpired coupons. Equal is `exact`, a smaller prediction is `under` (a price too high), a bigger one is
+ * `over`. An under is blamed on the state `before` held for the actual best coupon: USABLE → `listGap` (the registry
+ * knew it, its goods list did not hold this goods), RETIRED → `retired`, anything else or absent → `unregistered`.
+ */
+export function sampleAccuracy({ store, date, results, before }) {
+  const listed = store.couponsByGoods();
+  const out = { checked: 0, exact: 0, under: 0, over: 0, reasons: { unregistered: 0, listGap: 0, retired: 0 } };
+  for (const { goods, coupons } of results) {
+    if (goods.sale_price == null) continue;
+    const predicted = (listed.get(goods.goods_no) ?? []).flatMap((no) => {
+      if (before.get(no) !== COUPON_STATE.USABLE) return [];
+      const c = store.getCoupon(no);
+      return c && (c.until_date == null || c.until_date >= date) ? [registryCouponToCalc(c)] : [];
+    });
+    const guess = bestCoupon(goods.sale_price, predicted)?.discount ?? 0;
+    const actual = bestCoupon(goods.sale_price, coupons.filter((c) => c.until == null || c.until >= date));
+    const real = actual?.discount ?? 0;
+    out.checked++;
+    if (guess === real) out.exact++;
+    else if (guess > real) out.over++;
+    else {
+      out.under++;
+      const state = before.get(Number(actual.id));
+      if (state === COUPON_STATE.USABLE) out.reasons.listGap++;
+      else if (state === COUPON_STATE.RETIRED) out.reasons.retired++;
+      else out.reasons.unregistered++;
+    }
+  }
+  return out;
 }
