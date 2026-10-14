@@ -5,8 +5,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  COUPON_FIELDS, COUPON_CHECKS_PER_DAY, COUPON_TTL_DAYS, parseCoupon, couponDiscountMusinsa, couponPriceMusinsa,
-  checkGoodsCoupons, applyCouponPrices,
+  COUPON_FIELDS, COUPON_TTL_DAYS, CLASSIFY_CAP, SAMPLE_PER_DAY, BACKFILL_CLASSIFY_CAP, parseCoupon, couponDiscountMusinsa, couponPriceMusinsa,
+  createMemberChecker, applyCouponPrices,
 } from '../src/musinsaWide/coupons.js';
 import { MusinsaWideStore } from '../src/musinsaWide/store.js';
 
@@ -43,6 +43,11 @@ test('parseCoupon reads an explicit rate as PERCENT', () => {
   assert.equal(c.until, '2026-10-15');
 });
 
+test('parseCoupon reads useFromDate as start', () => {
+  assert.equal(parseCoupon(raw({ start: '2026-10-01T00:00:00+09:00' })).start, '2026-10-01');
+  assert.equal(parseCoupon(raw({ start: undefined })).start, null);
+});
+
 test('parseCoupon falls back to the name percent', () => {
   const c = parseCoupon(raw({ rate: undefined, kind: undefined, name: '실버정기 5%' }));
   assert.equal(c.type, 'PERCENT');
@@ -64,7 +69,7 @@ test('parseCoupon defaults max to null and min to 0', () => {
   assert.equal(parseCoupon(raw({ max: undefined })).max, null);
 });
 
-// ---- checkGoodsCoupons / applyCouponPrices ----
+// ---- createMemberChecker / applyCouponPrices ----
 const COOKIE = 'sid=SECRET-COOKIE-VALUE';
 const NEW_COOKIE = 'sid=SECRET-REFRESHED-VALUE';
 const DAY = '2026-10-14';
@@ -121,14 +126,21 @@ const provider = (cookie = COOKIE, extra = {}) => {
 };
 const authError = () => Object.assign(new Error('rejected'), { code: 'MEMBER_AUTH', status: 401 });
 const httpError = (status) => Object.assign(new Error(`HTTP ${status}`), { status });
-const run = (over) => checkGoodsCoupons({ store, date: DAY, log, concurrency: 1, ...over });
+const activeGoods = () => store.db.prepare("SELECT goods_no, brand, sale_price, extra_discount FROM goods WHERE status = 'ACTIVE' ORDER BY goods_no").all().map((r) => ({ ...r }));
+// One checker over every active goods, results written to the store the way the callers do; summarised like the old result.
+async function run({ date = DAY, deadline, ...over }) {
+  const checker = createMemberChecker({ log, concurrency: 1, ...over });
+  await checker.start();
+  await checker.check(activeGoods(), { deadline, onResult: (goods, coupons) => store.putGoodsCoupons(goods.goods_no, date, coupons, goods) });
+  return { memberStatus: checker.status, checked: checker.calls, failed: checker.failed };
+}
 
 test('constants match the spec', () => {
-  assert.equal(COUPON_CHECKS_PER_DAY, 4000);
+  assert.deepEqual([CLASSIFY_CAP, SAMPLE_PER_DAY, BACKFILL_CLASSIFY_CAP], [200, 200, 1500]);
   assert.equal(COUPON_TTL_DAYS, 10);
 });
 
-test('checkGoodsCoupons stores each picked goods coupons and applyCouponPrices prices it', async () => {
+test('the checker hands each goods coupons to onResult and applyCouponPrices prices them', async () => {
   store.applyScan('2026-10-13', [goodsRow(1, 100000), goodsRow(2, 50000, { extra_discount: 500 }), goodsRow(3, 30000)], { cat: '001', complete: true });
   const calls = [];
   const client = fakeClient({
@@ -191,7 +203,7 @@ test('MEMBER_AUTH refreshes once and retries; a second failure is expired and ne
   const calls2 = [];
   const client2 = fakeClient({ 1: authError(), 2: [], 3: [] }, calls2);
   const sp2 = provider();
-  const res2 = await checkGoodsCoupons({ store, date: '2026-10-15', log, concurrency: 1, withClient: withClientOf(client2), sessionProvider: sp2 });
+  const res2 = await run({ date: '2026-10-15', withClient: withClientOf(client2), sessionProvider: sp2 });
   assert.equal(res2.memberStatus, 'expired');
   assert.equal(res2.checked, 0);
   assert.equal(sp2.calls.filter((c) => c.refresh).length, 1);
@@ -201,7 +213,7 @@ test('MEMBER_AUTH refreshes once and retries; a second failure is expired and ne
 
   // No fresh cookie to be had → expired too.
   const sp3 = provider(COOKIE, { refreshTo: null });
-  const res3 = await checkGoodsCoupons({ store, date: '2026-10-16', log, concurrency: 1, withClient: withClientOf(fakeClient({ 1: authError() })), sessionProvider: sp3 });
+  const res3 = await run({ date: '2026-10-16', withClient: withClientOf(fakeClient({ 1: authError() })), sessionProvider: sp3 });
   assert.equal(res3.memberStatus, 'expired');
 });
 
@@ -224,7 +236,7 @@ test('a 401 that rotated the cookie, then a 401 on the rotated cookie, still ref
 
   logs = [];
   const accepted = make(true);
-  const res2 = await checkGoodsCoupons({ store, date: '2026-10-15', log, concurrency: 1, withClient: withClientOf(accepted.client), sessionProvider: accepted.sp });
+  const res2 = await run({ date: '2026-10-15', withClient: withClientOf(accepted.client), sessionProvider: accepted.sp });
   assert.equal(res2.memberStatus, 'ok');
   assert.equal(res2.checked, 2);
   assert.equal(accepted.sp.calls.filter((c) => c.refresh).length, 1);
@@ -239,6 +251,40 @@ test('concurrent MEMBER_AUTH triggers a single refresh', async () => {
   assert.equal(res.memberStatus, 'ok');
   assert.equal(res.checked, 3);
   assert.equal(sp.calls.filter((c) => c.refresh).length, 1);
+});
+
+test('two check() calls share one refresh: a second 401 after the refresh ends as expired', async () => {
+  store.applyScan('2026-10-13', [goodsRow(1, 10000), goodsRow(2, 20000)], { cat: '001', complete: true });
+  const calls = [];
+  const client = fakeClient({ 1: (c) => (c === COOKIE ? authError() : []), 2: authError() }, calls);
+  const sp = provider();
+  const checker = createMemberChecker({ withClient: withClientOf(client), sessionProvider: sp, concurrency: 1, log });
+  assert.equal(await checker.start(), 'ok');
+  const [g1, g2] = activeGoods();
+  const seen = [];
+  await checker.check([g1], { onResult: (g) => seen.push(g.goods_no) });
+  assert.equal(checker.status, 'ok');
+  await checker.check([g2], { onResult: (g) => seen.push(g.goods_no) });
+  assert.equal(checker.status, 'expired');
+  assert.deepEqual(seen, [1]);
+  assert.equal(sp.calls.filter((c) => c.refresh).length, 1); // the second 401 does not refresh again
+  assert.deepEqual(calls.map((c) => [c.goodsNo, c.cookie]), [[1, COOKIE], [1, NEW_COOKIE], [2, NEW_COOKIE]]);
+  assert.deepEqual([checker.calls, checker.failed], [1, 0]);
+  assert.ok(![COOKIE, NEW_COOKIE].some((c) => logs.join().includes(c)));
+});
+
+test('onResult gets deduped parsed coupons with start', async () => {
+  store.applyScan('2026-10-13', [goodsRow(1, 100000)], { cat: '001', complete: true });
+  const dated = (id) => raw({ id, rate: '10', max: 0, min: 0, start: '2026-10-01T00:00:00+09:00' });
+  const client = fakeClient({ 1: [dated(11), dated(11), dated(12)] });
+  const checker = createMemberChecker({ withClient: withClientOf(client), sessionProvider: provider(), concurrency: 1, log });
+  await checker.start();
+  const results = [];
+  await checker.check(activeGoods(), { onResult: (goods, coupons) => results.push({ goods, coupons }) });
+  assert.equal(results.length, 1);
+  assert.deepEqual(results[0].goods, { goods_no: 1, brand: 'nike', sale_price: 100000, extra_discount: 0 });
+  assert.deepEqual(results[0].coupons.map((c) => [c.id, c.start, c.until, c.percent]), [['11', '2026-10-01', '2026-10-15', 10], ['12', '2026-10-01', '2026-10-15', 10]]);
+  assert.equal(store.getActivePriceRows()[0].coupons, null); // the checker itself never writes
 });
 
 test('429 stops checking as throttled and keeps what was checked', async () => {
@@ -282,14 +328,6 @@ test('checking past the deadline starts no new goods', async () => {
   const res2 = await run({ withClient: withClientOf(client2), sessionProvider: provider(), deadline: Date.now() + 30 });
   assert.equal(res2.checked, 1);
   assert.deepEqual(calls2, [1]);
-});
-
-test('limit caps how many goods are picked', async () => {
-  store.applyScan('2026-10-13', [goodsRow(1, 10000), goodsRow(2, 20000), goodsRow(3, 30000)], { cat: '001', complete: true });
-  const calls = [];
-  const res = await run({ withClient: withClientOf(fakeClient({}, calls)), sessionProvider: provider(), limit: 2 });
-  assert.equal(res.checked, 2);
-  assert.equal(calls.length, 2);
 });
 
 test('a check 11 days old is stale and priced null; 9 days old is priced', async () => {

@@ -1,7 +1,7 @@
-// Daily Musinsa wide run: scan the top-level categories concurrently, apply each category's listings, rotate the
-// per-goods coupon checks, price every ACTIVE goods from its stored coupons.
+// Daily Musinsa wide run: scan the top-level categories concurrently, apply each category's listings, sample the
+// member coupon checks, price every ACTIVE goods from its stored coupons.
 import { CATEGORIES_MUSINSA, DEPTH_PAGES, scanCategory } from './client.js';
-import { checkGoodsCoupons, applyCouponPrices } from './coupons.js';
+import { createMemberChecker, applyCouponPrices, SAMPLE_PER_DAY } from './coupons.js';
 import { mapConcurrent, clientPool } from '../pool.js';
 
 // Keeps a degraded (slow, not dead) site from running the Actions job into its timeout; categories not finished by
@@ -70,7 +70,13 @@ export async function trackMusinsa({
 
   let checked;
   try {
-    checked = await checkGoodsCoupons({ withClient, store, date, sessionProvider, concurrency, deadline: runDeadline, log });
+    const checker = createMemberChecker({ withClient, sessionProvider, concurrency, log });
+    await checker.start();
+    await checker.check(store.pickSample(SAMPLE_PER_DAY, date), {
+      deadline: runDeadline,
+      onResult: (goods, coupons) => store.putGoodsCoupons(goods.goods_no, date, coupons, goods),
+    });
+    checked = { memberStatus: checker.status, checked: checker.calls, failed: checker.failed };
   } catch (err) {
     // The client never puts the cookie in an error message.
     log(`⚠️ [무신사] 쿠폰 조회 실패 (${err.status ?? err.name}: ${err.message})`);

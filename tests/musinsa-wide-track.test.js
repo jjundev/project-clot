@@ -181,9 +181,9 @@ test('a coupon check that throws becomes memberStatus error and prices still run
   assert.equal(res.coupons.stale, 1);
 });
 
-test('checkGoodsCoupons throwing is logged as memberStatus error and the run still finishes', async () => {
+test('the coupon check throwing is logged as memberStatus error and the run still finishes', async () => {
   const makeClient = fakeMakeClient({ '001': [item(1, 10000)], '002': [] });
-  store.pickCouponChecks = () => { throw new Error('db gone'); };
+  store.pickSample = () => { throw new Error('db gone'); };
   const lines = [];
   const res = await run({ makeClient, sessionProvider: session(), log: (m) => lines.push(m) });
   assert.deepEqual([res.coupons.memberStatus, res.coupons.checked, res.coupons.failed], ['error', 0, 0]);

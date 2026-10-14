@@ -246,51 +246,6 @@ test('a same-day rerun back to the earlier pair removes that day\'s row', () => 
   assert.equal(s.db.prepare('SELECT COUNT(*) AS n FROM coupon_price_changes WHERE goods_no = 1').get().n, 1);
 });
 
-test('pickCouponChecks orders never-checked, then price-changed since check, then oldest; skips sold-out and today-checked', () => {
-  s.applyScan(D1, [
-    row(10, 10000), // never checked
-    row(11, 10000), // never checked
-    row(20, 20000), // checked, price will change
-    row(21, 20000, '001', { extra_discount: 0 }), // checked, extra will change
-    row(30, 30000), // checked long ago
-    row(31, 30000), // checked more recently
-    row(32, 30000), // checked today
-    row(40, 40000, '001', { is_sold_out: 1 }), // sold out, never checked
-    row(41, null), // no price at insert
-  ], scan('001'));
-  const ok = (no, date, price, extra = 0) => s.putGoodsCoupons(no, date, [], { sale_price: price, extra_discount: extra });
-  ok(20, '2026-10-05', 20000);
-  ok(21, '2026-10-06', 20000);
-  ok(30, '2026-10-01', 30000);
-  ok(31, '2026-10-04', 30000);
-  ok(32, D2, 30000);
-  s.applyScan(D2, [
-    row(10, 10000), row(11, 10000), row(30, 30000), row(31, 30000), row(32, 30000),
-    row(20, 19000), row(21, 20000, '001', { extra_discount: 2000 }),
-    row(40, 40000, '001', { is_sold_out: 1 }), row(41, null),
-  ], scan('001'));
-  const picked = s.pickCouponChecks(100, D2);
-  assert.deepEqual(picked.map((p) => p.goods_no), [10, 11, 20, 21, 30, 31]);
-  assert.deepEqual(picked[2], { goods_no: 20, brand: 'nike', sale_price: 19000, extra_discount: 0 });
-  assert.deepEqual(s.pickCouponChecks(3, D2).map((p) => p.goods_no), [10, 11, 20]);
-  // next day, today-checked 32 is eligible again (oldest-first after the others)
-  assert.equal(s.pickCouponChecks(100, D3).map((p) => p.goods_no).includes(32), true);
-});
-
-test('pickCouponChecks puts goods with an expired stored coupon right after never-checked', () => {
-  s.applyScan(D1, [row(1, 10000), row(2, 20000), row(3, 30000), row(4, 40000), row(5, 50000)], scan('001'));
-  const info = (price) => ({ sale_price: price, extra_discount: 0 });
-  const coupon = (id, until) => ({ id, name: 'c', type: 'PERCENT', percent: 10, price: null, max: null, min: 0, discount: 0, until });
-  s.putGoodsCoupons(1, '2026-10-01', [coupon('a', '2026-12-31')], info(10000)); // still valid: oldest tier
-  s.putGoodsCoupons(2, '2026-10-05', [coupon('b', '2026-10-31')], info(20000)); // expired on D2... see date below
-  s.putGoodsCoupons(3, '2026-10-02', [], info(30000)); // price will change
-  s.putGoodsCoupons(4, '2026-10-06', [coupon('c', null), coupon('d', '2026-10-31')], info(40000)); // no-expiry + expired
-  // goods 5 never checked
-  s.applyScan(D2, [row(1, 10000), row(2, 20000), row(3, 29000), row(4, 40000), row(5, 50000)], scan('001'));
-  assert.deepEqual(s.pickCouponChecks(10, '2026-10-31').map((p) => p.goods_no), [5, 3, 1, 2, 4]); // nothing expired yet on the 31st
-  assert.deepEqual(s.pickCouponChecks(10, '2026-11-01').map((p) => p.goods_no), [5, 2, 4, 3, 1]);
-});
-
 test('applyScan clears coupon_price when a goods goes OUT_OF_SCOPE', () => {
   s.applyScan(D1, [row(1, 50000), row(2, 30000)], scan('001'));
   s.setCouponPrices(new Map([[1, 45000], [2, 27000]]));
@@ -299,13 +254,6 @@ test('applyScan clears coupon_price when a goods goes OUT_OF_SCOPE', () => {
   assert.equal(s.getGoods(1).status, STATUS_OUT_OF_SCOPE);
   assert.equal(s.getGoods(1).coupon_price, null);
   assert.equal(s.getGoods(2).coupon_price, 27000);
-});
-
-test('pickCouponChecks ignores OUT_OF_SCOPE listings', () => {
-  s.applyScan(D1, [row(1, 50000), row(2, 30000)], scan('001'));
-  s.applyScan(D2, [row(2, 30000)], scan('001'));
-  s.applyScan(D3, [row(2, 30000)], scan('001'));
-  assert.deepEqual(s.pickCouponChecks(10, D3).map((p) => p.goods_no), [2]);
 });
 
 test('putGoodsCoupons round-trips the coupon list through getActivePriceRows', () => {

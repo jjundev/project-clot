@@ -1,8 +1,8 @@
 // Musinsa wide listings in their own SQLite file (data/musinsa-wide.db), shipped through a GitHub Release like 4910.db.
 // ~30k listings a day over 5 top-level categories, so history is change-only: price_changes gets a row only for
 // NEW, PRICE and REVIVED, and a goods row is rewritten only when something in it changed.
-// Coupons are checked per goods on a rotation (pickCouponChecks); each goods keeps its own coupon list and the
-// date/price it was last checked at.
+// Member coupon checks (pickSample) are a sample; each goods keeps its own coupon list and the date/price it was last
+// checked at.
 // The coupon registry (coupons, coupon_empty_numbers, coupon_goods, coupon_observations, meta) lists every coupon
 // number found by walking the anonymous coupon API, with its state (USABLE, OTHER, PENDING, OUT_OF_SCOPE, RETIRED).
 // Old DBs (Release data) gain the new columns through PRAGMA table_info + ALTER TABLE in the constructor.
@@ -235,32 +235,6 @@ export class MusinsaWideStore {
     }
   }
 
-  /**
-   * The next `n` goods whose coupons should be checked on `date`: never checked first, then those whose stored list has
-   * a coupon already expired on `date` (they price as stale until re-checked), then those whose sale_price or
-   * extra_discount changed since their check, then the longest-unchecked; ties by goods_no. Only ACTIVE, in-stock,
-   * priced listings, and never one already checked on `date`.
-   */
-  pickCouponChecks(n, date) {
-    return this.db
-      .prepare(`
-        SELECT goods_no, brand, sale_price, extra_discount FROM goods
-        WHERE status = 'ACTIVE' AND is_sold_out = 0 AND sale_price IS NOT NULL
-          AND (coupon_checked_date IS NULL OR coupon_checked_date <> ?)
-        ORDER BY
-          CASE
-            WHEN coupon_checked_date IS NULL THEN 0
-            WHEN EXISTS (SELECT 1 FROM json_each(goods.coupons_json) WHERE json_extract(value, '$.until') < ?) THEN 1
-            WHEN sale_price IS NOT coupon_checked_sale_price OR extra_discount IS NOT coupon_checked_extra THEN 2
-            ELSE 3
-          END,
-          coupon_checked_date, goods_no
-        LIMIT ?
-      `)
-      .all(date, date, n)
-      .map((r) => ({ ...r }));
-  }
-
   // `coupons` is stored as opaque JSON; sale_price/extra_discount are the values the check was made at.
   putGoodsCoupons(goodsNo, date, coupons, { sale_price, extra_discount }) {
     this.db
@@ -332,7 +306,7 @@ export class MusinsaWideStore {
   }
 
   // coupons_ok sticks across same-day reruns (a later non-ok rerun leaves the refreshed prices alone), and
-  // coupon_checks adds up (pickCouponChecks never re-picks a goods checked that day, so nothing is counted twice).
+  // coupon_checks adds up (pickSample never re-picks a goods checked that day, so nothing is counted twice).
   recordScanRun({ date, categoryCounts, complete, changed, added, outOfScope, durationMs, couponsOk = false, couponChecks = 0, couponMetrics = null }) {
     this.db
       .prepare(`
