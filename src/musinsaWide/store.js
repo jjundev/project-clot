@@ -26,9 +26,33 @@ export const COUPON_STATE = {
 };
 
 // Empty coupon numbers are asked again for this many days after they were first seen.
-const EMPTY_RECHECK_DAYS = 3;
+export const EMPTY_RECHECK_DAYS = 3;
+// A USABLE coupon with at least LIVENESS_MIN_OBS observations in the last LIVENESS_DAYS days, none of them seen, is retired.
+export const LIVENESS_DAYS = 7;
+export const LIVENESS_MIN_OBS = 3;
+// OTHER and OUT_OF_SCOPE coupons are forgotten this many days after they were first seen.
+export const REGISTRY_KEEP_DAYS = 60;
 
-const addDays = (date, n) => new Date(Date.parse(`${date}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+// `date` (YYYY-MM-DD) moved by `days` whole days, on UTC midnights like coupons.js dayNumber.
+export const shiftDate = (date, days) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+
+// Deterministic shuffle so the same date draws the same sample.
+function mulberry32(seed) {
+  return () => {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// FNV-1a 32-bit over the string's char codes.
+function fnv1a(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 0x01000193);
+  return h >>> 0;
+}
 
 // Row fields copied into goods on every sighting; a row is rewritten only when one of them differs.
 const UPDATABLE = ['cat', 'brand', 'brand_name', 'name', 'url', 'image_url', 'sale_price', 'normal_price', 'extra_discount', 'is_sold_out', 'review_count'];
@@ -77,7 +101,7 @@ export class MusinsaWideStore {
       );
       CREATE TABLE IF NOT EXISTS coupon_empty_numbers (coupon_no INTEGER PRIMARY KEY, first_seen_date TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS coupon_goods (
-        coupon_no INTEGER NOT NULL, goods_no INTEGER NOT NULL, PRIMARY KEY (coupon_no, goods_no)
+        coupon_no INTEGER NOT NULL, goods_no INTEGER NOT NULL, date TEXT, PRIMARY KEY (coupon_no, goods_no)
       );
       CREATE TABLE IF NOT EXISTS coupon_observations (
         coupon_no INTEGER NOT NULL, goods_no INTEGER NOT NULL, date TEXT NOT NULL, seen INTEGER NOT NULL,
@@ -91,6 +115,7 @@ export class MusinsaWideStore {
     `);
     this.#addMissingColumns('goods', [['review_count', 'INTEGER']]);
     this.#addMissingColumns('scan_runs', [['coupon_metrics_json', 'TEXT']]);
+    this.#addMissingColumns('coupon_goods', [['date', 'TEXT']]);
   }
 
   // DBs created before a column existed (the Release copy) get it by ALTER TABLE; CREATE TABLE IF NOT EXISTS leaves them as is.
@@ -383,7 +408,7 @@ export class MusinsaWideStore {
   emptyNumbersToRecheck(date) {
     return this.db
       .prepare('SELECT coupon_no FROM coupon_empty_numbers WHERE first_seen_date >= ? AND first_seen_date < ? ORDER BY coupon_no')
-      .all(addDays(date, -EMPTY_RECHECK_DAYS), date)
+      .all(shiftDate(date, -EMPTY_RECHECK_DAYS), date)
       .map((r) => r.coupon_no);
   }
 
@@ -469,7 +494,149 @@ export class MusinsaWideStore {
     return {
       usable: count(`state = '${COUPON_STATE.USABLE}' AND (until_date IS NULL OR until_date >= ?)`, date),
       pending: count(`state = '${COUPON_STATE.PENDING}'`),
-      expiredYesterday: count(`state = '${COUPON_STATE.USABLE}' AND until_date = ?`, addDays(date, -1)),
+      expiredYesterday: count(`state = '${COUPON_STATE.USABLE}' AND until_date = ?`, shiftDate(date, -1)),
+    };
+  }
+
+  // --- coupon goods, observations, sample ---
+
+  // One transaction: the coupon's rows are replaced by its ACTIVE goods, stamped with `date`.
+  replaceCouponGoods(couponNo, date, goodsNos) {
+    const no = Number(couponNo);
+    this.db.exec('BEGIN');
+    try {
+      this.db.prepare('DELETE FROM coupon_goods WHERE coupon_no = ?').run(no);
+      const insert = this.db.prepare('INSERT OR IGNORE INTO coupon_goods (coupon_no, goods_no, date) VALUES (?, ?, ?)');
+      for (const g of this.filterActive(goodsNos)) insert.run(no, g, date);
+      this.db.exec('COMMIT');
+    } catch (e) {
+      this.db.exec('ROLLBACK');
+      throw e;
+    }
+  }
+
+  couponGoodsCount() {
+    return this.db.prepare('SELECT COUNT(*) AS n FROM coupon_goods').get().n;
+  }
+
+  // goods_no -> coupon numbers whose list holds it.
+  couponsByGoods() {
+    const m = new Map();
+    for (const { goods_no, coupon_no } of this.db.prepare('SELECT goods_no, coupon_no FROM coupon_goods ORDER BY goods_no, coupon_no').all()) {
+      const list = m.get(goods_no);
+      if (list) list.push(coupon_no);
+      else m.set(goods_no, [coupon_no]);
+    }
+    return m;
+  }
+
+  // Does any goods' stored (member-checked) coupon list hold this coupon? Stored ids are strings.
+  goodsHasDirectCoupon(couponNo) {
+    return !!this.db
+      .prepare("SELECT 1 FROM goods WHERE coupons_json IS NOT NULL AND EXISTS (SELECT 1 FROM json_each(goods.coupons_json) WHERE CAST(json_extract(value, '$.id') AS TEXT) = ?) LIMIT 1")
+      .get(String(couponNo));
+  }
+
+  /**
+   * One member check per goods: every USABLE coupon whose list holds that goods gets seen = 1 when the check returned it,
+   * else 0. INSERT OR REPLACE, so a same-day rerun leaves one row per (coupon, goods, date). Returns the rows written.
+   */
+  recordObservations(date, checks) {
+    const listed = this.db.prepare(`
+      SELECT cg.coupon_no FROM coupon_goods cg JOIN coupons c ON c.coupon_no = cg.coupon_no
+      WHERE cg.goods_no = ? AND c.state = '${COUPON_STATE.USABLE}'
+    `);
+    const put = this.db.prepare('INSERT OR REPLACE INTO coupon_observations (coupon_no, goods_no, date, seen) VALUES (?, ?, ?, ?)');
+    let written = 0;
+    this.db.exec('BEGIN');
+    try {
+      for (const { goods_no, couponNos } of checks) {
+        const returned = new Set((couponNos ?? []).map(Number));
+        for (const { coupon_no } of listed.all(Number(goods_no))) {
+          put.run(coupon_no, Number(goods_no), date, returned.has(coupon_no) ? 1 : 0);
+          written++;
+        }
+      }
+      this.db.exec('COMMIT');
+    } catch (e) {
+      this.db.exec('ROLLBACK');
+      throw e;
+    }
+    return written;
+  }
+
+  // USABLE coupons with LIVENESS_MIN_OBS+ observations in the last LIVENESS_DAYS days (date included), none seen, become RETIRED.
+  retireDead(date) {
+    const dead = this.db
+      .prepare(`
+        SELECT o.coupon_no FROM coupon_observations o JOIN coupons c ON c.coupon_no = o.coupon_no
+        WHERE c.state = '${COUPON_STATE.USABLE}' AND o.date >= ? AND o.date <= ?
+        GROUP BY o.coupon_no HAVING COUNT(*) >= ? AND SUM(o.seen) = 0
+        ORDER BY o.coupon_no
+      `)
+      .all(shiftDate(date, -(LIVENESS_DAYS - 1)), date, LIVENESS_MIN_OBS)
+      .map((r) => r.coupon_no);
+    if (dead.length) {
+      this.db
+        .prepare(`UPDATE coupons SET state = '${COUPON_STATE.RETIRED}' WHERE coupon_no IN (SELECT value FROM json_each(?))`)
+        .run(JSON.stringify(dead));
+    }
+    return dead;
+  }
+
+  /**
+   * The day's member-check sample: floor(n / 5) goods per top-level category, from ACTIVE, in-stock, priced goods not yet
+   * checked on `date`. Candidates go in goods_no order and are shuffled with a generator seeded from the date, so the same
+   * date draws the same sample.
+   */
+  pickSample(n, date) {
+    const perCat = Math.floor(n / 5);
+    const byCat = new Map();
+    const candidates = this.db
+      .prepare(`
+        SELECT goods_no, cat, brand, sale_price, extra_discount FROM goods
+        WHERE status = 'ACTIVE' AND is_sold_out = 0 AND sale_price IS NOT NULL
+          AND (coupon_checked_date IS NULL OR coupon_checked_date <> ?)
+        ORDER BY goods_no
+      `)
+      .all(date);
+    for (const r of candidates) {
+      const list = byCat.get(r.cat);
+      if (list) list.push({ ...r });
+      else byCat.set(r.cat, [{ ...r }]);
+    }
+    const picked = [];
+    for (const cat of [...byCat.keys()].sort()) {
+      const list = byCat.get(cat);
+      const rnd = mulberry32(fnv1a(date));
+      for (let i = list.length - 1; i > 0; i--) {
+        const j = Math.floor(rnd() * (i + 1));
+        [list[i], list[j]] = [list[j], list[i]];
+      }
+      picked.push(...list.slice(0, perCat));
+    }
+    return picked;
+  }
+
+  // Per top-level category, the smallest review_count among ACTIVE goods that have one.
+  categoryReviewFloors() {
+    const floors = {};
+    for (const r of this.db
+      .prepare("SELECT cat, MIN(review_count) AS floor FROM goods WHERE status = 'ACTIVE' AND review_count IS NOT NULL GROUP BY cat")
+      .all()) floors[r.cat] = r.floor;
+    return floors;
+  }
+
+  /**
+   * Drops what is no longer useful: OTHER and OUT_OF_SCOPE coupons first seen over REGISTRY_KEEP_DAYS ago, empty numbers
+   * past their recheck window, and observations older than the liveness window. USABLE, PENDING and RETIRED rows stay.
+   */
+  pruneRegistry(date) {
+    const run = (sql, ...args) => Number(this.db.prepare(sql).run(...args).changes);
+    return {
+      coupons: run(`DELETE FROM coupons WHERE state IN ('${COUPON_STATE.OTHER}', '${COUPON_STATE.OUT_OF_SCOPE}') AND first_seen_date < ?`, shiftDate(date, -REGISTRY_KEEP_DAYS)),
+      empties: run('DELETE FROM coupon_empty_numbers WHERE first_seen_date < ?', shiftDate(date, -EMPTY_RECHECK_DAYS)),
+      observations: run('DELETE FROM coupon_observations WHERE date < ?', shiftDate(date, -(LIVENESS_DAYS - 1))),
     };
   }
 

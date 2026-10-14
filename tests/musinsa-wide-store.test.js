@@ -7,6 +7,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import {
   MusinsaWideStore, defaultMusinsaWideDbPath, OUT_AFTER_MISSES, DROP_ALERT_RATE, STATUS_OUT_OF_SCOPE, COUPON_STATE,
+  LIVENESS_DAYS, LIVENESS_MIN_OBS, REGISTRY_KEEP_DAYS, EMPTY_RECHECK_DAYS, shiftDate,
 } from '../src/musinsaWide/store.js';
 
 const row = (goods_no, price, cat = '001', extra = {}) => ({
@@ -559,4 +560,153 @@ test('maxCouponNo and filterActive', () => {
   s.applyScan(D3, [row(1, 1000)], scan('001'));
   assert.deepEqual(s.filterActive([1, 2, 3, 4]), [1]);
   assert.deepEqual(s.filterActive([]), []);
+});
+
+test('registry constants and shiftDate', () => {
+  assert.deepEqual([LIVENESS_DAYS, LIVENESS_MIN_OBS, REGISTRY_KEEP_DAYS, EMPTY_RECHECK_DAYS], [7, 3, 60, 3]);
+  assert.equal(shiftDate('2026-10-15', -6), '2026-10-09');
+  assert.equal(shiftDate('2026-10-01', -1), '2026-09-30');
+  assert.equal(shiftDate('2026-12-30', 3), '2027-01-02');
+});
+
+const goodsOf = (couponNo) => s.db.prepare('SELECT goods_no FROM coupon_goods WHERE coupon_no = ? ORDER BY goods_no').all(couponNo).map((r) => r.goods_no);
+
+test('replaceCouponGoods keeps only ACTIVE goods and replaces that coupon\'s rows only', () => {
+  s.applyScan(D1, [row(1, 1000), row(2, 1000), row(3, 1000)], scan('001'));
+  s.applyScan(D2, [row(1, 1000), row(2, 1000)], scan('001'));
+  s.applyScan(D3, [row(1, 1000), row(2, 1000)], scan('001')); // goods 3 is out of scope now
+  s.replaceCouponGoods(10, D3, [1, 2, 3, 99]);
+  s.replaceCouponGoods(11, D3, [2]);
+  assert.deepEqual(goodsOf(10), [1, 2]);
+  assert.equal(s.couponGoodsCount(), 3);
+  s.replaceCouponGoods(10, D3, [1, 2, 3, 99]);
+  assert.equal(s.couponGoodsCount(), 3);
+  s.replaceCouponGoods(10, D3, [1]);
+  assert.deepEqual(goodsOf(10), [1]);
+  assert.deepEqual(goodsOf(11), [2]);
+  assert.equal(s.db.prepare('SELECT date FROM coupon_goods WHERE coupon_no = 10').get().date, D3);
+  s.replaceCouponGoods(10, D3, []);
+  assert.deepEqual(goodsOf(10), []);
+  assert.equal(s.couponGoodsCount(), 1);
+});
+
+test('couponsByGoods groups coupons per goods', () => {
+  s.applyScan(D1, [row(1, 1000), row(2, 1000)], scan('001'));
+  s.replaceCouponGoods(10, D1, [1, 2]);
+  s.replaceCouponGoods(11, D1, [2]);
+  const m = s.couponsByGoods();
+  assert.ok(m instanceof Map);
+  assert.deepEqual(m.get(1), [10]);
+  assert.deepEqual(m.get(2).sort((a, b) => a - b), [10, 11]);
+  assert.equal(m.size, 2);
+});
+
+const obs = (couponNo, goodsNo) =>
+  s.db.prepare('SELECT date, seen FROM coupon_observations WHERE coupon_no = ? AND goods_no = ? ORDER BY date').all(couponNo, goodsNo).map((r) => ({ ...r }));
+
+test('recordObservations writes seen 1/0 only for USABLE coupons whose list holds the goods; a same-day rerun does not duplicate', () => {
+  s.applyScan(D1, [row(1, 1000), row(2, 1000)], scan('001'));
+  s.upsertMemberCoupons(D1, [mc(10), mc(11), mc(12)]);
+  setState(12, 'OTHER');
+  s.replaceCouponGoods(10, D1, [1]);
+  s.replaceCouponGoods(11, D1, [1, 2]);
+  s.replaceCouponGoods(12, D1, [1]);
+  s.replaceCouponGoods(13, D1, [1]); // not in the registry at all
+  const n = s.recordObservations(D1, [{ goods_no: 1, couponNos: [10] }, { goods_no: 2, couponNos: [] }]);
+  assert.equal(n, 3);
+  assert.deepEqual(obs(10, 1), [{ date: D1, seen: 1 }]);
+  assert.deepEqual(obs(11, 1), [{ date: D1, seen: 0 }]);
+  assert.deepEqual(obs(11, 2), [{ date: D1, seen: 0 }]);
+  assert.deepEqual(obs(10, 2), []);
+  assert.deepEqual(obs(12, 1), []);
+  assert.deepEqual(obs(13, 1), []);
+  assert.equal(s.recordObservations(D1, [{ goods_no: 1, couponNos: [10, 11] }]), 2);
+  assert.equal(s.db.prepare('SELECT COUNT(*) AS n FROM coupon_observations').get().n, 3);
+  assert.deepEqual(obs(11, 1), [{ date: D1, seen: 1 }]);
+});
+
+test('retireDead retires after 3 unseen observations within 7 days, not with 2, not when one was seen, not with an 8-day-old observation', () => {
+  const D = '2026-10-15';
+  s.upsertMemberCoupons(D, [mc(1), mc(2), mc(3), mc(4), mc(5)]);
+  const put = (c, g, date, seen) =>
+    s.db.prepare('INSERT INTO coupon_observations (coupon_no, goods_no, date, seen) VALUES (?, ?, ?, ?)').run(c, g, date, seen);
+  for (const g of [1, 2, 3]) put(1, g, D, 0); // dead: 3 unseen
+  for (const g of [1, 2]) put(2, g, D, 0); // only 2 observations
+  put(3, 1, D, 0); put(3, 2, D, 0); put(3, 3, D, 1); // one seen
+  put(4, 1, D, 0); put(4, 2, shiftDate(D, -6), 0); put(4, 3, shiftDate(D, -7), 0); // 8-day-old one is outside the window
+  put(5, 1, D, 0); put(5, 2, shiftDate(D, -6), 0); put(5, 3, shiftDate(D, -3), 0); // oldest still inside
+  assert.deepEqual(s.retireDead(D), [1, 5]);
+  assert.equal(stateOf(1), 'RETIRED');
+  assert.equal(stateOf(5), 'RETIRED');
+  for (const n of [2, 3, 4]) assert.equal(stateOf(n), 'USABLE');
+  assert.deepEqual(s.retireDead(D), []);
+});
+
+const seedCats = (perCat, extra = () => ({})) => {
+  let n = 1;
+  for (const cat of ['001', '002', '003', '004', '005']) {
+    s.applyScan(D1, Array.from({ length: perCat }, () => { const g = n++; return row(g, 1000 + g, cat, extra(g)); }), scan(cat, false));
+  }
+};
+
+test('pickSample is deterministic per date, takes n/5 per category, skips sold-out and today-checked goods', () => {
+  seedCats(100, (g) => (g % 10 === 0 ? { is_sold_out: 1 } : {}));
+  s.putGoodsCoupons(1, D2, [], { sale_price: 1001, extra_discount: 0 }); // checked today
+  const a = s.pickSample(200, D2);
+  assert.equal(a.length, 200);
+  for (const cat of ['001', '002', '003', '004', '005']) assert.equal(a.filter((r) => r.cat === cat).length, 40);
+  assert.deepEqual(Object.keys(a[0]).sort(), ['brand', 'cat', 'extra_discount', 'goods_no', 'sale_price']);
+  assert.ok(!a.some((r) => r.goods_no % 10 === 0));
+  assert.ok(!a.some((r) => r.goods_no === 1));
+  assert.deepEqual(s.pickSample(200, D2), a);
+  assert.notDeepEqual(s.pickSample(200, D3).map((r) => r.goods_no), a.map((r) => r.goods_no));
+  // a smaller n takes the first n/5 of the same shuffle
+  const small = s.pickSample(10, D2);
+  assert.equal(small.length, 10);
+  assert.deepEqual(small.filter((r) => r.cat === '001').map((r) => r.goods_no), a.filter((r) => r.cat === '001').slice(0, 2).map((r) => r.goods_no));
+});
+
+test('pickSample skips goods without price or not ACTIVE and returns fewer when a category runs short', () => {
+  s.applyScan(D1, [row(1, 1000, '001'), row(2, 2000, '001'), row(3, 3000, '001')], scan('001'));
+  s.applyScan(D2, [row(1, 1000, '001'), row(2, 2000, '001')], scan('001'));
+  s.applyScan(D3, [row(1, 1000, '001'), row(2, 2000, '001')], scan('001')); // goods 3 out of scope
+  assert.deepEqual(s.pickSample(50, D3).map((r) => r.goods_no).sort(), [1, 2]);
+});
+
+test('categoryReviewFloors returns the minimum review_count of ACTIVE goods per category', () => {
+  s.applyScan(D1, [row(1, 1000, '001', { review_count: 50 }), row(2, 1000, '001', { review_count: 7 }), row(3, 1000, '001'), row(4, 1000, '001', { review_count: 2 })], scan('001'));
+  s.applyScan(D1, [row(5, 1000, '002', { review_count: 0 }), row(6, 1000, '002', { review_count: 9 })], scan('002'));
+  s.applyScan(D1, [row(7, 1000, '003')], scan('003'));
+  s.applyScan(D2, [row(1, 1000, '001', { review_count: 50 }), row(2, 1000, '001', { review_count: 7 }), row(3, 1000, '001')], scan('001'));
+  s.applyScan(D3, [row(1, 1000, '001', { review_count: 50 }), row(2, 1000, '001', { review_count: 7 }), row(3, 1000, '001')], scan('001')); // goods 4 (2 reviews) leaves scope
+  assert.deepEqual(s.categoryReviewFloors(), { '001': 7, '002': 0 });
+});
+
+test('pruneRegistry removes 60-day-old OTHER/OUT_OF_SCOPE, 3-day-old empties and 7-day-old observations, never USABLE', () => {
+  const D = '2026-10-15';
+  const old = shiftDate(D, -61);
+  const edge = shiftDate(D, -60);
+  const ins = (no, state, first) => s.db.prepare('INSERT INTO coupons (coupon_no, state, first_seen_date) VALUES (?, ?, ?)').run(no, state, first);
+  ins(1, 'OTHER', old); ins(2, 'OUT_OF_SCOPE', old); ins(3, 'OTHER', edge); ins(4, 'USABLE', old);
+  ins(5, 'PENDING', old); ins(6, 'RETIRED', old);
+  const empty = (no, first) => s.db.prepare('INSERT INTO coupon_empty_numbers (coupon_no, first_seen_date) VALUES (?, ?)').run(no, first);
+  empty(20, shiftDate(D, -4)); empty(21, shiftDate(D, -3));
+  const ob = (date) => s.db.prepare('INSERT INTO coupon_observations (coupon_no, goods_no, date, seen) VALUES (4, 1, ?, 0)').run(date);
+  ob(shiftDate(D, -7)); ob(shiftDate(D, -6));
+  assert.deepEqual(s.pruneRegistry(D), { coupons: 2, empties: 1, observations: 1 });
+  const left = s.db.prepare('SELECT coupon_no FROM coupons ORDER BY coupon_no').all().map((r) => r.coupon_no);
+  assert.deepEqual(left, [3, 4, 5, 6]);
+  assert.deepEqual(s.db.prepare('SELECT coupon_no FROM coupon_empty_numbers').all().map((r) => r.coupon_no), [21]);
+  assert.equal(s.db.prepare('SELECT COUNT(*) AS n FROM coupon_observations').get().n, 1);
+});
+
+test('goodsHasDirectCoupon finds a coupon in stored coupon lists', () => {
+  s.applyScan(D1, [row(1, 1000), row(2, 1000)], scan('001'));
+  assert.equal(s.goodsHasDirectCoupon(10), false);
+  s.putGoodsCoupons(1, D1, [mc(10), mc(11)], { sale_price: 1000, extra_discount: 0 });
+  s.putGoodsCoupons(2, D1, [], { sale_price: 1000, extra_discount: 0 });
+  assert.equal(s.goodsHasDirectCoupon(10), true);
+  assert.equal(s.goodsHasDirectCoupon('11'), true);
+  assert.equal(s.goodsHasDirectCoupon(1), false);
+  assert.equal(s.goodsHasDirectCoupon(12), false);
 });
