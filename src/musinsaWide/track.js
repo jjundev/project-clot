@@ -4,7 +4,7 @@
 // lists plus the fresh direct checks.
 import { CATEGORIES_MUSINSA, DEPTH_PAGES, scanCategory } from './client.js';
 import {
-  createMemberChecker, applyCouponPrices, sampleAccuracy, CLASSIFY_CAP, SAMPLE_PER_DAY,
+  createMemberChecker, applyCouponPrices, sampleAccuracy, CLASSIFY_CAP, SAMPLE_PER_DAY, BACKFILL_CLASSIFY_CAP,
 } from './coupons.js';
 import { enumerateNumbers, recheckEmpties, probeNeighbors, classifyPending, BACKFILL_FROM } from './registry.js';
 import { walkCouponLists } from './walk.js';
@@ -19,6 +19,13 @@ export const RUN_BUDGET_MS_MUSINSA = 35 * 60_000;
 // From the run's start: the number enumeration (and the empty-number recheck) end here, the classification here.
 export const ENUM_BUDGET_MS = 12 * 60_000;
 export const CLASSIFY_BUDGET_MS = 15 * 60_000;
+
+// The one-time backfill, from its start: the whole run, of which the number enumeration may take the first 130 minutes
+// (the Actions job's limit is 180).
+export const BACKFILL_BUDGET_MS = 160 * 60_000;
+export const BACKFILL_ENUM_BUDGET_MS = 130 * 60_000;
+// The enumeration cursor is saved about every this many numbers.
+export const CURSOR_EVERY = 1000;
 
 const NOT_READY_LINE = '⚠️ [무신사] 쿠폰 등록부 미완성 — backfill 필요';
 
@@ -44,6 +51,17 @@ function mergeDiffs(diffs, initial) {
   return merged;
 }
 
+// Runs one phase; one that throws keeps its fallback metrics with stop 'error' and lets the run go on.
+const phaseRunner = (log) => async (label, fallback, fn) => {
+  try {
+    return await fn();
+  } catch (err) {
+    // Status only: an error message could carry a request detail.
+    log(`⚠️ [무신사] ${label} 실패 (${err?.status ?? err?.name ?? 'error'})`);
+    return { ...fallback, stop: 'error' };
+  }
+};
+
 const sumWalks = (a, b) => ({
   walked: a.walked + b.walked,
   failed: a.failed + b.failed,
@@ -59,15 +77,7 @@ const sumWalks = (a, b) => ({
  * results, the registry states before the sample, and the sample phase's stop.
  */
 async function runRegistry({ withClient, store, date, checker, started, runDeadline, now, log }) {
-  const phase = async (label, fallback, fn) => {
-    try {
-      return await fn();
-    } catch (err) {
-      // Status only: an error message could carry a request detail.
-      log(`⚠️ [무신사] ${label} 실패 (${err?.status ?? err?.name ?? 'error'})`);
-      return { ...fallback, stop: 'error' };
-    }
-  };
+  const phase = phaseRunner(log);
   const enumDeadline = started + ENUM_BUDGET_MS;
 
   const enumerated = await phase('번호 순회', { probed: 0, hits: 0, newCoupons: 0, highest: null }, async () => {
@@ -275,4 +285,75 @@ export async function trackMusinsa({
     couponMetrics: registry,
   });
   return { date, categoryCounts, diff, coupons, registry, durationMs };
+}
+
+/**
+ * The one-time registry backfill: walks the coupon numbers from `from` (the saved enum_cursor, else BACKFILL_FROM) up
+ * through the highest known coupon, then classifies the new PENDING coupons with member calls (capped). It stores no
+ * empty numbers, and no sample, list walk or coupon price is made: the next daily run does those. The first run seeds
+ * the registry from the coupons already stored on the goods and records enum_floor; a run cut short by its enumeration
+ * deadline (or a throttle, an error) keeps enum_cursor at the next number to probe and is not done, so running it again
+ * resumes there. Done (backfill_done = date, cursor cleared) means the enumeration finished by itself, whatever
+ * the classification managed; the coupons it left PENDING are classified by the daily runs. Without a member session
+ * the classification is skipped.
+ */
+export async function backfillMusinsaCoupons({
+  makeClient, store, date, sessionProvider = null, from = null, concurrency = 3, budgetMs = BACKFILL_BUDGET_MS,
+  enumBudgetMs = BACKFILL_ENUM_BUDGET_MS, now = Date.now, log = console.log,
+}) {
+  const started = now();
+  const withClient = clientPool(makeClient);
+  const phase = phaseRunner(log);
+
+  const saved = store.getMeta('enum_cursor');
+  const start = Number(saved ?? from ?? BACKFILL_FROM);
+  let seeded = 0;
+  // Only the first run: seeding again would revive the OTHER/RETIRED rows a later run settled.
+  if (store.getMeta('enum_floor') == null) {
+    seeded = store.seedFromGoodsCoupons(date);
+    store.setMeta('enum_floor', start);
+  }
+
+  let cursor = start; // the latest number the enumeration reported reaching
+  let savedAt = start;
+  const enumerated = await phase('번호 순회', { from: start, probed: 0, hits: 0, newCoupons: 0, highest: null }, async () => {
+    return enumerateNumbers({
+      withClient, store, date, from: start, mustReach: store.maxCouponNo(), recordEmpties: false,
+      deadline: started + enumBudgetMs, now,
+      onCursor: (n) => {
+        cursor = n;
+        if (n - savedAt >= CURSOR_EVERY) {
+          store.setMeta('enum_cursor', n);
+          savedAt = n;
+        }
+      },
+    });
+  });
+  const { stop } = enumerated;
+  const next = enumerated.next ?? cursor;
+  const done = stop === null;
+  if (done) {
+    store.setMeta('backfill_done', date);
+    store.setMeta('enum_cursor', null);
+  } else {
+    // The exact stopping point, so a resumed run starts at `next`.
+    store.setMeta('enum_cursor', next);
+  }
+
+  const checker = createMemberChecker({ withClient, sessionProvider, concurrency, log, now });
+  await checker.start();
+  if (checker.status !== 'ok') log(`⚠️ [무신사] 회원 세션 ${checker.status} — 판별 생략`);
+  const classified = await phase('판별', { calls: 0, usable: 0, other: 0, outOfScope: 0, pending: 0 }, () => (
+    classifyPending({ store, checker, date, cap: BACKFILL_CLASSIFY_CAP, deadline: started + budgetMs })
+  ));
+  const { neighborCenters, checks, added, stop: classifyStop, ...classify } = classified;
+
+  log(
+    `[무신사] 전환: 번호 ${start}~${next} (${enumerated.probed}개, 쿠폰 ${enumerated.hits}종) · 시드 ${seeded}`
+    + ` · 판별 ${classify.calls}회 (대기 ${classify.pending}) · ${done ? '완료' : `중단 (${stop})`}`,
+  );
+  return {
+    date, from: start, next, probed: enumerated.probed, hits: enumerated.hits, seeded, classify, done,
+    memberStatus: checker.status, stop,
+  };
 }

@@ -5,7 +5,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  trackMusinsa, BUDGET_MS_MUSINSA, RUN_BUDGET_MS_MUSINSA, ENUM_BUDGET_MS, CLASSIFY_BUDGET_MS,
+  trackMusinsa, backfillMusinsaCoupons, BUDGET_MS_MUSINSA, RUN_BUDGET_MS_MUSINSA, ENUM_BUDGET_MS, CLASSIFY_BUDGET_MS,
+  BACKFILL_BUDGET_MS, BACKFILL_ENUM_BUDGET_MS, CURSOR_EVERY,
 } from '../src/musinsaWide/track.js';
 import { MusinsaWideStore } from '../src/musinsaWide/store.js';
 import { parseCoupon } from '../src/musinsaWide/coupons.js';
@@ -425,4 +426,204 @@ test('a same-day rerun re-checks no goods and doubles no lists or observations',
   assert.equal(count('coupon_observations'), 2);
   assert.equal(scanRun(DAY1).coupon_checks, 3);
   assert.deepEqual([1, 2, 3].map((n) => store.getGoods(n).coupon_price), [9000, 18000, 30000]);
+});
+
+// --- backfill ---
+
+const goodsRow = (goods_no) => ({
+  goods_no, cat: '001', brand: 'brandx', brand_name: '브랜드X', name: `상품 ${goods_no}`,
+  url: `https://www.musinsa.com/products/${goods_no}`, image_url: null,
+  sale_price: 10000, normal_price: 10000, extra_discount: 0, is_sold_out: 0,
+});
+const addGoods = (...nos) => store.applyScan(DAY0, nos.map(goodsRow), { cat: '001', complete: true });
+const backfill = (overrides) => backfillMusinsaCoupons({ store, date: DAY1, log, now: () => clock.t, ...overrides });
+const backfillMeta = () => Object.fromEntries(['enum_floor', 'enum_cursor', 'backfill_done'].map((k) => [k, store.getMeta(k)]));
+
+test('backfill budgets are 160 and 130 minutes; the cursor is saved every 1000 numbers', () => {
+  assert.equal(BACKFILL_BUDGET_MS, 160 * MIN);
+  assert.equal(BACKFILL_ENUM_BUDGET_MS, 130 * MIN);
+  assert.equal(CURSOR_EVERY, 1000);
+});
+
+test('first backfill seeds stored coupons, sets enum_floor and walks from 345000 through a sparse gap up to the highest known coupon', async () => {
+  addGoods(1, 2);
+  // The old per-goods flow stored coupon 345300 on goods 1: seeded USABLE, and the highest number known.
+  store.putGoodsCoupons(1, DAY0, [parseCoupon(rawCoupon(345300, 10))], goodsRow(1));
+  const api = {
+    counts: { 345010: 3, 345120: 2, 345300: 4 }, lists: { 345010: [2], 345120: [1] }, members: { 2: [rawCoupon(345010, 20)] },
+  };
+  const res = await backfill({ makeClient: fakeMakeClient({}, api), sessionProvider: session() });
+
+  assert.equal(res.seeded, 1);
+  assert.equal(res.from, 345000);
+  assert.equal(res.done, true);
+  assert.equal(res.stop, null);
+  assert.equal(res.hits, 3);
+  assert.equal(res.memberStatus, 'ok');
+  assert.deepEqual(backfillMeta(), { enum_floor: '345000', enum_cursor: null, backfill_done: DAY1 });
+  const counts = ofKind(api.calls, 'count').map((c) => c.no);
+  assert.equal(Math.min(...counts), 345000);
+  assert.ok(counts.includes(345299) && counts.includes(345300)); // the 180-number gap does not end the walk
+  assert.ok(res.next > 345300 && res.probed === counts.length);
+  // 345010 covers goods 2 (a member call returns it); 345120 covers goods 1, whose call does not return it.
+  assert.equal(store.getCoupon(345010).state, 'USABLE');
+  assert.equal(store.getCoupon(345120).state, 'OTHER');
+  assert.equal(res.classify.calls, 2);
+  assert.equal(res.classify.usable, 1);
+  assert.equal(res.classify.other, 1);
+  // No sample, list walk or price: that is the daily run's job. The only page calls are the new coupons' first pages.
+  assert.deepEqual(ofKind(api.calls, 'page').map((c) => c.no).sort(), [345010, 345120]);
+});
+
+test('a backfill cut by the enumeration deadline saves enum_cursor and is not done; the next one resumes there and finishes', async () => {
+  addGoods(1);
+  store.putGoodsCoupons(1, DAY0, [parseCoupon(rawCoupon(345300, 10))], goodsRow(1));
+  const api1 = { counts: { 345010: 3, 345300: 4 }, lists: { 345010: [1] }, tick: { count: MIN } };
+  // Three minutes of enumeration at a minute per call: the walk stops early.
+  const cut = await backfill({ makeClient: fakeMakeClient({}, api1), enumBudgetMs: 3 * MIN, concurrency: 1 });
+  assert.equal(cut.done, false);
+  assert.equal(cut.stop, 'deadline');
+  assert.equal(cut.seeded, 1);
+  assert.equal(cut.memberStatus, 'none');
+  assert.equal(cut.classify.calls, 0);
+  const meta = backfillMeta();
+  assert.equal(meta.enum_floor, '345000');
+  assert.equal(meta.backfill_done, null);
+  assert.equal(meta.enum_cursor, String(cut.next)); // exactly where the run stopped, below the CURSOR_EVERY save step
+  assert.ok(cut.next >= 345000 && cut.next < 345300);
+
+  // The next run resumes at the saved cursor, does not seed again and finishes.
+  const api2 = { counts: { 345300: 4 } };
+  const resumed = await backfill({ makeClient: fakeMakeClient({}, api2), date: DAY2 });
+  assert.equal(resumed.from, cut.next);
+  assert.equal(resumed.seeded, 0);
+  assert.equal(resumed.done, true);
+  assert.equal(Math.min(...ofKind(api2.calls, 'count').map((c) => c.no)), cut.next);
+  assert.deepEqual(backfillMeta(), { enum_floor: '345000', enum_cursor: null, backfill_done: DAY2 });
+});
+
+test('a resumed backfill does not seed again: settled OTHER rows stay settled', async () => {
+  addGoods(1);
+  store.putGoodsCoupons(1, DAY0, [parseCoupon(rawCoupon(345300, 10))], goodsRow(1));
+  const cut = await backfill({ makeClient: fakeMakeClient({}, { tick: { count: MIN } }), enumBudgetMs: MIN, concurrency: 1 });
+  assert.equal(cut.done, false);
+  store.db.prepare("UPDATE coupons SET state = 'OTHER' WHERE coupon_no = 345300").run(); // settled by a classification
+  const res = await backfill({ makeClient: fakeMakeClient({}, { counts: { 345300: 4 } }), date: DAY2 });
+  assert.equal(res.seeded, 0);
+  assert.equal(store.getCoupon(345300).state, 'OTHER');
+});
+
+test('an explicit from starts a first backfill there; a saved cursor wins over it', async () => {
+  const api = { counts: { 346100: 1 } };
+  const first = await backfill({ makeClient: fakeMakeClient({}, api), from: 346000 });
+  assert.equal(first.from, 346000);
+  assert.equal(store.getMeta('enum_floor'), '346000');
+  assert.equal(Math.min(...ofKind(api.calls, 'count').map((c) => c.no)), 346000);
+
+  store.setMeta('backfill_done', null);
+  store.setMeta('enum_cursor', 346500);
+  const again = await backfill({ makeClient: fakeMakeClient({}, {}), from: 346000 });
+  assert.equal(again.from, 346500);
+  assert.equal(store.getMeta('enum_floor'), '346000');
+});
+
+test('the cursor is saved every 1000 numbers during the walk', async () => {
+  // Hits keep the walk going (200 empties in a row would end it): one coupon every 100 numbers up to 347500.
+  const counts = {};
+  for (let no = 345050; no <= 347500; no += 100) counts[no] = 1;
+  const saves = [];
+  const setMeta = store.setMeta.bind(store);
+  store.setMeta = (key, value) => {
+    if (key === 'enum_cursor') saves.push(value);
+    setMeta(key, value);
+  };
+  const res = await backfill({ makeClient: fakeMakeClient({}, { counts }) });
+  assert.equal(res.done, true);
+  assert.equal(saves.at(-1), null);
+  const periodic = saves.slice(0, -1);
+  assert.ok(periodic.length >= 2);
+  assert.ok(periodic.every((n, i) => n - (i === 0 ? 345000 : periodic[i - 1]) >= CURSOR_EVERY));
+});
+
+test('backfill records no empty numbers', async () => {
+  addGoods(1);
+  store.putGoodsCoupons(1, DAY0, [parseCoupon(rawCoupon(345300, 10))], goodsRow(1));
+  const res = await backfill({ makeClient: fakeMakeClient({}, { counts: { 345010: 3, 345300: 4 }, lists: { 345010: [1] } }) });
+  assert.equal(res.done, true);
+  assert.ok(res.probed > 300);
+  assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM coupon_empty_numbers').get().n, 0);
+});
+
+test('backfill classification is capped at 1500', async () => {
+  const goods = Array.from({ length: 1600 }, (_, i) => i + 1);
+  addGoods(...goods);
+  // 1600 pending coupons, each covering its own goods.
+  for (const g of goods) store.recordHit(345000 + g, DAY0, 1, { scopeGoods: [g] });
+  const api = {};
+  const res = await backfill({ makeClient: fakeMakeClient({}, api), sessionProvider: session() });
+  assert.equal(res.classify.calls, 1500);
+  assert.equal(ofKind(api.calls, 'member').length, 1500);
+  assert.equal(res.classify.pending, 100);
+  assert.equal(res.done, true);
+});
+
+test('done sets backfill_done and clears enum_cursor; a following trackMusinsa is ready', async () => {
+  store.setMeta('enum_cursor', 345000);
+  const res = await backfill({ makeClient: fakeMakeClient({}, {}), sessionProvider: session() });
+  assert.equal(res.done, true);
+  assert.equal(store.getMeta('backfill_done'), DAY1);
+  assert.equal(store.getMeta('enum_cursor'), null);
+
+  const api = {};
+  const tracked = await run({ makeClient: fakeMakeClient(catalog3(), api), date: DAY2, sessionProvider: session() });
+  assert.equal(tracked.coupons.ready, true);
+  assert.notEqual(tracked.registry, null);
+});
+
+test('without a member session the classification is skipped but the enumeration still finishes', async () => {
+  addGoods(1);
+  const api = { counts: { 345010: 1 }, lists: { 345010: [1] } };
+  const res = await backfill({ makeClient: fakeMakeClient({}, api) });
+  assert.equal(res.memberStatus, 'none');
+  assert.equal(res.done, true);
+  assert.equal(res.classify.calls, 0);
+  assert.equal(res.classify.pending, 1);
+  assert.deepEqual(ofKind(api.calls, 'member'), []);
+  assert.equal(store.getMeta('backfill_done'), DAY1);
+});
+
+test('an enumeration that throws is stop error: not done, the cursor kept, and the classification still runs', async () => {
+  addGoods(1);
+  store.recordHit(345010, DAY0, 1, { scopeGoods: [1] });
+  store.setMeta('enum_cursor', 345200);
+  store.maxCouponNo = () => { throw new Error('db gone'); };
+  const lines = [];
+  const api = { members: { 1: [rawCoupon(345010, 10)] } };
+  const res = await backfill({ makeClient: fakeMakeClient({}, api), sessionProvider: session(), log: (m) => lines.push(m) });
+  assert.equal(res.stop, 'error');
+  assert.equal(res.done, false);
+  assert.equal(res.next, 345200);
+  assert.equal(store.getMeta('enum_cursor'), '345200');
+  assert.equal(store.getMeta('backfill_done'), null);
+  assert.equal(res.classify.calls, 1);
+  assert.ok(lines.includes('⚠️ [무신사] 번호 순회 실패 (Error)'));
+  assert.ok(!lines.join('\n').includes('db gone'));
+});
+
+test('a throttled backfill keeps its place: the cursor is the first number of the cut batch', async () => {
+  const makeClient = fakeMakeClient({}, { counts: { 345010: 1 } });
+  const throttled = () => {
+    const client = makeClient();
+    const count = client.getCouponGoodsCount.bind(client);
+    client.getCouponGoodsCount = async (no) => {
+      if (no >= 345100) throw Object.assign(new Error('429'), { status: 429 });
+      return count(no);
+    };
+    return client;
+  };
+  const res = await backfill({ makeClient: throttled });
+  assert.equal(res.stop, 'throttled');
+  assert.equal(res.done, false);
+  assert.equal(res.next, 345100);
+  assert.equal(store.getMeta('enum_cursor'), '345100');
 });
