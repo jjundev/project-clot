@@ -101,7 +101,12 @@ export async function enumerateNumbers({ withClient, store, date, from, mustReac
       const probes = ENUM_PROBES.map((d) => lastHit + d).filter((p) => p >= n);
       const pr = await probeNumbers({ withClient, store, date, numbers: probes, deadline, now });
       probed += pr.probed;
+      // A probe hit is registered here, so the walk reaching it later sees a known number: count it as new now.
+      newCoupons += pr.newCoupons.length;
       if (pr.stop) {
+        // The walk will not get to what the probes recorded before the stop, so count and lift `highest` with it.
+        hits += pr.hits.length;
+        if (pr.hits.length > 0) lastHit = Math.max(lastHit, ...pr.hits);
         stop = pr.stop;
         break;
       }

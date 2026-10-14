@@ -86,6 +86,8 @@ test('a probe hit at lastHit+1000 makes it walk on up to and past the probe', as
   assert.ok(f.calls.count.includes(1200 + 500));
   assert.ok(Math.max(...f.calls.count.filter((n) => n < 1500)) <= 1200 + 200 + 50);
   assert.equal(store.getCoupon(1200).state, COUPON_STATE.OUT_OF_SCOPE);
+  assert.equal(r.newCoupons, 2, 'the probe-registered coupon counts as new');
+  assert.equal(r.hits, 2);
 });
 
 test('mustReach keeps walking through a 400-number gap below it', async () => {
@@ -265,4 +267,15 @@ test('a stop mid-batch leaves next and the cursor at that batch\'s first number'
   assert.ok(cursors.every((c) => c <= 250));
   assert.ok(store.getCoupon(230));
   assert.equal(r.highest, 230);
+});
+
+test('a probe hit recorded before a 429 still counts and lifts highest and the frontier', async () => {
+  const f = fakeClient({ counts: countsOf([200, 700]), throw429: [1200] });
+  const r = await enumerateNumbers({ withClient: f.withClient, store, date: DATE, from: 200 });
+  assert.equal(r.stop, 'throttled');
+  assert.ok(store.getCoupon(700));
+  assert.equal(r.highest, 700);
+  assert.equal(r.hits, 2);
+  assert.equal(r.newCoupons, 2);
+  assert.equal(store.getMeta('frontier'), '700');
 });
