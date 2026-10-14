@@ -293,8 +293,10 @@ export async function trackMusinsa({
  * empty numbers, and no sample, list walk or coupon price is made: the next daily run does those. The first run seeds
  * the registry from the coupons already stored on the goods and records enum_floor; a run cut short by its enumeration
  * deadline (or a throttle, an error) keeps enum_cursor at the next number to probe and is not done, so running it again
- * resumes there. Done (backfill_done = date, cursor cleared) means the enumeration finished by itself, whatever
- * the classification managed; the coupons it left PENDING are classified by the daily runs. Without a member session
+ * resumes there. Done (backfill_done = date, cursor cleared, both only after the classification has returned) means the
+ * enumeration finished by itself and the classification did not throw; the coupons it left PENDING (cap, deadline, no
+ * session) are classified by the daily runs. The cursor is saved at `next` as soon as the enumeration ends, so a run
+ * killed during the classification resumes at the end. Without a member session
  * the classification is skipped.
  */
 export async function backfillMusinsaCoupons({
@@ -331,14 +333,9 @@ export async function backfillMusinsaCoupons({
   });
   const { stop } = enumerated;
   const next = enumerated.next ?? cursor;
-  const done = stop === null;
-  if (done) {
-    store.setMeta('backfill_done', date);
-    store.setMeta('enum_cursor', null);
-  } else {
-    // The exact stopping point, so a resumed run starts at `next`.
-    store.setMeta('enum_cursor', next);
-  }
+  // Saved whether or not the enumeration finished: a run killed during the classification resumes at the end and
+  // re-walks almost nothing. The cursor is cleared only once the classification has returned.
+  store.setMeta('enum_cursor', next);
 
   const checker = createMemberChecker({ withClient, sessionProvider, concurrency, log, now });
   await checker.start();
@@ -348,12 +345,20 @@ export async function backfillMusinsaCoupons({
   ));
   const { neighborCenters, checks, added, stop: classifyStop, ...classify } = classified;
 
+  // A classification that threw is not done: the daily run must not price from a registry still full of PENDING coupons.
+  const done = stop === null && classifyStop == null;
+  if (done) {
+    store.setMeta('backfill_done', date);
+    store.setMeta('enum_cursor', null);
+  }
+  const finalStop = stop ?? classifyStop ?? null;
+
   log(
     `[무신사] 전환: 번호 ${start}~${next} (${enumerated.probed}개, 쿠폰 ${enumerated.hits}종) · 시드 ${seeded}`
-    + ` · 판별 ${classify.calls}회 (대기 ${classify.pending}) · ${done ? '완료' : `중단 (${stop})`}`,
+    + ` · 판별 ${classify.calls}회 (대기 ${classify.pending}) · ${done ? '완료' : `중단 (${finalStop})`}`,
   );
   return {
     date, from: start, next, probed: enumerated.probed, hits: enumerated.hits, seeded, classify, done,
-    memberStatus: checker.status, stop,
+    memberStatus: checker.status, stop: finalStop,
   };
 }

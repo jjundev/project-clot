@@ -539,8 +539,9 @@ test('the cursor is saved every 1000 numbers during the walk', async () => {
   };
   const res = await backfill({ makeClient: fakeMakeClient({}, { counts }) });
   assert.equal(res.done, true);
-  assert.equal(saves.at(-1), null);
-  const periodic = saves.slice(0, -1);
+  // The end of the enumeration is saved too, and cleared once the classification has returned.
+  assert.deepEqual(saves.slice(-2), [res.next, null]);
+  const periodic = saves.slice(0, -2);
   assert.ok(periodic.length >= 2);
   assert.ok(periodic.every((n, i) => n - (i === 0 ? 345000 : periodic[i - 1]) >= CURSOR_EVERY));
 });
@@ -626,4 +627,32 @@ test('a throttled backfill keeps its place: the cursor is the first number of th
   assert.equal(res.done, false);
   assert.equal(res.next, 345100);
   assert.equal(store.getMeta('enum_cursor'), '345100');
+});
+
+test('a classification that fails after a finished enumeration leaves the cursor at the end and is not done; the next run re-walks only the tail, classifies and finishes', async () => {
+  addGoods(1);
+  store.putGoodsCoupons(1, DAY0, [parseCoupon(rawCoupon(345300, 10))], goodsRow(1));
+  const counts = { 345010: 3, 345300: 4 };
+  const lists = { 345010: [1] };
+  const pendingCoupons = store.pendingCoupons.bind(store);
+  store.pendingCoupons = () => { throw new Error('killed'); };
+  const first = await backfill({ makeClient: fakeMakeClient({}, { counts, lists }), sessionProvider: session() });
+  assert.equal(first.done, false);
+  assert.equal(first.stop, 'error');
+  assert.equal(store.getMeta('backfill_done'), null);
+  assert.equal(store.getMeta('enum_cursor'), String(first.next));
+  assert.ok(first.next > 345300);
+
+  store.pendingCoupons = pendingCoupons;
+  const api = { counts, lists, members: { 1: [rawCoupon(345010, 10)] } };
+  const second = await backfill({ makeClient: fakeMakeClient({}, api), sessionProvider: session(), date: DAY2 });
+  assert.equal(second.from, first.next);
+  assert.equal(second.seeded, 0);
+  // Only the tail past the last coupon: the empty stretch and the three look-ahead probes, not the 345000-345300 walk.
+  assert.ok(second.probed <= 250 + 3 && second.probed < first.probed);
+  assert.equal(Math.min(...ofKind(api.calls, 'count').map((c) => c.no)), first.next);
+  assert.equal(second.classify.calls, 1);
+  assert.equal(store.getCoupon(345010).state, 'USABLE');
+  assert.equal(second.done, true);
+  assert.deepEqual(backfillMeta(), { enum_floor: '345000', enum_cursor: null, backfill_done: DAY2 });
 });
