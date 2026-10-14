@@ -90,12 +90,12 @@ const dayNumber = (date) => Date.parse(`${date}T00:00:00Z`) / 86400000;
  * A member coupon checker shared by everything in one run that calls getUsableCoupons. `start()` reads the session once;
  * `check(goodsList, { deadline, onResult })` gives each goods its own coupon call (`concurrency` at a time, each on a
  * client of its own from `withClient`) and hands `onResult(goods, coupons)` the parsed, id-deduped list; the caller
- * does the writing. Past `deadline` no new goods start. A rejected member session is refreshed once per checker
+ * does the writing. Past `deadline` (read from `now`) no new goods start. A rejected member session is refreshed once per checker
  * (concurrent workers, and later check() calls, share that one refresh) and the goods retried; a second rejection ends
  * checking as 'expired'. HTTP 429 ends it as 'throttled' with what was checked kept. Any other failure skips just that
  * goods ('error' only when every goods attempted failed). Logs carry goods numbers and statuses only, never the cookie.
  */
-export function createMemberChecker({ withClient, sessionProvider, concurrency = 3, log = console.log }) {
+export function createMemberChecker({ withClient, sessionProvider, concurrency = 3, log = console.log, now = Date.now }) {
   let base = 'none'; // what start() found: 'ok' | 'none' | 'error'
   let cookie = null;
   let stop = null; // 'expired' | 'throttled' once checking must end
@@ -184,7 +184,7 @@ export function createMemberChecker({ withClient, sessionProvider, concurrency =
   async function check(goodsList, { deadline = Infinity, onResult } = {}) {
     if (base !== 'ok') return;
     await mapConcurrent(goodsList, concurrency, async (goods) => {
-      if (stop || Date.now() > deadline) return;
+      if (stop || now() > deadline) return;
       try {
         await withClient((client) => checkOne(client, goods, onResult));
       } catch {

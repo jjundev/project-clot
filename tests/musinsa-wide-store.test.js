@@ -498,6 +498,16 @@ test('registryCounts reports usable, pending and coupons that expired yesterday'
   assert.deepEqual(s.registryCounts(D), { usable: 2, pending: 1, expiredYesterday: 1 });
 });
 
+test('couponStates snapshots every registry row as coupon_no -> state', () => {
+  const D = '2026-10-15';
+  assert.deepEqual(s.couponStates(), new Map());
+  s.upsertMemberCoupons(D, [mc(1), mc(2)]);
+  setState(2, 'RETIRED');
+  s.recordHit(6, D, 3, { scopeGoods: [1] });
+  s.recordHit(7, D, 3, { scopeGoods: [] });
+  assert.deepEqual(s.couponStates(), new Map([[1, 'USABLE'], [2, 'RETIRED'], [6, 'PENDING'], [7, 'OUT_OF_SCOPE']]));
+});
+
 test('maxCouponNo and filterActive', () => {
   assert.equal(s.maxCouponNo(), null);
   s.recordHit(5, D1, 1);

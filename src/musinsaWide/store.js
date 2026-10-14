@@ -480,6 +480,11 @@ export class MusinsaWideStore {
     };
   }
 
+  // coupon_no -> state for every registry row: the baseline the day's sample accuracy is judged against.
+  couponStates() {
+    return new Map(this.db.prepare('SELECT coupon_no, state FROM coupons').all().map((r) => [r.coupon_no, r.state]));
+  }
+
   // --- coupon goods, observations, sample ---
 
   // One transaction: the coupon's rows are replaced by its ACTIVE goods, stamped with `date`.

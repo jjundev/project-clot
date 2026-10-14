@@ -348,6 +348,17 @@ test('checking past the deadline starts no new goods', async () => {
   assert.deepEqual(calls2, [1]);
 });
 
+test('the deadline is read from the injected clock', async () => {
+  store.applyScan('2026-10-13', [goodsRow(1, 10000), goodsRow(2, 20000), goodsRow(3, 30000)], { cat: '001', complete: true });
+  let t = 1000;
+  const calls = [];
+  const client = { async getUsableCoupons(args) { calls.push(args.goodsNo); t += 10; return []; } };
+  // Each call moves the clock 10 past 1000: goods 1 starts at 1000, goods 2 at 1010 (not past 1010), goods 3 at 1020 is.
+  const res = await run({ withClient: withClientOf(client), sessionProvider: provider(), deadline: 1010, now: () => t });
+  assert.equal(res.checked, 2);
+  assert.deepEqual(calls, [1, 2]);
+});
+
 // ---- applyCouponPrices from the registry's coupon lists + fresh direct checks ----
 
 // A registered USABLE coupon (10% uncapped by default), as a member call would have registered it.

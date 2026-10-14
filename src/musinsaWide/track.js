@@ -1,19 +1,30 @@
-// Daily Musinsa wide run: scan the top-level categories concurrently, apply each category's listings, sample the
-// member coupon checks, price every ACTIVE goods from its stored coupons.
+// Daily Musinsa wide run: scan the top-level categories concurrently and apply each category's listings; then, once the
+// coupon registry is built (backfill_done), enumerate new coupon numbers, classify the pending ones with member calls,
+// sample goods with member calls while walking the usable coupons' goods lists, and price every ACTIVE goods from those
+// lists plus the fresh direct checks.
 import { CATEGORIES_MUSINSA, DEPTH_PAGES, scanCategory } from './client.js';
-import { createMemberChecker, applyCouponPrices, SAMPLE_PER_DAY } from './coupons.js';
+import {
+  createMemberChecker, applyCouponPrices, sampleAccuracy, CLASSIFY_CAP, SAMPLE_PER_DAY,
+} from './coupons.js';
+import { enumerateNumbers, recheckEmpties, probeNeighbors, classifyPending, BACKFILL_FROM } from './registry.js';
+import { walkCouponLists } from './walk.js';
 import { mapConcurrent, clientPool } from '../pool.js';
 
 // Keeps a degraded (slow, not dead) site from running the Actions job into its timeout; categories not finished by
 // then count as incomplete, so their listings take no misses.
 export const BUDGET_MS_MUSINSA = 20 * 60_000;
-// The whole run, from its start: past it the coupon checks start no new goods, so the coupon prices, scan_runs and
-// the Release push still happen inside the job timeout.
+// The whole run, from its start: past it the sample and the list walks start nothing new, so the coupon prices,
+// scan_runs and the Release push still happen inside the job timeout.
 export const RUN_BUDGET_MS_MUSINSA = 35 * 60_000;
+// From the run's start: the number enumeration (and the empty-number recheck) end here, the classification here.
+export const ENUM_BUDGET_MS = 12 * 60_000;
+export const CLASSIFY_BUDGET_MS = 15 * 60_000;
 
-async function scanOne(client, cat, maxPages, deadline) {
+const NOT_READY_LINE = '⚠️ [무신사] 쿠폰 등록부 미완성 — backfill 필요';
+
+async function scanOne(client, cat, maxPages, deadline, now) {
   try {
-    return await scanCategory(client, cat, { maxPages, deadline });
+    return await scanCategory(client, cat, { maxPages, deadline, now });
   } catch (err) {
     return { cat, rows: new Map(), pages: 0, complete: false, problems: [`scan: ${err.message}`] };
   }
@@ -33,23 +44,142 @@ function mergeDiffs(diffs, initial) {
   return merged;
 }
 
+const sumWalks = (a, b) => ({
+  walked: a.walked + b.walked,
+  failed: a.failed + b.failed,
+  suspectEmpty: a.suspectEmpty + b.suspectEmpty,
+  calls: a.calls + b.calls,
+  stop: a.stop ?? b.stop,
+});
+
 /**
- * Order: concurrent category scan → (dry run stops here, nothing written) → per-category applyScan → coupon checks
- * (rotating, session required) → coupon prices from the stored lists (no session needed) → scan_runs. `partial`
- * (--category/--depth) means no category was read in full, so none counts a miss.
+ * The registry part of a ready run, steps 2-5 of the daily order. Each phase is caught on its own: a phase that throws
+ * keeps its zero metrics with stop 'error' and the run goes on. Returns the registry metrics (the `registry` result
+ * field and scan_runs.coupon_metrics_json, `sample` still null) and what the accuracy check needs: the sample's member
+ * results, the registry states before the sample, and the sample phase's stop.
+ */
+async function runRegistry({ withClient, store, date, checker, started, runDeadline, now, log }) {
+  const phase = async (label, fallback, fn) => {
+    try {
+      return await fn();
+    } catch (err) {
+      // Status only: an error message could carry a request detail.
+      log(`⚠️ [무신사] ${label} 실패 (${err?.status ?? err?.name ?? 'error'})`);
+      return { ...fallback, stop: 'error' };
+    }
+  };
+  const enumDeadline = started + ENUM_BUDGET_MS;
+
+  const enumerated = await phase('번호 순회', { probed: 0, hits: 0, newCoupons: 0, highest: null }, async () => {
+    // A ready registry has a frontier; without one, carry on from the highest number known (or the backfill start).
+    const frontier = store.getMeta('frontier') ?? store.maxCouponNo() ?? BACKFILL_FROM - 1;
+    const r = await enumerateNumbers({
+      withClient, store, date, from: Number(frontier) + 1, mustReach: store.maxCouponNo(), deadline: enumDeadline, now,
+    });
+    return { probed: r.probed, hits: r.hits, newCoupons: r.newCoupons, highest: r.highest, stop: r.stop };
+  });
+  const recheck = await phase('빈 번호 재조회', { probed: 0, newPositive: 0 }, () => (
+    recheckEmpties({ withClient, store, date, deadline: enumDeadline, now })
+  ));
+
+  const classified = await phase('판별', { calls: 0, usable: 0, other: 0, outOfScope: 0, pending: 0, neighborCenters: [], checks: [], added: [] }, () => (
+    classifyPending({ store, checker, date, cap: CLASSIFY_CAP, deadline: started + CLASSIFY_BUDGET_MS })
+  ));
+  const { neighborCenters, checks: classifyChecks, added: classifyAdded, ...classify } = classified;
+
+  // The accuracy baseline: the registry as classification left it, before the sample can add to it.
+  const before = store.couponStates();
+
+  const floorMeta = store.getMeta('enum_floor');
+  const floor = floorMeta == null ? null : Number(floorMeta);
+  const sampleResults = [];
+  const sampleChecks = [];
+  const sampleAdded = [];
+  const sampleFound = new Set(); // added or revived by a sample result: USABLE from today on
+  const walkFallback = { walked: 0, failed: 0, suspectEmpty: 0, calls: 0 };
+  let walkedToday = new Set();
+  const [sampled, walk1] = await Promise.all([
+    phase('표본 조회', {}, async () => {
+      await checker.check(store.pickSample(SAMPLE_PER_DAY, date), {
+        deadline: runDeadline,
+        onResult: (goods, coupons) => {
+          store.putGoodsCoupons(goods.goods_no, date, coupons, goods);
+          const { added, revived } = store.upsertMemberCoupons(date, coupons);
+          for (const no of added) sampleAdded.push(no);
+          for (const no of [...added, ...revived]) sampleFound.add(no);
+          sampleResults.push({ goods, coupons });
+          sampleChecks.push({ goods_no: goods.goods_no, couponNos: coupons.map((c) => Number(c.id)) });
+        },
+      });
+      return {};
+    }),
+    phase('목록 순회', walkFallback, async () => {
+      const couponNos = store.usableCoupons(date).map((c) => c.coupon_no);
+      walkedToday = new Set(couponNos);
+      const r = await walkCouponLists({ withClient, store, date, couponNos, deadline: runDeadline, now });
+      return { walked: r.walked, failed: r.failed, suspectEmpty: r.suspectEmpty, calls: r.calls, stop: r.stop };
+    }),
+  ]);
+
+  // Coupons the sample made USABLE that the walk above did not have: walked now. Not after a stop (a 429 ends the walk).
+  let walk = walk1;
+  if (walk1.stop == null) {
+    const walk2 = await phase('목록 순회', walkFallback, async () => {
+      const usable = new Set(store.usableCoupons(date).map((c) => c.coupon_no));
+      const couponNos = [...sampleFound].filter((no) => !walkedToday.has(no) && usable.has(no)).sort((a, b) => a - b);
+      if (couponNos.length === 0) return { ...walkFallback, stop: null };
+      const r = await walkCouponLists({ withClient, store, date, couponNos, deadline: runDeadline, now });
+      return { walked: r.walked, failed: r.failed, suspectEmpty: r.suspectEmpty, calls: r.calls, stop: r.stop };
+    });
+    walk = sumWalks(walk1, walk2);
+  }
+
+  const centers = [...neighborCenters, ...(floor == null ? [] : sampleAdded.filter((no) => no < floor))];
+  const neighbors = await phase('이웃 조회', { probed: 0, hits: 0 }, () => (
+    probeNeighbors({ withClient, store, date, centers, deadline: runDeadline, now })
+  ));
+
+  const liveness = await phase('생존 관리', { retired: [] }, () => {
+    store.recordObservations(date, [...classifyChecks, ...sampleChecks]);
+    return { retired: store.retireDead(date) };
+  });
+
+  return {
+    registry: {
+      enum: enumerated,
+      recheck,
+      classify,
+      neighbors,
+      walk,
+      sample: null, // the accuracy check fills it in once the prices are set
+      counts: { ...store.registryCounts(date), added: classifyAdded.length + sampleAdded.length, retired: liveness.retired.length },
+    },
+    sample: { results: sampleResults, before, stop: sampled.stop ?? null },
+  };
+}
+
+/**
+ * Order: concurrent category scan → (dry run stops here, nothing written) → per-category applyScan → when the coupon
+ * registry is ready: number enumeration and the empty-number recheck (12 min) → classification of pending coupons
+ * (member calls, 15 min) → the member sample alongside the walk of every usable coupon's goods list, then a walk of
+ * the coupons the sample found → neighbour counts → liveness → coupon prices for every ACTIVE goods → sample accuracy →
+ * registry pruning → scan_runs. A registry not yet backfilled makes no coupon call of any kind (member or anonymous)
+ * and leaves every coupon price null. `partial` (--category/--depth) means no category was read in full, so none counts
+ * a miss.
  */
 export async function trackMusinsa({
   makeClient, store, date, categories = CATEGORIES_MUSINSA, depthPages = DEPTH_PAGES, partial = false, concurrency = 3,
   dryRun = false, sessionProvider = null, budgetMs = BUDGET_MS_MUSINSA, runBudgetMs = RUN_BUDGET_MS_MUSINSA, log = console.log,
+  now = Date.now,
 }) {
-  const started = Date.now();
+  const started = now();
   const deadline = started + budgetMs;
   const runDeadline = started + runBudgetMs;
   const withClient = clientPool(makeClient);
   const initial = dryRun ? false : store.isEmpty();
 
   const scans = await mapConcurrent(categories, concurrency, (cat) => withClient(async (client) => {
-    const scan = await scanOne(client, cat, depthPages, deadline);
+    const scan = await scanOne(client, cat, depthPages, deadline, now);
     log(`[무신사] ${cat}: ${scan.rows.size}개 ${scan.pages}페이지${scan.complete ? '' : ` (불완전: ${scan.problems.slice(0, 3).join('; ')})`}`);
     return scan;
   }));
@@ -61,33 +191,77 @@ export async function trackMusinsa({
   if (categoryCounts.every((c) => c.scanned === 0)) {
     throw new Error(categoryCounts.find((c) => c.problems.length)?.problems[0] ?? 'no category returned any goods');
   }
-  if (dryRun) return { date, categoryCounts, diff: null, coupons: null, durationMs: Date.now() - started };
+  if (dryRun) return { date, categoryCounts, diff: null, coupons: null, registry: null, durationMs: now() - started };
 
   const diffs = categories.map((cat, i) => (
     store.applyScan(date, [...scans[i].rows.values()], { cat, complete: scans[i].complete && !partial })
   ));
   const diff = mergeDiffs(diffs, initial);
 
-  let checked;
-  try {
-    const checker = createMemberChecker({ withClient, sessionProvider, concurrency, log });
-    await checker.start();
-    await checker.check(store.pickSample(SAMPLE_PER_DAY, date), {
-      deadline: runDeadline,
-      onResult: (goods, coupons) => store.putGoodsCoupons(goods.goods_no, date, coupons, goods),
-    });
-    checked = { memberStatus: checker.status, checked: checker.calls, failed: checker.failed };
-  } catch (err) {
-    // The client never puts the cookie in an error message.
-    log(`⚠️ [무신사] 쿠폰 조회 실패 (${err.status ?? err.name}: ${err.message})`);
-    checked = { memberStatus: 'error', checked: 0, failed: 0 };
+  const ready = store.getMeta('backfill_done') != null;
+  const checker = createMemberChecker({ withClient, sessionProvider, concurrency, log, now });
+  let registry = null;
+  let sample = null;
+  let memberStatus = 'skipped';
+  if (ready) {
+    // Only a ready run reads the session: the provider verifies the cookie online, and a not-ready run calls nothing.
+    memberStatus = await checker.start();
+    if (memberStatus !== 'ok') log(`⚠️ [무신사] 회원 세션 ${memberStatus} — 판별·표본 생략`);
+    ({ registry, sample } = await runRegistry({ withClient, store, date, checker, started, runDeadline, now, log }));
+    memberStatus = checker.status;
+  } else {
+    log(NOT_READY_LINE);
   }
-  if (checked.memberStatus !== 'ok') log(`⚠️ [무신사] 쿠폰 조회 ${checked.memberStatus} — 저장된 쿠폰 목록으로 계산`);
-  // Not ready until the registry flow lands (the next task): every price is null, so every goods counts as unpriced.
-  const { priced, drops, best } = applyCouponPrices({ store, date });
-  const stale = best.size - priced;
 
-  const durationMs = Date.now() - started;
+  const prices = applyCouponPrices({ store, date, ready });
+  let { drops } = prices;
+  let lateDrops = prices.lateDrops.length;
+  // The first day priced from the registry moves many prices at once (per-goods lists → per-coupon lists): no drop
+  // alerts until that day is recorded, nor on a same-day rerun of it (it logs the same switch against the day before).
+  const firstPriced = ready ? store.getMeta('registry_first_priced') : null;
+  const dropsSuppressed = ready && (firstPriced == null || firstPriced === date);
+  if (dropsSuppressed) {
+    drops = [];
+    lateDrops = 0;
+    if (firstPriced == null && store.couponGoodsCount() > 0) store.setMeta('registry_first_priced', date);
+  }
+
+  if (registry) {
+    let accuracy;
+    try {
+      accuracy = sampleAccuracy({ store, date, results: sample.results, before: sample.before });
+    } catch (err) {
+      log(`⚠️ [무신사] 표본 정확도 실패 (${err?.name ?? 'error'})`);
+      accuracy = { checked: 0, exact: 0, under: 0, over: 0, reasons: { unregistered: 0, listGap: 0, retired: 0 }, stop: 'error' };
+    }
+    registry.sample = sample.stop ? { ...accuracy, stop: sample.stop } : accuracy;
+    const { enum: en, classify, walk } = registry;
+    log(
+      `[무신사] 등록부: 번호 ${en.probed}개 (새 쿠폰 ${en.newCoupons}, 최대 ${en.highest ?? '-'}) · 판별 ${classify.calls}회 (대기 ${classify.pending})`
+      + ` · 목록 ${walk.walked}종 (호출 ${walk.calls}, 실패 ${walk.failed}) · 표본 ${registry.sample.checked}개 (정확 ${registry.sample.exact})`,
+    );
+  }
+  try {
+    store.pruneRegistry(date);
+  } catch (err) {
+    log(`⚠️ [무신사] 등록부 정리 실패 (${err?.name ?? 'error'})`);
+  }
+
+  const coupons = {
+    memberStatus,
+    checked: checker.calls,
+    failed: checker.failed,
+    priced: prices.priced,
+    withCoupon: prices.withCoupon,
+    // The goods left without a coupon price (all of them before the registry is ready); the digest reads it until the
+    // registry lines replace that line.
+    stale: prices.best.size - prices.priced,
+    drops,
+    lateDrops,
+    dropsSuppressed,
+    ready,
+  };
+  const durationMs = now() - started;
   store.recordScanRun({
     date,
     categoryCounts,
@@ -96,12 +270,9 @@ export async function trackMusinsa({
     added: diff.added.length,
     outOfScope: diff.outOfScope,
     durationMs,
-    couponsOk: checked.memberStatus === 'ok',
-    couponChecks: checked.checked,
+    couponsOk: memberStatus === 'ok',
+    couponChecks: checker.calls,
+    couponMetrics: registry,
   });
-  return {
-    date, categoryCounts, diff,
-    coupons: { memberStatus: checked.memberStatus, checked: checked.checked, failed: checked.failed, priced, stale, drops },
-    durationMs,
-  };
+  return { date, categoryCounts, diff, coupons, registry, durationMs };
 }
