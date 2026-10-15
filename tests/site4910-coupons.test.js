@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Store4910 } from '../src/site4910/store.js';
-import { couponDiscount, couponPrice, learnMarketCoupons, applyCouponPrices } from '../src/site4910/coupons.js';
+import { couponDiscount, couponPrice, learnMarketCoupons, applyCouponPrices as applyCouponPricesImpl } from '../src/site4910/coupons.js';
 import { clientPool } from '../src/pool.js';
 
 const SECRET = 'SECRET-TOKEN';
@@ -13,7 +13,10 @@ const DATE = '2026-10-11';
 
 let dir;
 let store;
+let observations;
+const applyCouponPrices = args => applyCouponPricesImpl({ ...args, observations });
 beforeEach(() => {
+  observations = new Map();
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-4910-coupons-'));
   store = new Store4910(path.join(dir, '4910.db'));
 });
@@ -93,8 +96,11 @@ function fakeClient({ wallet = W, me = { emoney: 1200 }, details = {}, best = {}
     },
   };
 }
-const learn = (client, marketSnos, logs = [], extra = {}) =>
-  learnMarketCoupons({ client, store, date: DATE, marketSnos, memberToken: SECRET, log: (m) => logs.push(m), ...extra });
+const learn = async (client, marketSnos, logs = [], extra = {}) => {
+  const result = await learnMarketCoupons({ client, store, date: DATE, marketSnos, memberToken: SECRET, log: (m) => logs.push(m), ...extra });
+  observations = result.observations;
+  return result;
+};
 const NONE_HIDDEN = { scope: 0, naver: 0, mismatch: 0 };
 const wallet20 = (discount) => ({ couponSno: 1, name: '20% 쿠폰', discount, percent: 20, price: null, max: 30000, min: 10000 });
 
@@ -193,4 +199,15 @@ test('concurrency stays bounded and wallet is fetched once',async()=>{
   let active=0,peak=0;const c=fakeClient(),original=c.getGoodsDetail;
   c.getGoodsDetail=async sno=>{active++;peak=Math.max(peak,active);await new Promise(r=>setTimeout(r,2));const d=await original(sno);active--;return d;};
   await learn(c,[1,2,3,4,5,6],[],{concurrency:3});assert.ok(peak<=3);assert.ok(peak>1);assert.equal(c.calls.coupons,1);
+});
+
+test('same-date rerun recomputes derived prices when wallet changes or new scope appears',async()=>{
+  seed(goods(1,7,50000),goods(2,7,15000),goods(3,7,20000));
+  store.replaceWallet(DATE,[pct(1,20,30000,{conditions:['10,000원 이상 구매 시 할인'],scope:'listed'})]);
+  store.setCouponGoods(1,DATE,new Set([1,2,3]));
+  applyCouponPrices({store,date:DATE});assert.equal(store.getGoods(3).coupon_price,16000);
+  store.replaceWallet(DATE,[]);
+  applyCouponPrices({store,date:DATE});assert.equal(store.getGoods(3).coupon_price,null);
+  store.replaceWallet(DATE,[pct(1,20,30000,{conditions:['10,000원 이상 구매 시 할인'],scope:'listed'})]);
+  applyCouponPrices({store,date:DATE});assert.equal(store.getGoods(3).coupon_price,16000);
 });

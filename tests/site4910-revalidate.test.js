@@ -56,3 +56,19 @@ test('CLI dry run preserves DB hash; apply makes a verified backup and leaves ra
     await assert.rejects(runRevalidationCli(['--db',path.join(dir,'missing'),'--from',DATE,'--to',DATE,'--out',out]));
   } finally {fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('invalid evidence is never revived by numeric recalculation',async()=>{
+  const s=fixture();s.putPriceValidation({kind:'liked',sno:1,date:DATE,status:'invalid',reason:'confirmed-unavailable',
+    evidence:{observedDate:DATE,priceBasis:'AGLO',optionSno:42,bestOptionSno:42,basePrice:75900,discount:3790,isApplied:true}});
+  const r=await revalidate4910({db:s.db,from:DATE,to:DATE,now:NOW,apply:true});
+  assert.equal(r.invalid,1);assert.equal(r.corrected,0);s.close();
+});
+for(const alias of ['symlink','hardlink']) test('CLI rejects report '+alias+' to input DB before any write',async()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'clot-alias-')),dbPath=path.join(dir,'4910.db'),out=path.join(dir,'report.json');
+  try {
+    const s=fixture(dbPath);s.close();const before=sha(dbPath);
+    if(alias==='symlink')fs.symlinkSync(dbPath,out);else fs.linkSync(dbPath,out);
+    await assert.rejects(runRevalidationCli(['--db',dbPath,'--from',DATE,'--to',DATE,'--out',out]),/overlap|alias/);
+    assert.equal(sha(dbPath),before);
+  } finally {fs.rmSync(dir,{recursive:true,force:true});}
+});

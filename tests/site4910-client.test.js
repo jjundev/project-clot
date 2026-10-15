@@ -456,3 +456,12 @@ test('wallet preserves all conditions and target restrictions', async () => {
   assert.equal(c.hasTargets, true);
   assert.equal(c.appOnly, true);
 });
+
+test('malformed successful best coupon responses cannot verify no-coupon prices',async()=>{
+  for(const body of [{},null,{best_coupon:null},{best_coupon:null,is_applied:true}]) {
+    const {fn}=fakeFetch({lists:[json(200,body)]});
+    await assert.rejects(createClient({fetchFn:fn,delayMs:0}).getBestCoupon(1,{memberToken:'test'}));
+  }
+  const {fn}=fakeFetch({lists:[json(200,{best_coupon:null,is_applied:false})]});
+  assert.equal(await createClient({fetchFn:fn,delayMs:0}).getBestCoupon(1,{memberToken:'test'}),null);
+});

@@ -258,7 +258,10 @@ export function createClient({ fetchFn = fetch, delayMs = 300, retryBaseMs = 100
     const options = encodeURIComponent(JSON.stringify([{ sno: Number(optionSno), ea: 1 }]));
     const body = await getJson(`${BEST_COUPON_URL}?options=${options}`, { memberToken, aglo: true, label: `best coupon ${optionSno}` });
     const c = body?.best_coupon;
-    if (!c) return null;
+    if (c == null) {
+      if (body && Object.hasOwn(body, 'best_coupon') && body.best_coupon === null && body.is_applied === false) return null;
+      throw httpError(`4910 best coupon ${optionSno} failed: malformed coupon response`, undefined);
+    }
     const discount = c.coupon_discount == null ? NaN : Number(c.coupon_discount);
     if (!Number.isFinite(discount)) throw httpError(`4910 best coupon ${optionSno} failed: no numeric coupon_discount`, undefined);
     return {

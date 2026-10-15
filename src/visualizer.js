@@ -47,14 +47,19 @@ function buildLikedItems(db4910) {
   for (const log of logs) {
     const validation = validations.get(`${log.sno}:${log.date}`);
     const my = effective4910Price({ raw: log, validation });
+    const evidence = validation?.evidence_json ? JSON.parse(validation.evidence_json) : null;
+    const corrected = validation?.corrected_json ? JSON.parse(validation.corrected_json) : null;
+    const baseProven = evidence?.priceBasis === 'AGLO' && evidence.observedDate === log.date;
+    const base = baseProven ? evidence.basePrice : validation?.status === 'verified' ? log.list_price : corrected?.list_price;
+    const original = baseProven ? evidence.originalPrice : validation?.status === 'verified' ? log.original_price : corrected?.original_price;
     const tuple = [
       log.date,
-      log.original_price ?? null,
-      log.list_price ?? null,
+      original ?? null,
+      base ?? null,
       my,
       log.is_soldout ? 1 : 0,
       my == null ? '가격 재검증 필요' : '4910 검증가',
-      log.list_price != null && my != null ? Math.max(log.list_price - my, 0) : 0,
+      base != null && my != null ? Math.max(base - my, 0) : 0,
       null,
     ];
     const arr = logsBySno.get(log.sno);
@@ -238,6 +243,10 @@ export function buildScan4910Payload(db4910, { brandSno = null } = {}) {
       const v = validations.get(`${sno}:${row[0]}`);
       // No validation for this date: no refreshed coupon estimate on a later day.
       if (!v || !['verified', 'corrected'].includes(v.status)) return [row[0], row[1], row[2], null];
+      if (v.corrected_json) {
+        const c = JSON.parse(v.corrected_json);
+        if (Number.isFinite(c.sale_price)) return [row[0], row[1], c.sale_price, effective4910Price({ raw: c, validation: v })];
+      }
       return row;
     });
   };

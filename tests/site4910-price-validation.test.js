@@ -33,3 +33,12 @@ test('scan coupon history cannot resurrect invalid prices via carry',()=>{
   s.putPriceValidation({kind:'scan',sno:1,date:'2026-10-14',status:'invalid',reason:'fixture'});
   assert.ok(buildScan4910Payload(s.db).r[0][7].every(r=>r[3]===null));s.close();
 });
+
+test('corrected AGLO scan base survives merging against a different raw basis',()=>{
+  const s=new Store4910(':memory:');
+  s.applyScan('2026-10-15',[{sno:1,brand_sno:1,brand:'b',name:'a',url:'x',market_sno:1,market_name:null,category:null,image_url:null,sale_price:85200,original_price:90000,discount_rate:null}],{completeBrands:[1]});
+  s.logCouponPriceChanges('2026-10-15',[{sno:1,sale_price:85200,coupon_price:81410}]);
+  s.putPriceValidation({kind:'scan',sno:1,date:'2026-10-15',status:'corrected',reason:'evidence',corrected:{sale_price:75900,coupon_price:72110}});
+  assert.deepEqual(buildScan4910Payload(s.db).r[0][7][0],['2026-10-15',90000,75900,72110]);
+  assert.equal(s.getGoods(1).sale_price,85200);s.close();
+});

@@ -343,7 +343,7 @@ const ANON_CHECKS = ['4910 anonymous token', '4910 uniqlo listing', '4910 brand 
 
 // Anonymous endpoints answer; `likedStatus` / `couponsStatus` / `bestStatus` set the member endpoints' answers,
 // `best` the best-coupon body.
-const probeFetch = ({ likedStatus = 200, couponsStatus = 200, bestStatus = 200, best = { best_coupon: null } } = {}) => async (url) => {
+const probeFetch = ({ likedStatus = 200, couponsStatus = 200, bestStatus = 200, best = { best_coupon: null, is_applied: false } } = {}) => async (url) => {
   if (url.includes('/anonymous/token/')) return json(200, { token: 'tok' });
   if (url.includes('/brands/ranking/')) return json(200, { brand_list: [{ sno: 2421, name: '유니클로' }], last_sno: 1 });
   if (url.includes('/markets/')) return json(200, { market: { sno: 56293, name: 'seller', purchasing_satisfaction_ratio: 98, reviews_count: 4321 } });

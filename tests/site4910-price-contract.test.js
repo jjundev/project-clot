@@ -31,8 +31,8 @@ test('seller sample does not expand wallet or grant unsampled listings a coupon'
     getBestCoupon: async optionSno => ({ couponSno: 22, optionSno, isApplied: true, discount: 2820, percent: 22, min: 1 }),
     getCouponGoodsPage: async () => ({ totalCount: 999999, snos: [], lastSno: null }),
   };
-  await learnMarketCoupons({ client, store, date: '2026-10-16', marketSnos: [7], memberToken: 'test', log() {} });
-  applyCouponPrices({ store, date: '2026-10-16' });
+  const learned = await learnMarketCoupons({ client, store, date: '2026-10-16', marketSnos: [7], memberToken: 'test', log() {} });
+  applyCouponPrices({ store, date: '2026-10-16', observations: learned.observations });
   assert.equal(store.getGoods(1).coupon_price, 10030);
   assert.equal(store.getGoods(3).coupon_price, null);
   // Only highest/lowest distinct samples qualify; no amount can ever become the quantity-3 9,000 price.

@@ -51,7 +51,7 @@ export async function learnMarketCoupons({ client, withClient = fn => fn(client)
   marketSnos, memberToken, deadline = Infinity, log = console.log }) {
   const result = { memberStatus: 'none', wallet: 0, walletChanges: { added: [], removed: [] }, emoney: null,
     eligible: 0, mismatched: 0, hidden: { scope: 0, naver: 0, mismatch: 0 },
-    validation: { verified: 0, unverified: 0, reasons: {} } };
+    validation: { verified: 0, unverified: 0, reasons: {} }, observations: new Map() };
   if (!memberToken) return result;
   let wallet;
   try {
@@ -103,11 +103,13 @@ export async function learnMarketCoupons({ client, withClient = fn => fn(client)
         result.validation[ok ? 'verified' : 'unverified']++;
         result.validation.reasons[resolved.reason] = (result.validation.reasons[resolved.reason] ?? 0) + 1;
         if (ok) verified++;
-        store.putPriceValidation({ kind: 'scan', sno: sample.sno, date, status: ok ? 'verified' : 'unverified',
+        const observation = { kind: 'scan', sno: sample.sno, date, status: ok ? 'verified' : 'unverified',
           reason: resolved.reason, corrected: ok ? { sale_price: detail.listPrice, coupon_price: resolved.price } : null,
           evidence: { observedDate: date, bestOptionSno: best?.optionSno ?? null, priceBasis: detail?.priceBasis ?? null, optionSno: detail?.optionSno ?? null,
             basePrice: detail?.listPrice ?? null, couponSno: best?.couponSno ?? null,
-            discount: best?.discount ?? null, isApplied: best?.isApplied ?? null } });
+            discount: best?.discount ?? null, isApplied: best?.isApplied ?? null } };
+        store.putPriceValidation(observation);
+        result.observations.set(sample.sno, observation);
       }
       if (answered) store.recordMarketCoupon({ market_sno: marketSno, date, mismatch: verified === 0 });
       if (verified) result.eligible++;
@@ -118,11 +120,12 @@ export async function learnMarketCoupons({ client, withClient = fn => fn(client)
   return result;
 }
 
-export function applyCouponPrices({ store, date, marketSnos = null }) {
+export function applyCouponPrices({ store, date, marketSnos = null, observations = new Map() }) {
   const learned = marketSnos == null ? null : new Set(marketSnos.map(Number));
   const rows = store.getWallet().filter(c => c.market_sno == null && c.seen_date === date && c.scope === 'listed');
   const scopes = new Map(rows.map(c => [c.coupon_sno, { kind: 'goods', complete: true, goodsSnos: store.getCouponGoods(c.coupon_sno, date) }]));
-  const direct = new Map(store.db.prepare("SELECT * FROM price_validations WHERE kind='scan' AND date=?").all(date).map(r => [r.sno, r]));
+  // Only observations returned by this learning run are direct evidence; stored derived prices are never fresh.
+  const direct = observations;
   const prices = new Map(), pairs = [];
   const validation = { verified: 0, unverified: 0, reasons: {} };
   for (const g of store.getActivePriceRows()) {
@@ -130,7 +133,7 @@ export function applyCouponPrices({ store, date, marketSnos = null }) {
     const observed = direct.get(g.sno);
     let price = null, reason = 'scope';
     if (observed?.status === 'verified') {
-      const corrected = JSON.parse(observed.corrected_json);
+      const corrected = observed.corrected;
       // The listing may be stale relative to today's detail: keep the observation's own base price.
       if (corrected.sale_price === g.sale_price) { price = corrected.coupon_price; reason = observed.reason; }
       else reason = 'listing-detail-mismatch';
@@ -145,7 +148,7 @@ export function applyCouponPrices({ store, date, marketSnos = null }) {
     validation.reasons[reason] = (validation.reasons[reason] ?? 0) + 1;
     store.putPriceValidation({ kind: 'scan', sno: g.sno, date, status: price == null ? 'unverified' : 'verified', reason,
       corrected: price == null ? null : { sale_price: g.sale_price, coupon_price: price },
-      evidence: observed ? JSON.parse(observed.evidence_json) : { priceBasis: 'AGLO', basePrice: g.sale_price, scope: 'complete-goods-list' } });
+      evidence: observed ? observed.evidence : { priceBasis: 'AGLO', basePrice: g.sale_price, scope: 'complete-goods-list' } });
   }
   store.setCouponPrices(prices);
   store.logCouponPriceChanges(date, pairs);

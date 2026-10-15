@@ -199,9 +199,23 @@ describe('Visualizer Data Extraction', () => {
       assert.equal(item.fs, '2026-10-11');
       assert.equal(typeof item.c, 'string');
       assert.deepEqual(item.L[0], ['2026-10-11', 51300, 21600, 19440, 0, '4910 검증가', 2160, null]);
-      assert.deepEqual(item.L[1], ['2026-10-12', 51300, 21600, null, 0, '가격 재검증 필요', 0, null]);
+      assert.deepEqual(item.L[1], ['2026-10-12', null, null, null, 0, '가격 재검증 필요', 0, null]);
       assert.deepEqual(payload.dates, ['2026-08-01', '2026-08-02', '2026-10-11', '2026-10-12']);
       store.close();
+    });
+
+    test('legacy ABLY bases are masked while independently verified AGLO bases remain visible', () => {
+      const store=new Store4910(':memory:');
+      store.syncLiked([likedRow(1)],'2026-10-15');
+      store.logLikedPrice({sno:1,date:'2026-10-15',list_price:85200,original_price:99000,member_price:81410,coupon_price:72420});
+      const item=()=>buildClotDataPayload(setupTestDb(),{db4910:store.db}).items.find(it=>it.src==='4910');
+      assert.deepEqual(item().L[0].slice(1,4),[null,null,null]);
+      store.putPriceValidation({kind:'liked',sno:1,date:'2026-10-15',status:'unverified',reason:'coupon-not-applied',
+        evidence:{observedDate:'2026-10-15',priceBasis:'AGLO',basePrice:75900,originalPrice:90000}});
+      assert.deepEqual(item().L[0].slice(1,4),[90000,75900,null]);
+      store.putPriceValidation({kind:'liked',sno:1,date:'2026-10-15',status:'corrected',reason:'evidence',corrected:{member_price:72110},
+        evidence:{observedDate:'2026-10-15',priceBasis:'AGLO',basePrice:75900}});
+      assert.deepEqual(item().L[0].slice(1,4),[null,75900,72110]);store.close();
     });
 
     test('brand falls back to market_name then 4910', () => {

@@ -1437,12 +1437,12 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     tb.innerHTML = rows.map(function (r, i) {
       var older = rows[i + 1];
       var sameBasis = !older || !is4910(it) || r[5] === older[5];
-      var d = (older && sameBasis) ? r[3] - older[3] : null;
+      var d = (older && sameBasis && r[3] != null && older[3] != null) ? r[3] - older[3] : null;
       var dCell = d == null ? '<span class="delta-flat">—</span>'
         : d < 0 ? '<span class="delta-down num">↓ ' + Math.abs(d).toLocaleString('ko-KR') + '</span>'
         : d > 0 ? '<span class="delta-up num">↑ ' + d.toLocaleString('ko-KR') + '</span>'
         : '<span class="delta-flat">변동 없음</span>';
-      var isLowRow = r[3] === it.lowMy && (!is4910(it) || r[5] === it.couponName);
+      var isLowRow = r[3] != null && it.lowMy != null && r[3] === it.lowMy && (!is4910(it) || r[5] === it.couponName);
       return '<tr><td>' + r[0] + '</td>' +
         '<td class="mine-c num">' + won(r[3]) + '</td>' +
         '<td>' + dCell + '</td>' +
@@ -1451,6 +1451,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         '<td class="num" style="color:var(--muted)">' + won(r[1]) + '</td>' +
         '<td>' + (r[4] === 1
           ? '<span class="st">품절</span>'
+          : is4910(it) && r[3] == null ? '<span class="st">가격 재검증 필요</span>'
           : isLowRow ? '<span class="st on">최저가</span>' : '<span class="st">판매중</span>') + '</td></tr>';
     }).join('');
   }

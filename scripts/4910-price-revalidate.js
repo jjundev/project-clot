@@ -33,7 +33,9 @@ export async function revalidate4910({ db, client = null, from, to, now = new Da
       let status = 'unverified', reason = 'legacy-missing-platform-option-conditions', corrected = null, evidence = null;
       try { evidence = existing?.evidence_json ? JSON.parse(existing.evidence_json) : null; } catch { /* corrupt evidence cannot authorize a price */ }
       // A captured date and matching option are mandatory: present-day responses are never historical evidence.
-      if (evidence?.observedDate === raw.date && evidence.priceBasis === 'AGLO' && evidence.optionSno != null &&
+      if (existing?.status === 'invalid') {
+        status = 'invalid'; reason = existing.reason;
+      } else if (evidence?.observedDate === raw.date && evidence.priceBasis === 'AGLO' && evidence.optionSno != null &&
           evidence.bestOptionSno === evidence.optionSno && evidence.isApplied === true &&
           Number.isFinite(evidence.basePrice) && evidence.basePrice > 0 && Number.isFinite(evidence.discount) &&
           evidence.discount >= 0 && evidence.discount <= evidence.basePrice) {
@@ -108,7 +110,12 @@ export async function runRevalidationCli(argv) {
   }
   validateRange(flags.from,flags.to);
   if (!flags.db || !flags.out || !fs.statSync(flags.db).isFile()) throw new Error('existing --db and --out required');
-  const dbPath=path.resolve(flags.db),out=path.resolve(flags.out);
+  const dbPath=fs.realpathSync(flags.db),out=path.resolve(flags.out);
+  const inputStat=fs.statSync(dbPath);
+  if (fs.existsSync(out)) {
+    const outputStat=fs.statSync(out);
+    if (outputStat.dev===inputStat.dev && outputStat.ino===inputStat.ino) throw new Error('report alias overlaps DB');
+  }
   if (dbPath===out || out===dbPath+'-wal' || out===dbPath+'-shm') throw new Error('report path overlaps DB');
   // A standalone Release copy is the intended input. Never copy a live, uncheckpointed database.
   if (fs.existsSync(dbPath+'-wal') && fs.statSync(dbPath+'-wal').size>0) throw new Error('checkpoint or copy live WAL database first');
@@ -133,7 +140,12 @@ export async function runRevalidationCli(argv) {
   try {report=await revalidate4910({db,client,from:flags.from,to:flags.to,apply:!!flags.apply});} finally {db.close();}
   if (!flags.apply && sha(dbPath)!==before) throw new Error('dry-run modified database');
   report={...report,db:dbPath,inputSha256:before,outputSha256:sha(dbPath),backup,applied:!!flags.apply};
-  fs.writeFileSync(out,JSON.stringify(report,null,2)+'\n');
+  const temporary=out+'.tmp-'+process.pid+'-'+Date.now();
+  try {
+    fs.writeFileSync(temporary,JSON.stringify(report,null,2)+'\n',{flag:'wx'});
+    fs.renameSync(temporary,out);
+  } finally { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); }
+  if (!flags.apply && sha(dbPath)!==before) throw new Error('report delivery modified database');
   return report;
 }
 
