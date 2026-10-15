@@ -2,6 +2,7 @@
 // ~16k listings a day, so history is change-only: price_changes gets a row only for NEW, PRICE, DROPPED, REVIVED,
 // and a goods row is rewritten only when something in it changed — an unchanged listing keeps its bytes, so the
 // daily git commit of this file stays a small delta. (No last_seen_date for that reason: misses track absence.)
+import { effective4910Price } from './price-validation.js';
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -528,9 +529,11 @@ export class Store4910 {
   }
 
   getPrevLikedPrice(sno, date) {
-    return this.db
-      .prepare('SELECT * FROM liked_price_logs WHERE sno = ? AND date < ? ORDER BY date DESC LIMIT 1')
-      .get(Number(sno), date);
+    const raw = this.db.prepare('SELECT * FROM liked_price_logs WHERE sno = ? AND date < ? ORDER BY date DESC LIMIT 1').get(Number(sno), date);
+    if (!raw) return null;
+    const validation = this.db.prepare("SELECT * FROM price_validations WHERE kind='liked' AND sno=? AND date=?").get(Number(sno), raw.date);
+    const price = effective4910Price({ raw, validation });
+    return price == null ? null : { ...raw, member_price: price, coupon_price: null };
   }
 
   getGoods(sno) {

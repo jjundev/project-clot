@@ -148,6 +148,7 @@ export function applyCouponPrices({ store, date, marketSnos = null }) {
     validation[price == null ? 'unverified' : 'verified']++;
     validation.reasons[reason] = (validation.reasons[reason] ?? 0) + 1;
     store.putPriceValidation({ kind: 'scan', sno: g.sno, date, status: price == null ? 'unverified' : 'verified', reason,
+      corrected: price == null ? null : { sale_price: g.sale_price, coupon_price: price },
       evidence: observed ? JSON.parse(observed.evidence_json) : { priceBasis: 'AGLO', basePrice: g.sale_price, scope: 'complete-goods-list' } });
   }
   store.setCouponPrices(prices);

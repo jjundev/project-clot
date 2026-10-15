@@ -859,7 +859,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     P.r.forEach(function (r) {
       var L = r[7].map(function (h) {
         var cp = h[3];
-        return [h[0], h[1], h[2], cp != null ? cp : h[2], 0, cp != null ? '쿠폰가' : '표시가', cp != null ? h[2] - cp : 0];
+        return [h[0], h[1], h[2], cp, 0, cp != null ? '4910 검증가' : '가격 재검증 필요', cp != null ? h[2] - cp : 0];
       });
       D.items.push({
         n: r[0], k: '4910:' + r[0], src: '4910all', bs: P.brandSno, b: P.b[r[1]], m: P.m[r[2]], g: r[3],
@@ -940,6 +940,8 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         (it.newbie != null && it.newbie !== it.my ? '<div class="was nb num">쿠폰적용가(신규회원 기준) ' + won(it.newbie) + '</div>' : '') +
         (it.coupon > 0 ? '<span class="tag">' + esc(it.couponName || '쿠폰') + ' −' + it.coupon.toLocaleString('ko-KR') + '원</span>' : '');
     }
+    if (is4910(it) && it.my == null && it.tracked) body = '<div class="waitprice">가격 재검증 필요</div>';
+    if (is4910(it) && it.vd) body += '<div class="was">검증일 ' + esc(it.vd.slice(0, 10)) + '</div>';
     var tags = (it.c ? '<span class="cat-tag">' + esc(CAT_NAMES[it.c] || it.c) + '</span>' : '') +
       (is4910(it) ? '<span class="cat-tag">4910</span>' : '');
     return '<button class="card' + (it.isOut ? ' out' : '') + '" type="button" data-k="' + esc(it.k) +
@@ -1261,6 +1263,8 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         '<span class="now num">' + won(it.my) + '</span>' +
         (it.normal !== it.my ? '<span class="base num">' + won(it.normal) + '</span>' : '');
       var f = [];
+      if (on4910 && it.my == null) f.push('<span class="fact">가격 재검증 필요</span>');
+      if (on4910 && it.vd) f.push('<span class="fact">검증일 ' + esc(it.vd.slice(0,10)) + '</span>');
       f.push('<span class="fact' + (it.isLow ? ' low' : '') + '">역대 최저가 <b class="num">' + won(it.lowMy) +
         '</b> · ' + md(it.lowDate) + '</span>');
       f.push('<span class="fact">' + (on4910 ? '4910 표시가' : '무신사 판매가') + ' <b class="num">' + won(it.sale) + '</b></span>');

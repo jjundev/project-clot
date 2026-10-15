@@ -256,8 +256,9 @@ test('getPrevLikedPrice returns the latest row before the date', () => {
   const log = (date, member_price) => s.logLikedPrice({ sno: 1, date, list_price: 5000, original_price: 9000, coupon_price: null, member_price, is_soldout: 0 });
   log('2026-10-09', 4500);
   log('2026-10-10', 4000);
+  s.putPriceValidation({kind:'liked',sno:1,date:'2026-10-10',status:'verified',reason:'fixture'});
   assert.equal(s.getPrevLikedPrice(1, '2026-10-11').date, '2026-10-10');
-  assert.equal(s.getPrevLikedPrice(1, '2026-10-09'), undefined);
+  assert.equal(s.getPrevLikedPrice(1, '2026-10-09'), null);
 });
 
 // ---- top-100 sellers: per-brand scans, scope, brands, sellers, coupons ----

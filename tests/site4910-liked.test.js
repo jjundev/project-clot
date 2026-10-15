@@ -246,8 +246,10 @@ test('a best-coupon failure logs the item with a null member price and no token'
   assert.equal(store.db.prepare('SELECT member_price FROM liked_price_logs WHERE sno = 1').get().member_price, null);
 });
 
-const prevRow = (sno, member_price, coupon_price, list_price = 21600) =>
+const prevRow = (sno, member_price, coupon_price, list_price = 21600) => {
   store.logLikedPrice({ sno, date: '2026-10-09', list_price, original_price: 51300, coupon_price, member_price, is_soldout: 0 });
+  if (member_price != null) store.putPriceValidation({ kind:'liked',sno,date:'2026-10-09',status:'verified',reason:'test-evidence' });
+};
 
 test('a member price drop is reported; failed member lookup cannot fall back to public price', async () => {
   prevRow(1, 20000, 18000);

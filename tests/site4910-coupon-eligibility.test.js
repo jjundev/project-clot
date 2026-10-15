@@ -1,3 +1,4 @@
+import './setup-env.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseCouponConditions, evaluateCouponEligibility as evaluate } from '../src/site4910/coupon-eligibility.js';

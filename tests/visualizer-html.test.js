@@ -220,6 +220,7 @@ describe('Visualizer HTML Generation', () => {
       scanListing(71863924, 2421, '유니클로'), scanListing(71863925, 2421, '유니클로'), scanListing(80000001, 13647, 'GU'),
     ]);
     store.logCouponPriceChanges('2026-10-10', [{ sno: 71863924, sale_price: 21600, coupon_price: 18000 }]);
+    store.putPriceValidation({kind:'scan',sno:71863924,date:'2026-10-10',status:'verified',reason:'fixture'});
     store.close();
 
     const tempOutput = path.join(dir, 'index.html');
@@ -326,14 +327,14 @@ describe('Visualizer HTML Generation', () => {
     const html = buildInTempDir('clot-4910all-contract-');
     for (const s of ['data-src="4910all"', '4910 찜', '4910 전체', "'4910/index.js'", "'?v='", '__CLOT_4910_INDEX__', '__CLOT_4910_B__',
       '4910 판매글 불러오는 중…', '4910 전체 목록을 불러오지 못했습니다', 'data-retry-4910',
-      'id="gridMore"', 'var PAGE = 120', 'IntersectionObserver', "rootMargin: '600px'", "'표시가'"]) {
+      'id="gridMore"', 'var PAGE = 120', 'IntersectionObserver', "rootMargin: '600px'", "'가격 재검증 필요'"]) {
       assert.ok(html.includes(s), s);
     }
   });
 
   test('template loads brand files on demand; coupon price is the 4910 basis', () => {
     const html = buildInTempDir('clot-4910brands-contract-');
-    for (const s of ['__CLOT_4910_INDEX__', 'data-b4910', "'4910/b'", "'쿠폰가'", "{ coupon: 'priceAsc', couponRate: 'rate' }",
+    for (const s of ['__CLOT_4910_INDEX__', 'data-b4910', "'4910/b'", "'4910 검증가'", "{ coupon: 'priceAsc', couponRate: 'rate' }",
       "'&brand='", "get('brand')"]) {
       assert.ok(html.includes(s), s);
     }
