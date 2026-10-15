@@ -31,6 +31,11 @@ export class Store4910 {
       PRAGMA busy_timeout = 5000;
       PRAGMA journal_mode = WAL;
 
+      CREATE TABLE IF NOT EXISTS price_validations (
+        kind TEXT NOT NULL, sno INTEGER NOT NULL, date TEXT NOT NULL, status TEXT NOT NULL,
+        corrected_json TEXT, reason TEXT NOT NULL, evidence_json TEXT, checked_at TEXT NOT NULL,
+        PRIMARY KEY (kind, sno, date)
+      );
       CREATE TABLE IF NOT EXISTS goods (
         sno INTEGER PRIMARY KEY, brand_sno INTEGER NOT NULL, brand TEXT, name TEXT NOT NULL,
         market_sno INTEGER, market_name TEXT, category TEXT, url TEXT NOT NULL, image_url TEXT,
@@ -509,6 +514,13 @@ export class Store4910 {
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `)
       .run(sno, date, list_price ?? null, original_price ?? null, coupon_price ?? null, member_price ?? null, is_soldout ? 1 : 0);
+  }
+
+  putPriceValidation({ kind, sno, date, status, corrected = null, reason, evidence = null, checkedAt = new Date().toISOString() }) {
+    this.db.prepare(`INSERT OR REPLACE INTO price_validations
+      (kind,sno,date,status,corrected_json,reason,evidence_json,checked_at) VALUES (?,?,?,?,?,?,?,?)`)
+      .run(kind, Number(sno), date, status, corrected == null ? null : JSON.stringify(corrected), reason,
+        evidence == null ? null : JSON.stringify(evidence), checkedAt);
   }
 
   getActiveLiked() {

@@ -184,7 +184,7 @@ test('past the run budget no seller is checked and no coupon is sampled, but the
   const member = {
     async getMyCoupons() { calls.coupons++; return WALLET; },
     async getMe() { return { emoney: 0 }; },
-    async getGoodsDetail(sno) { return { optionSno: sno * 10 }; },
+    async getGoodsDetail(sno) { return { priceBasis: 'AGLO', listPrice: store.getGoods(sno)?.sale_price, optionSno: sno * 10 }; },
     async getBestCoupon() { calls.best++; return null; },
   };
   const makeClient = fakeClients(CATALOG, { member });
@@ -207,18 +207,19 @@ test('with a member token the qualified sellers get coupon prices', async () => 
   const member = {
     async getMyCoupons() { return WALLET; },
     async getMe() { return { emoney: 1200 }; },
-    async getGoodsDetail(sno) { return { optionSno: sno * 10 }; },
-    async getBestCoupon(optionSno) { return { couponSno: 7, name: '10% 쿠폰', discount: optionSno === 10 ? 5000 : 1990 }; },
+    async getGoodsDetail(sno) { return { priceBasis: 'AGLO', listPrice: store.getGoods(sno)?.sale_price, optionSno: sno * 10 }; },
+    async getBestCoupon(optionSno) { return { optionSno, isApplied: true, couponSno: 7, name: '10% 쿠폰', discount: optionSno === 10 ? 5000 : 1990 }; },
   };
   const makeClient = fakeClients(CATALOG, { member });
   const res = await track4910({ makeClient, store, date: '2026-10-10', brands: BRANDS, memberToken: 'T', log: quiet });
   assert.ok(makeClient.calls <= 3); // coupon learning reuses the scan's clients
-  const { walletChanges, ...coupons } = res.coupons;
-  assert.deepEqual(coupons, { memberStatus: 'ok', wallet: 1, emoney: 1200, eligible: 1, mismatched: 0, hidden: { scope: 0, naver: 0, mismatch: 0 }, priced: 5 });
+  const { walletChanges, validation, ...coupons } = res.coupons;
+  assert.deepEqual(coupons, { memberStatus: 'ok', wallet: 1, emoney: 1200, eligible: 1, mismatched: 0, hidden: { scope: 0, naver: 0, mismatch: 0 }, priced: 2 });
+  assert.equal(validation.verified, 2);
   assert.deepEqual(walletChanges.added, ['10% 쿠폰']);
   assert.equal(store.getGoods(1).coupon_price, 45000);
   assert.equal(store.getGoods(11).coupon_price, 17910);
-  assert.equal(store.getGoods(3).coupon_price, 9900); // below the coupon minimum
+  assert.equal(store.getGoods(3).coupon_price, null); // below the coupon minimum
   assert.equal(count("SELECT COUNT(*) AS n FROM coupon_price_changes WHERE date = '2026-10-10'"), 5);
   assert.equal(count("SELECT COUNT(*) AS n FROM scan_runs WHERE coupons_ok = 1"), 1);
 });
@@ -227,8 +228,8 @@ test('a run whose coupon learning is not ok keeps the last coupon prices and his
   const member = {
     async getMyCoupons() { return WALLET; },
     async getMe() { return { emoney: 0 }; },
-    async getGoodsDetail(sno) { return { optionSno: sno * 10 }; },
-    async getBestCoupon(optionSno) { return { couponSno: 7, name: '10% 쿠폰', discount: optionSno === 10 ? 5000 : 1990 }; },
+    async getGoodsDetail(sno) { return { priceBasis: 'AGLO', listPrice: store.getGoods(sno)?.sale_price, optionSno: sno * 10 }; },
+    async getBestCoupon(optionSno) { return { optionSno, isApplied: true, couponSno: 7, name: '10% 쿠폰', discount: optionSno === 10 ? 5000 : 1990 }; },
   };
   await track4910({ makeClient: fakeClients(CATALOG, { member }), store, date: '2026-10-10', brands: BRANDS, memberToken: 'T', log: quiet });
   const lines = [];
@@ -256,8 +257,8 @@ test("a --brand run reprices only the sellers it learned; another brand's listin
   const member = {
     async getMyCoupons() { return WALLET; },
     async getMe() { return { emoney: 0 }; },
-    async getGoodsDetail(sno) { return { optionSno: sno * 10 }; },
-    async getBestCoupon(optionSno) { return { couponSno: 7, name: '10% 쿠폰', discount: price[optionSno / 10] * 0.1 }; },
+    async getGoodsDetail(sno) { return { priceBasis: 'AGLO', listPrice: store.getGoods(sno)?.sale_price, optionSno: sno * 10 }; },
+    async getBestCoupon(optionSno) { return { optionSno, isApplied: true, couponSno: 7, name: '10% 쿠폰', discount: price[optionSno / 10] * 0.1 }; },
   };
   store.upsertBrands('2026-10-10', BRANDS, []); // the stored brand list keeps GU in scope on a partial run
   await track4910({ makeClient: fakeClients(catalog, { member }), store, date: '2026-10-10', brands: BRANDS, memberToken: 'T', log: quiet });
@@ -275,8 +276,8 @@ test('a >=10% drop carries its coupon price with a member token, null without', 
   const member = {
     async getMyCoupons() { return WALLET; },
     async getMe() { return { emoney: 0 }; },
-    async getGoodsDetail(sno) { return { optionSno: sno * 10 }; },
-    async getBestCoupon(optionSno) { return { couponSno: 7, name: '10% 쿠폰', discount: LIST_PRICE[optionSno / 10] * 0.1 }; },
+    async getGoodsDetail(sno) { return { priceBasis: 'AGLO', listPrice: store.getGoods(sno)?.sale_price, optionSno: sno * 10 }; },
+    async getBestCoupon(optionSno) { return { optionSno, isApplied: true, couponSno: 7, name: '10% 쿠폰', discount: LIST_PRICE[optionSno / 10] * 0.1 }; },
   };
   const dropped = { ...CATALOG, 2421: [[1, 40000], [2, 30000], [3, 9900]] }; // listing 1: 50,000 -> 40,000 (-20%)
   await track4910({ makeClient: fakeClients(CATALOG, { member }), store, date: '2026-10-10', brands: BRANDS, memberToken: 'T', log: quiet });
