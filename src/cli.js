@@ -1153,7 +1153,7 @@ function handleVisualize(flags, positional) {
   });
 
   console.log(`✅ 대시보드가 생성되었습니다: ${res.outputPath}`);
-  console.log(`   총 ${res.totalItems}개 상품 시계열 반영 완료.`);
+  console.log(`   총 ${res.totalItems}개 상품 반영 완료.`);
   if (res.targetGoodsNo) {
     console.log(`   🎯 타겟 상품 번호: ${res.targetGoodsNo}`);
   }

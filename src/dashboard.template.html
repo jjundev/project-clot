@@ -549,10 +549,9 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     <div class="chips" role="group" aria-label="출처 필터" data-od-id="source-chips">
       <button class="chip" type="button" data-src="all" aria-pressed="true" data-od-id="src-all">전체 <span class="c num" id="sAll">—</span></button>
       <button class="chip" type="button" data-src="musinsa" aria-pressed="false" data-od-id="src-musinsa">무신사 <span class="c num" id="sMusinsa">—</span></button>
-      <button class="chip" type="button" data-src="4910" aria-pressed="false" data-od-id="src-4910">4910 찜 <span class="c num" id="s4910">—</span></button>
-      <button class="chip" type="button" data-src="4910all" aria-pressed="false" data-od-id="src-4910all">4910 전체 <span class="c num" id="s4910all">—</span></button>
+      <button class="chip" type="button" data-src="4910" aria-pressed="false" data-od-id="src-4910">4910 <span class="c num" id="s4910">—</span></button>
     </div>
-    <div class="chips b4910" id="b4910Bar" role="group" aria-label="4910 브랜드" hidden data-od-id="brand-4910-chips"></div>
+
 
     <div class="chips" role="group" aria-label="빠른 필터" data-od-id="filter-chips">
       <button class="chip" type="button" data-filter="all" aria-pressed="true" data-od-id="chip-all">전체 <span class="c num" id="cAll">—</span></button>
@@ -577,10 +576,11 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   </section>
 
   <div class="resultbar" data-od-id="result-count">
-    <span><b id="shownN">—</b>개 표시</span>
+    <span>조건에 맞는 상품 <b id="shownN">—</b>개 · 현재 <b id="renderedN">0</b>개 표시</span>
     <button class="linkbtn" id="resetBtn" type="button" hidden>초기화</button>
   </div>
 
+  <p id="catalogNotice" role="status" hidden></p>
   <section class="grid" id="grid" data-od-id="product-grid" aria-label="추적 상품 목록"></section>
   <button class="more" id="gridMore" type="button" hidden data-od-id="grid-more"></button>
 </main>
@@ -639,7 +639,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         <div class="tbl-title">가격 변동 기록</div>
         <table data-od-id="history-table">
           <thead><tr>
-            <th scope="col">일자</th><th scope="col">나의 실구매가</th><th scope="col">전일 대비</th>
+            <th scope="col">일자</th><th scope="col">나의 실구매가</th><th scope="col">직전 관측 대비</th>
             <th scope="col">판매가</th><th scope="col" class="nb-col">신규회원가</th><th scope="col">정상가</th><th scope="col">상태</th>
           </tr></thead>
           <tbody id="mRows"></tbody>
@@ -684,52 +684,8 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
 
   /* __CLOT_MODEL__ */
   /* __CLOT_RUNTIME__ */
-  /* ── 파생 지표 계산 (모든 값은 관측치에서 유도, 추정 없음) ── */
-
-  function is4910(it) { return it.src === '4910' || it.src === '4910all'; }
-
-  function derive(it, idx) {
-    it._idx = idx;
-    it._hay = ((it.b || '') + ' ' + (it.m || '') + ' ' + (it.g || '') + ' ' + it.n).toLowerCase();
-    it._init = (it.b || it.g || '?').trim().charAt(0).toUpperCase();
-
-    var L = it.L;
-    it.tracked = L.length > 0;
-    if (!it.tracked) {
-      it.rate = -1; it.dropAmt = 0; it.isOut = it.s === 'SOLDOUT';
-      it.isLow = false; it.my = null; it.sale = null; it.normal = null; it.newbie = null;
-      return;
-    }
-    var last = L[L.length - 1], prev = L.length > 1 ? L[L.length - 2] : null;
-    it.my = last[3]; it.sale = last[2]; it.normal = last[1];
-    it.newbie = last.length > 7 ? last[7] : null;
-    it.isOut = last[4] === 1 || it.s === 'SOLDOUT';
-    it.coupon = last[6] > 0 ? last[6] : 0;
-    it.couponName = last[5];
-    it.rate = (it.normal && it.my != null) ? Math.round((1 - it.my / it.normal) * 100) : 0;
-
-    // 4910 rows are priced on different bases ('내 회원가' vs '쿠폰적용가(신규회원 기준)', slot [5]); only
-    // rows on the latest row's basis are comparable, so a coupon-only day never fakes a drop or a low.
-    var is4910Item = is4910(it);
-    var lowMy = Infinity, lowDate = null, basisMoved = false, firstMy = null;
-    L.forEach(function (r) {
-      if (is4910Item && r[5] !== last[5]) return;
-      if (r[3] != null && r[3] < lowMy) { lowMy = r[3]; lowDate = r[0]; }
-      if (r[3] != null) {
-        if (firstMy == null) firstMy = r[3];
-        else if (r[3] !== firstMy) basisMoved = true;
-      }
-    });
-    it.lowMy = lowMy === Infinity ? null : lowMy;
-    it.lowDate = lowDate;
-    it.isLow = it.lowMy != null && it.my != null && it.my <= it.lowMy;
-    // A listing whose price on today's basis never changed has nothing to be lowest against.
-    if (it.src === '4910all' && !basisMoved) it.isLow = false;
-
-    it.dropAmt = (prev && (!is4910Item || prev[5] === last[5]) && prev[3] != null && it.my != null && it.my < prev[3]) ? prev[3] - it.my : 0;
-  }
-  D.items.forEach(derive);
-
+  var model = window.__CLOT_MODEL__;
+  function is4910(it) { return it.src === '4910'; }
   /* ── 헤더 · KPI · 칩 카운트 ─────────────────────────────── */
   var lastRunTxt = D.lastRun
     ? new Date(D.lastRun).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -741,179 +697,33 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   var CAT_ORDER = { top: 1, outer: 2, bottom: 3, shoes: 4, bag: 5, etc: 6 };
 
   /* ── 상태 ───────────────────────────────────────────────── */
-  var SRC_KEYS = { all: 1, musinsa: 1, '4910': 1, '4910all': 1 };
-  var FILTER_KEYS = { all: 1, lowest: 1, drop: 1, onsale: 1, out: 1 };
-  var state = {
-    q: '',
-    src: store('src') || 'all',
-    cat: store('cat') || 'all',
-    filter: store('filter') || 'all',
-    sort: store('sort') || 'rate'
-  };
-  if (!FILTER_KEYS[state.filter]) state.filter = 'all';
-  if (!SRC_KEYS[state.src] || (state.src === '4910all' && !D.has4910All)) state.src = 'all';
-  var view = [];
-  var shown = 0;
-  var PAGE = 120;
-  document.querySelector('[data-src="4910all"]').hidden = !D.has4910All;
-
-  /* ── 4910 전체: 칩을 누르면 4910/index.js, 브랜드 칩을 누르면 4910/b{sno}.js 를 <script> 로 불러온다 (file:// 에서도 동작) ──
-     불러온 브랜드는 쌓인다. 고른 브랜드(sel4910)의 판매글만 `4910 전체`에 보이고, `전체`는 무신사와 찜만 보인다. */
-  var idx4910 = { status: 'idle', promise: null, brands: [] };
-  var b4910 = {};    // brand sno → { status, promise }
-  var sel4910 = {};  // brand sno → true while its chip is on
-  function loadScript(src, onload, onerror) {
-    var s = document.createElement('script');
-    s.onerror = function () { if (s.parentNode) s.parentNode.removeChild(s); onerror(); };
-    s.onload = function () { onload(s); };
-    s.src = src + '?v=' + encodeURIComponent(D.generatedAt || '');
-    document.head.appendChild(s);
-  }
-  function ensure4910Index() {
-    if (idx4910.status === 'ready') return Promise.resolve(true);
-    if (idx4910.promise) return idx4910.promise;
-    idx4910.status = 'loading';
-    idx4910.promise = new Promise(function (resolve) {
-      function fail() { idx4910.status = 'error'; idx4910.promise = null; render(); resolve(false); }
-      loadScript('4910/index.js', function () {
-        var I = window.__CLOT_4910_INDEX__;
-        if (!I || !I.brands) { fail(); return; }
-        window.__CLOT_4910_INDEX__ = null;
-        idx4910.brands = I.brands;
-        idx4910.status = 'ready';
-        renderBrandBar(); render(); resolve(true);
-      }, fail);
-    });
-    return idx4910.promise;
-  }
-  function load4910Brand(sno) {
-    var st = b4910[sno] || (b4910[sno] = { status: 'idle', promise: null });
-    if (st.status === 'ready') return Promise.resolve(true);
-    if (st.promise) return st.promise;
-    st.status = 'loading';
-    renderBrandBar();
-    st.promise = new Promise(function (resolve) {
-      function fail() { st.status = 'error'; st.promise = null; renderBrandBar(); render(); resolve(false); }
-      loadScript('4910/b' + sno + '.js', function () {
-        var all = window.__CLOT_4910_B__ || {};
-        var P = all[sno];
-        if (!P || !P.r) { fail(); return; }
-        delete all[sno];
-        expand4910All(P);
-        st.status = 'ready';
-        renderBrandBar(); render(); resolve(true);
-      }, fail);
-    });
-    return st.promise;
-  }
-  function brandName4910(sno) {
-    var b = idx4910.brands.filter(function (x) { return String(x[0]) === String(sno); })[0];
-    return b ? b[1] : String(sno);
-  }
-  var brandBar = document.getElementById('b4910Bar');
-  // The chips are built once per loaded index; every later render only updates them in place, so the bar keeps
-  // its scroll position and the focused chip keeps keyboard focus.
-  var brandChips = {};
-  var brandChipsFor = null;
-  function buildBrandBar() {
-    brandBar.innerHTML = idx4910.brands.map(function (b) {
-      return '<button class="chip" type="button" data-b4910="' + b[0] + '" aria-pressed="false">' +
-        esc(b[1]) + ' <span class="c num"></span></button>';
-    }).join('');
-    brandChips = {};
-    brandBar.querySelectorAll('[data-b4910]').forEach(function (el) { brandChips[el.dataset.b4910] = el; });
-    brandChipsFor = idx4910.brands;
-  }
-  function renderBrandBar() {
-    brandBar.hidden = state.src !== '4910all' || idx4910.status !== 'ready';
-    if (brandBar.hidden) return;
-    if (brandChipsFor !== idx4910.brands) buildBrandBar();
-    idx4910.brands.forEach(function (b) {
-      var el = brandChips[b[0]];
-      var st = (b4910[b[0]] || {}).status;
-      var c = st === 'loading' ? '…' : st === 'error' ? '!' : b[2].toLocaleString('ko-KR');
-      el.setAttribute('aria-pressed', String(Boolean(sel4910[b[0]])));
-      if (st === 'error') {
-        el.dataset.state = 'error';
-        el.title = '불러오지 못했습니다 · 다시 누르면 다시 시도';
-      } else {
-        delete el.dataset.state;
-        el.removeAttribute('title');
-      }
-      var count = el.querySelector('.c');
-      if (count.textContent !== c) count.textContent = c;
-    });
-  }
-  brandBar.addEventListener('click', function (e) {
-    var b = e.target.closest('[data-b4910]');
-    if (!b) return;
-    var sno = Number(b.dataset.b4910);
-    // A failed brand stays on, so its chip retries instead of switching off.
-    if (sel4910[sno] && (b4910[sno] || {}).status !== 'error') delete sel4910[sno];
-    else { sel4910[sno] = true; load4910Brand(sno); }
-    renderBrandBar(); render();
-  });
-  // A scanned listing's price on a day is its 쿠폰가 when that day's coupon price is known, else its 표시가;
-  // the two bases are never compared (slot [5]). The payload already ends on the latest scan, so an old
-  // change never reads as today's drop (dropAmt compares the last two rows).
-  function expand4910All(P) {
-    var start = D.items.length;
-    P.r.forEach(function (r) {
-      var L = r[7].map(function (h) {
-        var cp = h[3];
-        return [h[0], h[1], h[2], cp != null ? cp : h[2], 0, cp != null ? '쿠폰가' : '표시가', cp != null ? h[2] - cp : 0];
-      });
-      D.items.push({
-        n: r[0], k: '4910:' + r[0], src: '4910all', bs: P.brandSno, b: P.b[r[1]], m: P.m[r[2]], g: r[3],
-        u: 'https://4910.kr/goods/' + r[0], i: !r[4] ? '' : (/^https?:/.test(r[4]) ? r[4] : P.imgBase + r[4]),
-        s: 'ACTIVE', c: r[6], fs: r[5], L: L
-      });
-    });
-    for (var i = start; i < D.items.length; i++) derive(D.items[i], i);
-  }
-
-  function inSrc(it) {
-    if (state.src === 'all') return it.src !== '4910all';
-    if (state.src === '4910all') return it.src === '4910' || (it.src === '4910all' && sel4910[it.bs] === true);
-    return it.src === state.src;
-  }
-
-  var grid = document.getElementById('grid');
-  var qEl = document.getElementById('q');
-  var sortSel = document.getElementById('sortSel');
-
-  function matches(it) {
-    if (!inSrc(it)) return false;
-    if (state.cat && state.cat !== 'all' && it.c !== state.cat) return false;
-    if (state.q && it._hay.indexOf(state.q) === -1) return false;
-    switch (state.filter) {
-      case 'lowest': return it.isLow;
-      case 'drop': return it.dropAmt > 0;
-      case 'onsale': return !it.isOut;
-      case 'out': return it.isOut;
-      default: return true;
-    }
-  }
-  var SORTERS = {
-    category: function (a, b) {
-      var d = (CAT_ORDER[a.c] || 9) - (CAT_ORDER[b.c] || 9);
-      return d !== 0 ? d : (b.rate - a.rate || a.n - b.n);
-    },
-    rate: function (a, b) { return b.rate - a.rate || a.n - b.n; },
-    priceAsc: function (a, b) { return (a.my == null ? 1e12 : a.my) - (b.my == null ? 1e12 : b.my); },
-    priceDesc: function (a, b) { return (b.my == null ? -1 : b.my) - (a.my == null ? -1 : a.my); },
-    dropAmt: function (a, b) { return b.dropAmt - a.dropAmt || b.rate - a.rate; },
-    brand: function (a, b) { return (a.b || '').localeCompare(b.b || '', 'ko') || a.g.localeCompare(b.g, 'ko'); },
-    new: function (a, b) { return (b.fs || '').localeCompare(a.fs || '') || b.n - a.n; }
-  };
-  // The coupon sorts became the price sorts once 쿠폰가 is the 4910 price; a saved one opens as its successor.
-  var SORT_RENAMED = { coupon: 'priceAsc', couponRate: 'rate' };
-  if (SORT_RENAMED[state.sort]) { state.sort = SORT_RENAMED[state.sort]; store('sort', state.sort); }
-  if (!SORTERS[state.sort]) state.sort = 'rate';
+  var state = model.restoreState({src:store('src'),cat:store('cat'),filter:store('filter'),sort:store('sort')});
+  var view = [], shown = 0, PAGE = 120, lastQuery = null;
+  var grid = document.getElementById('grid'), qEl = document.getElementById('q'), sortSel = document.getElementById('sortSel');
   sortSel.value = state.sort;
-
+  function loadDataScript(src) {
+    return new Promise(function(resolve,reject) {
+      var tag = document.createElement('script'), done = false;
+      var ref = D.catalog.parts.find(function(p){return p.path===src;});
+      var brand = !ref && /^4910\/b(\d+)\.js$/.exec(src);
+      if(!ref && !brand){reject(new Error('알 수 없는 데이터 경로'));return;}
+      function finish(error) {
+        if(done)return;done=true;clearTimeout(timer);tag.remove();
+        if(error){reject(error);return;}
+        var value = ref ? (window.__CLOT_CATALOG_PARTS__||{})[ref.id] : (window.__CLOT_4910_B__||{})[brand[1]];
+        if(ref)delete (window.__CLOT_CATALOG_PARTS__||{})[ref.id];
+        else delete (window.__CLOT_4910_B__||{})[brand[1]];
+        if(!value)reject(new Error('데이터 파일 내용 없음'));else resolve(value);
+      }
+      var timer = setTimeout(function(){finish(new Error('데이터 요청 시간 초과'));},15000);
+      tag.onload=function(){finish();};tag.onerror=function(){finish(new Error('데이터 파일 요청 실패'));};
+      tag.src=src+'?v='+encodeURIComponent(D.catalog.revision);document.head.appendChild(tag);
+    });
+  }
+  var runtime = window.__CLOT_RUNTIME_FACTORY__({model:model,baseItems:D.items,inlineHistories:D.inlineHistories,manifest:D.catalog,loadScript:loadDataScript,onChange:function(){render();}});
+  function renderBrandBar() {}
   var FILTER_CAPTION = {
-    all: '', lowest: '· 역대 최저가만', drop: '· 어제보다 하락한 상품만',
+    all: '', lowest: '· 역대 최저가만', drop: '· 직전 관측 대비 하락한 상품만',
     onsale: '· 판매중만', out: '· 품절만'
   };
 
@@ -956,116 +766,45 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       '<div class="gname">' + esc(it.g) + '</div>' + body + '</div></button>';
   }
 
+  function fmt(n) { return Number(n||0).toLocaleString('ko-KR'); }
   function render() {
-    view = D.items.filter(matches).sort(SORTERS[state.sort]);
-    document.getElementById('shownN').textContent = view.length;
-    var reset = document.getElementById('resetBtn');
-    reset.hidden = (state.filter === 'all' && state.cat === 'all' && state.src === 'all' && !state.q);
-
-    function inCat(it) { return state.cat === 'all' || it.c === state.cat; }
-
-    // Dynamic scoped counts for quick filters & KPI cards based on selected source and category
-    var pool = D.items.filter(function (it) { return inSrc(it) && inCat(it); });
-
-    var scopedCounts = {
-      all: pool.length,
-      lowest: pool.filter(function (i) { return i.isLow; }).length,
-      drop: pool.filter(function (i) { return i.dropAmt > 0; }).length,
-      onsale: pool.filter(function (i) { return !i.isOut; }).length,
-      out: pool.filter(function (i) { return i.isOut; }).length
-    };
-
-    ['all', 'lowest', 'drop', 'onsale', 'out'].forEach(function (k) {
-      var el = document.getElementById('c' + k.charAt(0).toUpperCase() + k.slice(1));
-      if (el) el.textContent = scopedCounts[k];
+    var data=runtime.getCatalog(), waiting=state.src!=='musinsa'&&data.status!=='ready';
+    var query=model.queryCatalog(data.items,state);lastQuery=query;
+    view=waiting?[]:query.items;
+    document.getElementById('shownN').textContent=waiting?'집계 중':fmt(query.total);
+    document.getElementById('resetBtn').hidden=state.filter==='all'&&state.cat==='all'&&state.src==='all'&&!state.q&&!state.brandKeys.length;
+    ['all','lowest','drop','onsale','out'].forEach(function(k){
+      document.getElementById('c'+k.charAt(0).toUpperCase()+k.slice(1)).textContent=waiting?'—':fmt(query.quick[k]);
     });
-
-    document.getElementById('kTotal').innerHTML = scopedCounts.all + '<small>개</small>';
-    document.getElementById('kLowest').innerHTML = scopedCounts.lowest + '<small>개</small>';
-    document.getElementById('kDrop').innerHTML = scopedCounts.drop + '<small>개</small>';
-    document.getElementById('kOut').innerHTML = scopedCounts.out + '<small>개</small>';
-
-    // Dynamic category tab counts (within the selected source)
-    var srcPool = D.items.filter(inSrc);
-    var catCounts = { all: srcPool.length, top: 0, outer: 0, bottom: 0, shoes: 0, bag: 0 };
-    srcPool.forEach(function (it) {
-      if (catCounts[it.c] !== undefined) catCounts[it.c]++;
+    [['kTotal','all'],['kLowest','lowest'],['kDrop','drop'],['kOut','out']].forEach(function(p){
+      document.getElementById(p[0]).innerHTML=(waiting?'—':fmt(query.quick[p[1]]))+'<small>개</small>';
     });
-    document.getElementById('cntAll').textContent = catCounts.all;
-    document.getElementById('cntTop').textContent = catCounts.top;
-    document.getElementById('cntOuter').textContent = catCounts.outer;
-    document.getElementById('cntBottom').textContent = catCounts.bottom;
-    document.getElementById('cntShoes').textContent = catCounts.shoes;
-    document.getElementById('cntBag').textContent = catCounts.bag;
-
-    // Source chip counts (within the selected category)
-    var srcCounts = { all: 0, musinsa: 0, '4910': 0 };
-    D.items.forEach(function (it) {
-      if (!inCat(it) || it.src === '4910all') return;
-      srcCounts.all++;
-      if (srcCounts[it.src] !== undefined) srcCounts[it.src]++;
+    document.querySelectorAll('[data-cat]').forEach(function(b){
+      b.setAttribute('aria-pressed',String(b.dataset.cat===state.cat));
+      b.querySelector('.c').textContent=waiting?'—':fmt(query.categories[b.dataset.cat]);
     });
-    document.getElementById('sAll').textContent = srcCounts.all;
-    document.getElementById('sMusinsa').textContent = srcCounts.musinsa;
-    document.getElementById('s4910').textContent = srcCounts['4910'];
-    // Brand files load on demand, so only the build-time total is known (category scope unknown).
-    document.getElementById('s4910all').textContent = state.cat === 'all' ? (D.total4910All || 0) + srcCounts['4910'] : '—';
-    document.querySelectorAll('[data-src]').forEach(function (b) {
-      b.setAttribute('aria-pressed', String(b.dataset.src === state.src));
+    [['sAll','all'],['sMusinsa','musinsa'],['s4910','4910']].forEach(function(p){
+      document.getElementById(p[0]).textContent=data.status!=='ready'&&p[1]!=='musinsa'?'집계 중':fmt(query.sources[p[1]]);
     });
-
-    document.querySelectorAll('[data-cat]').forEach(function (b) {
-      b.setAttribute('aria-pressed', String(b.dataset.cat === state.cat));
-    });
-
-    shown = 0;
-    renderBrandBar();
-    if (state.src === '4910all' && idx4910.status !== 'ready') {
-      grid.innerHTML = idx4910.status === 'error'
-        ? '<div class="empty"><b>4910 전체 목록을 불러오지 못했습니다</b>' +
-          '<button class="more" type="button" data-retry-4910="">다시 시도</button></div>'
-        : '<div class="empty"><b>4910 판매글 불러오는 중…</b></div>';
-    } else {
-      var note = state.src === '4910all' ? brandNotes() : '';
-      var picked = Object.keys(sel4910).length > 0;
-      grid.innerHTML = note + (view.length || note ? ''
-        : state.src === '4910all' && !picked
-          ? '<div class="empty"><b>브랜드를 골라 주세요</b>위 브랜드 목록에서 고르면 그 브랜드의 판매글을 불러옵니다.</div>'
-          : '<div class="empty"><b>조건에 맞는 상품이 없습니다</b>검색어를 지우거나 다른 필터를 선택해 보세요.</div>');
-    }
+    document.querySelectorAll('[data-src]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.src===state.src));});
+    document.querySelectorAll('[data-filter]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.filter===state.filter));});
+    var notice=document.getElementById('catalogNotice');notice.hidden=!data.notice;notice.textContent=data.notice||'';
+    shown=0;renderBrandBar();
+    grid.innerHTML=waiting ? '<div class="empty"><b>'+(data.status==='error'?'전체 상품 요약을 불러오지 못했습니다':'전체 상품 집계 중…')+'</b>'+(data.status==='error'?'<button class="more" data-retry-catalog type="button">다시 시도</button>':'')+'</div>' :
+      view.length?'':'<div class="empty"><b>조건에 맞는 상품이 없습니다</b>검색어를 지우거나 다른 필터를 선택해 보세요.</div>';
     renderMore();
-    if (moreIo) { moreIo.unobserve(moreBtn); moreIo.observe(moreBtn); }
-
-    document.querySelectorAll('[data-filter]').forEach(function (b) {
-      b.setAttribute('aria-pressed', String(b.dataset.filter === state.filter));
-    });
-    if (modalItem) {
-      var i = view.indexOf(modalItem);
-      updateStepper(i);
-    }
-  }
-
-  // A failed brand keeps its retry above whatever has loaded; a brand still loading says so.
-  function brandNotes() {
-    var out = '', loading = false;
-    Object.keys(sel4910).forEach(function (sno) {
-      var st = (b4910[sno] || {}).status;
-      if (st === 'loading') loading = true;
-      if (st === 'error') {
-        out += '<div class="empty"><b>' + esc(brandName4910(sno)) + ' — 4910 전체 목록을 불러오지 못했습니다</b>' +
-          '<button class="more" type="button" data-retry-4910="' + esc(sno) + '">다시 시도</button></div>';
-      }
-    });
-    return out + (loading ? '<div class="empty"><b>4910 판매글 불러오는 중…</b></div>' : '');
+    if(moreIo){moreIo.unobserve(moreBtn);moreIo.observe(moreBtn);}
+    if(modalItem)updateStepper(view.findIndex(function(x){return x.k===modalItem.k;}));
   }
 
   var moreBtn = document.getElementById('gridMore');
   function renderMore() {
-    var loading = state.src === '4910all' && idx4910.status !== 'ready';
+    var loading = state.src !== 'musinsa' && runtime.getCatalog().status !== 'ready';
     if (!loading && shown < view.length) {
       grid.insertAdjacentHTML('beforeend', view.slice(shown, shown + PAGE).map(cardHtml).join(''));
       shown = Math.min(shown + PAGE, view.length);
     }
+    document.getElementById('renderedN').textContent = fmt(shown);
     var left = loading ? 0 : view.length - shown;
     moreBtn.hidden = left <= 0;
     moreBtn.textContent = '더 보기 (남은 ' + left.toLocaleString('ko-KR') + '개)';
@@ -1090,7 +829,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     b.addEventListener('click', function () {
       state.src = (state.src === b.dataset.src && b.dataset.src !== 'all') ? 'all' : b.dataset.src;
       store('src', state.src);
-      if (state.src === '4910all') ensure4910Index();
+      if (state.src !== 'musinsa') runtime.ensureCatalog();
       render();
     });
   });
@@ -1112,8 +851,8 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     state.sort = sortSel.value; store('sort', state.sort); render();
   });
   document.getElementById('resetBtn').addEventListener('click', function () {
-    state.filter = 'all'; state.cat = 'all'; state.src = 'all'; state.q = ''; qEl.value = '';
-    store('filter', 'all'); store('cat', 'all'); store('src', 'all'); render();
+    state.filter = 'all'; state.cat = 'all'; state.src = 'all'; state.q = ''; state.brandKeys = []; qEl.value = '';
+    store('filter', 'all'); store('cat', 'all'); store('src', 'all'); if(state.src!=='musinsa')runtime.ensureCatalog(); render();
   });
 
   /* ── 테마 ───────────────────────────────────────────────── */
@@ -1145,14 +884,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   var modalItem = null, chart = null, range = 0, lastFocus = null;
 
   grid.addEventListener('click', function (e) {
-    var retry = e.target.closest('[data-retry-4910]');
-    if (retry) {
-      // getAttribute, not dataset: `data-retry-4910` has no camelCase dataset key (a digit follows the dash).
-      var retrySno = retry.getAttribute('data-retry-4910');
-      if (retrySno) load4910Brand(Number(retrySno));
-      else ensure4910Index();
-      render(); return;
-    }
+    if(e.target.closest('[data-retry-catalog]')){runtime.retryCatalog();return;}
     var c = e.target.closest('.card');
     if (c) openModal(c.dataset.k);
   });
@@ -1163,28 +895,39 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     document.getElementById('mPos').textContent = i >= 0 ? (i + 1) + ' / ' + view.length : '—';
   }
 
-  function openModal(key) {
-    var it = D.items.filter(function (x) { return x.k === String(key); })[0];
-    if (!it) return;
-    if (view.indexOf(it) === -1) {
-      state.filter = 'all'; state.q = ''; qEl.value = '';
-      // A scanned listing lives only under 4910 전체, with its brand on.
-      state.src = it.src === '4910all' ? '4910all' : 'all';
-      if (it.src === '4910all') { sel4910[it.bs] = true; ensure4910Index(); }
+  var detailToken=0;
+  async function openModal(key) {
+    key=model.resolveKey(key);
+    var token=++detailToken;
+    var it=runtime.getCatalog().items.find(function(x){return x.k===key;});
+    if(!it){
+      await runtime.ensureCatalog();if(token!==detailToken)return;
+      it=runtime.getCatalog().items.find(function(x){return x.k===key;});
+    }
+    if(!it)return;
+    if(!view.some(function(x){return x.k===key;})){
+      state.filter='all';state.cat='all';state.brandKeys=[];state.q='';qEl.value='';state.src='all';
+      runtime.ensureCatalog();
       render();
     }
-    lastFocus = document.activeElement;
-    modalItem = it; range = 0;
-    fillModal(it);
-    scrim.classList.add('open');
-    document.body.style.overflow = 'hidden';
-    document.querySelector('.sheet-body').scrollTop = 0;
-    document.getElementById('closeBtn').focus();
-    setUrl(goodsQs(it));
+    lastFocus=document.activeElement;modalItem=Object.assign({},it,{L:[]});range=0;
+    fillModal(modalItem);
+    scrim.classList.add('open');document.body.style.overflow='hidden';
+    document.querySelector('.sheet-body').scrollTop=0;document.getElementById('closeBtn').focus();setUrl(goodsQs(it));
+    document.getElementById('mRows').innerHTML='<tr><td colspan="7">가격 이력 불러오는 중…</td></tr>';
+    try {
+      var rows=await runtime.getHistory(key);if(token!==detailToken||!modalItem)return;
+      modalItem=Object.assign({},it,{L:rows});fillModal(modalItem);
+    }catch(error){
+      if(token!==detailToken||!modalItem)return;
+      document.getElementById('mRows').innerHTML='<tr><td colspan="7">가격 이력을 불러오지 못했습니다 <button type="button" id="retryHistory">이력 다시 시도</button></td></tr>';
+      document.getElementById('retryHistory').onclick=function(){openModal(key);};
+    }
   }
   // A scanned listing's link names its brand file so a reload can fetch it again.
   function goodsQs(it) { return '?goods=' + it.k + (it.bs != null ? '&brand=' + it.bs : ''); }
   function closeModal() {
+    ++detailToken;
     scrim.classList.remove('open');
     document.body.style.overflow = '';
     if (chart) { chart.destroy(); chart = null; }
@@ -1193,14 +936,11 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     if (lastFocus && lastFocus.focus) lastFocus.focus();
   }
   function stepTo(delta) {
-    var i = view.indexOf(modalItem);
+    var i = view.findIndex(function(x){return x.k===modalItem.k;});
     if (i < 0) return;
     var j = i + delta;
     if (j < 0 || j >= view.length) return;
-    modalItem = view[j]; range = 0;
-    fillModal(modalItem);
-    document.querySelector('.sheet-body').scrollTop = 0;
-    setUrl(goodsQs(modalItem));
+    openModal(view[j].k);
   }
 
   document.getElementById('closeBtn').addEventListener('click', closeModal);
@@ -1248,7 +988,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     var on4910 = is4910(it);
     var linkTxt = on4910 ? '4910에서 보기 ↗' : '무신사에서 보기 ↗';
     // is-4910 reveals the 신규회원가 column, which only liked listings carry.
-    document.getElementById('sheet').classList.toggle('is-4910', it.src === '4910');
+    document.getElementById('sheet').classList.toggle('is-4910', it.kind === 'liked');
     document.getElementById('mLink').href = it.u;
     document.getElementById('mLink').textContent = linkTxt;
     document.getElementById('mLinkMobile').href = it.u;
@@ -1271,10 +1011,9 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       if (it.isOut) f.push('<span class="fact out">품절</span>');
       fx.innerHTML = f.join('');
     }
-    updateStepper(view.indexOf(it));
-    setupRanges(it);
-    drawChart(it);
-    fillTable(it);
+    updateStepper(view.findIndex(function(x){return x.k===it.k;}));
+    if(it.L.length || !it.tracked){ setupRanges(it);drawChart(it);fillTable(it); }
+    else { if(chart){chart.destroy();chart=null;} document.querySelectorAll(".seg button").forEach(function(b){b.disabled=true;}); }
   }
 
   function setupRanges(it) {
@@ -1346,7 +1085,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     var mines = rows.map(function (r) { return r[3]; });
     var outs = rows.map(function (r) { return r[4] === 1; });
     var on4910 = is4910(it);
-    var newbies = it.src === '4910' ? rows.map(function (r) { return r.length > 7 ? r[7] : null; }) : [];
+    var newbies = it.kind === 'liked' ? rows.map(function (r) { return r.length > 7 ? r[7] : null; }) : [];
 
     var okMine = mines.filter(function (v) { return v != null; });
     var okNorm = normals.filter(function (v) { return v != null; });
@@ -1378,7 +1117,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         pointBorderWidth: rows.map(function (r, i) { return outs[i] ? 2 : 2; }),
         pointHoverRadius: 7 }
     ];
-    if (it.src === '4910') {
+    if (it.kind === 'liked') {
       datasets.push({ label: '쿠폰적용가(신규회원)', data: newbies, borderColor: cMuted, borderWidth: 1.5,
         pointRadius: 2, pointBackgroundColor: cMuted, pointBorderWidth: 0,
         pointHoverRadius: 4, tension: 0.1, fill: false });
@@ -1453,18 +1192,11 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   }
 
   /* ── 초기 렌더 + 딥링크 (기획 S9) ──────────────────────── */
-  // Only the 4910 전체 chip loads scan files; a stored 4910 전체 view asks for the index again.
-  if (state.src === '4910all') ensure4910Index();
   render();
-  var qs = new URLSearchParams(location.search);
-  var dl = qs.get('goods') || (D.targetGoodsNo ? String(D.targetGoodsNo) : null);
-  var dlBrand = Number(qs.get('brand'));
-  if (dl) {
-    var hit = D.items.some(function (x) { return x.k === dl; });
-    if (!hit && D.has4910All && dl.indexOf('4910:') === 0 && dlBrand > 0) {
-      load4910Brand(dlBrand).then(function () { openModal(dl); });
-    } else openModal(dl);
-  }
+  if(state.src!=='musinsa')runtime.ensureCatalog();
+  var qs=new URLSearchParams(location.search);
+  var dl=qs.get('goods')||(D.targetGoodsNo?String(D.targetGoodsNo):null);
+  if(dl)openModal(dl);
 })();
 </script>
 </body>

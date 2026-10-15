@@ -18,7 +18,8 @@
     "audit": "node src/cli.js audit",
     "skip": "node src/cli.js skip",
     "daemon:install": "node src/cli.js daemon-install",
-    "daemon:uninstall": "node src/cli.js daemon-uninstall"
+    "daemon:uninstall": "node src/cli.js daemon-uninstall",
+    "test:dashboard:browser": "node --test tests/browser/dashboard.test.js"
   },
   "keywords": [
     "musinsa",
@@ -28,5 +29,8 @@
     "opencli"
   ],
   "author": "hyunjun",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
 }

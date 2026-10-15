@@ -322,47 +322,15 @@ describe('Visualizer HTML Generation', () => {
     assert.ok(html.includes('"src":"musinsa"'));
   });
 
-  test('template carries the 4910 전체 chip, lazy loader and paged grid', () => {
-    const html = buildInTempDir('clot-4910all-contract-');
-    for (const s of ['data-src="4910all"', '4910 찜', '4910 전체', "'4910/index.js'", "'?v='", '__CLOT_4910_INDEX__', '__CLOT_4910_B__',
-      '4910 판매글 불러오는 중…', '4910 전체 목록을 불러오지 못했습니다', 'data-retry-4910',
-      'id="gridMore"', 'var PAGE = 120', 'IntersectionObserver', "rootMargin: '600px'", "'표시가'"]) {
-      assert.ok(html.includes(s), s);
-    }
-  });
-
-  test('template loads brand files on demand; coupon price is the 4910 basis', () => {
-    const html = buildInTempDir('clot-4910brands-contract-');
-    for (const s of ['__CLOT_4910_INDEX__', 'data-b4910', "'4910/b'", "'쿠폰가'", "{ coupon: 'priceAsc', couponRate: 'rate' }",
-      "'&brand='", "get('brand')"]) {
-      assert.ok(html.includes(s), s);
-    }
-    // The coupon price is the hero price, so it has no line, fact or sorts of its own.
-    assert.ok(!html.includes('was cp'));
-    assert.ok(!html.includes('value="coupon"'));
-    assert.ok(!html.includes('value="couponRate"'));
-    assert.ok(!html.includes('4910-all.js'));
-    // No background load after first paint: only the 4910 전체 chip starts it.
-    assert.ok(!/^\s*if \(D\.has4910All\) ensure4910\w*\(\);/m.test(html));
-    assert.ok(!html.includes('ensure4910All();'));
-    // The brand bar is built once per index and then updated in place (scroll position and focus survive renders).
-    const renderBar = html.slice(html.indexOf('function renderBrandBar()'), html.indexOf("brandBar.addEventListener('click'"));
-    assert.ok(renderBar.length > 0 && !renderBar.includes('innerHTML'));
-  });
-
-  test('template has the source chips and the new-member column', () => {
-    const content = buildInTempDir('clot-src-chips-');
-    assert.ok(content.includes('data-src="all"'));
-    assert.ok(content.includes('data-src="musinsa"'));
-    assert.ok(content.includes('data-src="4910"'));
-    assert.ok(content.includes('class="nb-col"'));
-    assert.ok(content.includes('4910에서 보기 ↗'));
-    assert.ok(content.includes('쿠폰적용가(신규회원 기준)'));
-    // 4910 cards and the modal show brand + seller; low/drop/delta only compare rows on the same price basis.
-    assert.ok(content.includes("is4910(it) && it.m ? ' · '"));
-    assert.ok(content.includes('r[5] !== last[5]'));
-    assert.ok(content.includes('prev[5] === last[5]'));
-    assert.ok(content.includes('r[5] === older[5]'));
+  test('generated inline model derives prices and resolves legacy keys', () => {
+    const html=buildInTempDir('clot-model-contract-');
+    const start=html.indexOf('window.__CLOT_MODEL__ = (');
+    const end=html.indexOf('/* ── 헤더',start);
+    const win={};
+    vm.runInNewContext(html.slice(start,end),{window:win});
+    assert.equal(win.__CLOT_MODEL__.resolveKey('777'),'musinsa:777');
+    assert.equal(win.__CLOT_MODEL__.summarize({n:1,src:'4910all',L:[['d',100,80,80,0,'표시가',0]]}).isLow,false);
+    assert.equal(typeof win.__CLOT_RUNTIME_FACTORY__,'function');
   });
 
   test('generated dashboard asks search engines not to index it', () => {
