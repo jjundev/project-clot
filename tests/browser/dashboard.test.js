@@ -76,3 +76,31 @@ test('catalog failure offers retry; musinsa view works during delayed loading',a
  await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='5');
  assert.equal(await page.locator('[data-src=all]').getAttribute('aria-pressed'),'true');
 });
+test('common brand picker preserves OR selections and zero-count removals across sources',async t=>{
+ const {page,url}=await fixture(t);await page.goto(url);await page.locator('#shownN').filter({hasText:'5'}).waitFor();
+ const trigger=page.getByRole('button',{name:'브랜드 선택',exact:true});
+ await trigger.click();await page.getByRole('checkbox',{name:'나이키 3',exact:true}).check();
+ await page.keyboard.press('Escape');assert.equal(await trigger.evaluate(e=>e===document.activeElement),true);
+ assert.equal(await page.locator('#shownN').textContent(),'3');
+ await trigger.click();await page.getByRole('checkbox',{name:'GU 1',exact:true}).check();
+ await page.keyboard.press('Escape');
+ await page.locator('[data-src="4910"]').click();assert.equal(await page.locator('#shownN').textContent(),'3');
+ await page.locator('[data-src=musinsa]').click();assert.equal(await page.locator('#shownN').textContent(),'1');
+ await trigger.click();assert.equal(await page.getByRole('checkbox',{name:'GU 0',exact:true}).isChecked(),true);
+ await page.keyboard.press('Escape');await page.getByRole('button',{name:'GU 선택 해제'}).click();
+ await page.getByRole('button',{name:'나이키 선택 해제'}).click();assert.equal(await page.locator('#shownN').textContent(),'2');
+});
+test('brand dialog fits mobile and desktop, scopes slash and restores focus',async t=>{
+ const {page,url}=await fixture(t);
+ for(const size of [{width:390,height:844},{width:1440,height:1000}]){
+ await page.setViewportSize(size);await page.goto(url);
+ const trigger=page.getByRole('button',{name:'브랜드 선택',exact:true});await trigger.click();
+ const dialog=page.getByRole('dialog',{name:'브랜드 선택',exact:true});
+ const box=await dialog.boundingBox();assert.ok(box.x>=0&&box.y>=0&&box.x+box.width<=size.width&&box.y+box.height<=size.height);
+ await page.getByRole('searchbox',{name:'브랜드 찾기'}).fill('나이키');
+ await page.keyboard.press('/');assert.equal(await page.locator('#q').inputValue(),'');
+ await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});assert.equal(await dialog.count(),0);
+ assert.equal(await trigger.evaluate(e=>e===document.activeElement),true);
+ assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+ }
+});
