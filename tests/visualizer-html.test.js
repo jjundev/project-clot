@@ -157,7 +157,7 @@ describe('Visualizer HTML Generation', () => {
     assert.equal(res.totalItems, 2);
     const content = fs.readFileSync(tempOutput, 'utf-8');
     assert.ok(content.includes('"k":"4910:71863924"'));
-    assert.ok(content.includes('"k":"777"'));
+    assert.ok(content.includes('"k":"musinsa:777"'));
   });
 
   test('generateDashboardHtml without a 4910.db still renders', () => {
@@ -225,7 +225,7 @@ describe('Visualizer HTML Generation', () => {
     const tempOutput = path.join(dir, 'index.html');
     const res = generateDashboardHtml({ db: createTestDb(), outputPath: tempOutput, openBrowser: false, db4910Path });
     assert.equal(fs.existsSync(path.join(dir, '4910-all.js')), false);
-    assert.deepEqual(fs.readdirSync(path.join(dir, '4910')).sort(), ['b13647.js', 'b2421.js', 'index.js']);
+    assert.deepEqual(fs.readdirSync(path.join(dir, '4910')).sort(), ['b13647.js', 'b2421.js', 'catalog-0000.js', 'index.js']);
 
     const indexJs = fs.readFileSync(path.join(dir, '4910', 'index.js'), 'utf-8');
     assert.ok(indexJs.startsWith('window.__CLOT_4910_INDEX__ = {'));
@@ -258,7 +258,7 @@ describe('Visualizer HTML Generation', () => {
     const { store, db4910Path } = scanDb(dir, [scanListing(71863924, 2421, '유니클로')]);
     store.close();
     generateDashboardHtml({ db: createTestDb(), outputPath: path.join(dir, 'index.html'), openBrowser: false, db4910Path });
-    assert.deepEqual(fs.readdirSync(path.join(dir, '4910')).sort(), ['b2421.js', 'index.js']);
+    assert.deepEqual(fs.readdirSync(path.join(dir, '4910')).sort(), ['b2421.js', 'catalog-0000.js', 'index.js']);
   });
 
   test('without a 4910.db the dashboard reports has4910All false and writes no 4910 files', () => {

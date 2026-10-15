@@ -4,6 +4,9 @@
  */
 
 import fs from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { createDashboardModel } from './dashboard-model.js';
+import { buildDashboardCatalog } from './dashboard-catalog.js';
 import path from 'node:path';
 import { exec } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
@@ -426,41 +429,30 @@ export function generateDashboardHtml({
 
   const digits = targetGoodsNo != null ? String(targetGoodsNo).replace(/\D/g, '') : '';
   const gNo = digits.length > 0 ? Number(digits) : undefined;
-  let payload;
-  let total4910All = null;
+  let payload, packaged;
+  const revision = randomUUID();
+  let total4910All = 0;
   try {
-    // A broken 4910.db (corrupt, locked, schema drift) must never block the Musinsa dashboard.
-    if (db4910Path && fs.existsSync(db4910Path)) {
-      let db4910 = null;
-      try {
-        db4910 = new DatabaseSync(db4910Path, { readOnly: true });
-        payload = buildClotDataPayload(activeDb, { targetGoodsNo: gNo, db4910 });
-        // The scan listings fail on their own: the liked items above stay on the dashboard.
-        try {
-          total4910All = write4910Files(db4910, dir4910);
-        } catch (err) {
-          console.warn(`⚠️ [4910] 대시보드에서 4910 전체 목록 제외: ${err.message}`);
-          total4910All = null;
-          fs.rmSync(dir4910, { recursive: true, force: true });
-        }
-      } catch (err) {
-        console.warn(`⚠️ [4910] 대시보드에서 4910 항목 제외: ${err.message}`);
-        payload = undefined;
-        total4910All = null;
-        fs.rmSync(dir4910, { recursive: true, force: true });
-      } finally {
-        if (db4910) db4910.close();
-      }
-    }
-    if (!payload) payload = buildClotDataPayload(activeDb, { targetGoodsNo: gNo });
-  } finally {
-    if (shouldCloseDb) {
-      activeDb.close();
-    }
-  }
-  payload.has4910All = total4910All != null;
-  payload.total4910All = total4910All ?? 0;
-
+    let db4910;
+    try {
+      if (db4910Path && fs.existsSync(db4910Path)) db4910 = new DatabaseSync(db4910Path, {readOnly:true});
+      payload = buildClotDataPayload(activeDb, {targetGoodsNo:gNo, db4910});
+      let scanIndex = {brands:[]}, scanState=db4910?'complete':'unavailable', notice=db4910?null:'4910 데이터 미포함: 원본 DB 없음';
+      if(db4910)try { scanIndex=buildScan4910Index(db4910); } catch(err) { scanState='partial';notice='4910 데이터 일부 미포함: '+err.message; }
+      packaged = buildDashboardCatalog({
+        baseItems:payload.items, scanIndex,
+        readBrand:brandSno=>buildScan4910Payload(db4910,{brandSno}),
+        dir4910,revision,scanState,notice,
+      });
+    } catch(err) {
+      console.warn('⚠️ [4910] 대시보드에서 4910 항목 제외: '+err.message);
+      payload = buildClotDataPayload(activeDb, {targetGoodsNo:gNo});
+      packaged = buildDashboardCatalog({baseItems:payload.items,dir4910,revision,scanState:'unavailable',notice:'4910 데이터 미포함: '+err.message});
+    } finally { if(db4910)db4910.close(); }
+  } finally { if(shouldCloseDb)activeDb.close(); }
+  total4910All = packaged.catalog.scanCount;
+  Object.assign(payload,packaged,{has4910All:packaged.catalog.scanState==='complete',total4910All});
+  const total4910 = payload.items.filter(x=>x.src==='4910').length + total4910All;
   const templateContent = fs.readFileSync(templatePath, 'utf-8');
 
   // Replace data placeholder using a function replacer to prevent '$' corruption (CRLF tolerant)
@@ -479,6 +471,7 @@ export function generateDashboardHtml({
     );
   }
 
+  rendered = rendered.replace('/* __CLOT_MODEL__ */', () => 'window.__CLOT_MODEL__ = ('+createDashboardModel.toString()+')();');
   fs.writeFileSync(outputPath, rendered, 'utf-8');
 
   if (openBrowser) {
@@ -498,7 +491,9 @@ export function generateDashboardHtml({
   return {
     outputPath,
     targetGoodsNo: gNo !== undefined ? gNo : undefined,
-    totalItems: payload.items.length,
+    totalItems: payload.items.length + total4910All,
+    total4910,
+    scanState: payload.catalog.scanState,
     total4910All: payload.total4910All,
   };
 }
