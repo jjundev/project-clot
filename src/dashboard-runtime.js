@@ -8,6 +8,8 @@ export function createDashboardRuntime({model,baseItems,inlineHistories,manifest
  if(state.status==='ready')return Promise.resolve(state);
  state={...state,status:'loading',error:null};
  pending=Promise.resolve().then(async()=>{
+ const ids=new Set(),paths=new Set();
+ for(const ref of manifest.parts){if(ids.has(ref.id)||paths.has(ref.path))throw Error('중복 요약 파일');ids.add(ref.id);paths.add(ref.path);}
  const loaded=new Array(manifest.parts.length);let next=0;
  const worker=async()=>{while(next<manifest.parts.length){
  const index=next++,ref=manifest.parts[index],part=await loadScript(ref.path);

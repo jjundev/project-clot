@@ -7,6 +7,11 @@ on:
       - data/prices.db
       - src/dashboard.template.html
       - src/visualizer.js
+      - src/dashboard-*.js
+      - scripts/verify-dashboard-build.js
+      - tests/**
+      - package.json
+      - package-lock.json
       - .github/workflows/pages.yml
   # Pushes made with GITHUB_TOKEN (the Actions daily run) do not fire `push`, so follow it explicitly.
   workflow_run:
@@ -28,7 +33,7 @@ jobs:
   deploy:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -40,6 +45,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24 # node:sqlite
+
+      - run: npm ci
+      - name: Validate dashboard model and build
+        run: node --test tests/dashboard-*.test.js tests/visualizer-data.test.js tests/visualizer-html.test.js tests/cli-visualize.test.js
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:dashboard:browser
 
       # 4910.db lives in the data-4910 Release, not in git. A missing asset must not fail the deploy:
       # the build then skips the 4910 section and the Musinsa dashboard still ships.
@@ -54,7 +65,7 @@ jobs:
           CLOT_DASHBOARD_PATH=_site/index.html node src/cli.js visualize --no-open
           printf 'User-agent: *\nDisallow: /\n' > _site/robots.txt
           test -s _site/index.html
-          test -s _site/4910/index.js || echo "::warning::4910 index not built"
+          node scripts/verify-dashboard-build.js _site/index.html
 
       - uses: actions/configure-pages@v5
 

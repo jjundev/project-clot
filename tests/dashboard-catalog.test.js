@@ -29,3 +29,11 @@ test('2001 unique scan rows split 2000/1; failed build publishes none',t=>{
  assert.equal(bad.catalog.scanState,'partial');assert.equal(bad.catalog.scanCount,0);
  assert.ok(bad.catalog.notice);assert.equal(fs.existsSync(opts.dir4910),false);
 });
+test('a short or wrong-brand extraction is partial, never a plausible complete subtotal',t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'clot-short-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ for(const payload of [compact(1),{...compact(2),brandSno:99}]){
+ const result=buildDashboardCatalog({baseItems:[],scanIndex:{brands:[[9,'나이키',2]]},readBrand:()=>payload,dir4910:path.join(dir,'4910'),revision:'r'});
+ assert.equal(result.catalog.scanState,'partial');
+ assert.equal(result.catalog.scanCount,0);
+ }
+});

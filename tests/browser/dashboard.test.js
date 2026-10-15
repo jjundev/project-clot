@@ -104,3 +104,32 @@ test('brand dialog fits mobile and desktop, scopes slash and restores focus',asy
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  }
 });
+test('140129 summaries search the final part while rendering only 120 cards',async t=>{
+ const {page,url}=await fixture(t,{scale:true});
+ await page.addInitScript(()=>{window.IntersectionObserver=class {observe(){} unobserve(){}};});
+ let histories=0;page.on('request',r=>{if(/\/b\d+\.js/.test(r.url()))histories++;});
+ await page.goto(url);await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='140,129');
+ assert.equal(await page.locator('#sMusinsa').textContent(),'626');
+ assert.equal(await page.locator('#s4910').textContent(),'139,503');
+ assert.equal(await page.locator('.card').count(),120);
+ await page.locator('#q').fill('LAST_SENTINEL');await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='1');
+ assert.equal(await page.locator('#cAll').textContent(),'1');
+ assert.equal(histories,0);
+ const timings=[];
+ for(let i=0;i<10;i++){
+   const start=performance.now();
+   await page.locator('#q').fill(i%2?'LAST_SENTINEL':'');
+   await page.waitForFunction(expected=>document.querySelector('#shownN').textContent===expected,i%2?'1':'140,129');
+   await page.locator('#sortSel').selectOption(i%2?'priceAsc':'rate');
+   timings.push(performance.now()-start);
+ }
+ timings.sort((a,b)=>a-b);t.diagnostic('scale UI operations ms: '+JSON.stringify({median:timings[5],max:timings.at(-1)}));
+ await page.locator('.card').click();await page.waitForFunction(()=>document.querySelector('#mRows').textContent.includes('2026-10-16'));
+ assert.equal(await page.locator('#shownN').textContent(),'1');assert.equal(histories,1);
+});
+test('brand dialog uses the current theme text color',async t=>{
+ const {page,url}=await fixture(t);await page.goto(url);
+ await page.evaluate(()=>localStorage.setItem('clot.theme','dark'));await page.reload();
+ await page.locator('#brandTrigger').click();
+ assert.equal(await page.locator('#brandDialog').evaluate(e=>getComputedStyle(e).color),await page.locator('body').evaluate(e=>getComputedStyle(e).color));
+});

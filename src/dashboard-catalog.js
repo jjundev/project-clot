@@ -23,8 +23,10 @@ export function buildDashboardCatalog({baseItems,scanIndex={brands:[]},readBrand
  try {
  if(scanState!=='complete')return {items,inlineHistories,catalog};
  fs.mkdirSync(stage,{recursive:true});
- for(const [bs] of scanIndex.brands){
- const P=readBrand(bs);P.revision=revision;
+ for(const [bs,,expected] of scanIndex.brands){
+ const P=readBrand(bs);
+ if(P.brandSno!==Number(bs)||!Array.isArray(P.r)||(expected!=null&&P.r.length!==expected))throw Error("브랜드 추출 건수 불일치: "+bs);
+ P.revision=revision;
  fs.writeFileSync(path.join(stage,'b'+bs+'.js'),'(window.__CLOT_4910_B__ = window.__CLOT_4910_B__ || {})['+Number(bs)+'] = '+json(P)+';\n');
  for(const r of P.r){
  const k=model.itemKey('4910',r[0]);if(keys.has(k))continue;keys.add(k);

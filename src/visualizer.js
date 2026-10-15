@@ -238,28 +238,6 @@ export function buildScan4910Payload(db4910, { brandSno = null } = {}) {
 const scriptJson = (value) => JSON.stringify(value).replace(/<\/script/gi, '<\\/script');
 
 /**
- * Writes `index.js` and one `b{sno}.js` per brand into `dir4910`, which the caller has emptied.
- * @param {import('node:sqlite').DatabaseSync} db4910
- * @param {string} dir4910
- * @returns {number} Listings across all brand files.
- */
-function write4910Files(db4910, dir4910) {
-  const index = buildScan4910Index(db4910);
-  fs.mkdirSync(dir4910, { recursive: true });
-  // One brand at a time: ~190k listings held at once would run to hundreds of MB.
-  for (const [sno] of index.brands) {
-    const payload = buildScan4910Payload(db4910, { brandSno: sno });
-    fs.writeFileSync(
-      path.join(dir4910, `b${sno}.js`),
-      `(window.__CLOT_4910_B__ = window.__CLOT_4910_B__ || {})[${sno}] = ${scriptJson(payload)};\n`,
-      'utf-8'
-    );
-  }
-  fs.writeFileSync(path.join(dir4910, 'index.js'), `window.__CLOT_4910_INDEX__ = ${scriptJson(index)};\n`, 'utf-8');
-  return index.brands.reduce((sum, [, , n]) => sum + n, 0);
-}
-
-/**
  * Extracts raw data from SQLite and builds the dashboard data contract.
  * @param {import('node:sqlite').DatabaseSync | { db: import('node:sqlite').DatabaseSync }} dbOrWrapper
  * @param {object} [options]

@@ -163,7 +163,7 @@ a{color:inherit}
 }
 .search input:focus ~ kbd{display:none}
 
-.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .chip{
   height:36px;padding:0 14px;border-radius:999px;cursor:pointer;
   border:1px solid var(--border);background:var(--bg);
@@ -477,11 +477,12 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
 
 /* Boolean hidden must win over chip/flex layout rules. */
 [hidden]{display:none!important}
-.brand-controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px;width:100%}
+.brand-controls{order:1;display:flex;flex:1 1 300px;flex-wrap:wrap;align-items:center;gap:8px;min-width:0}
+.toolbar>.sort{order:2}
 .brand-summary{display:flex;gap:6px;flex-wrap:wrap;align-items:center;min-width:0}
 .brand-summary .chip{max-width:220px;white-space:normal;overflow-wrap:anywhere;min-height:40px}
 .brand-summary button{cursor:pointer}
-.brand-dialog{width:min(520px,calc(100% - 32px));max-height:calc(100dvh - 40px);padding:24px;border:1px solid var(--border);border-radius:16px;background:var(--bg);color:var(--text);box-shadow:0 8px 24px rgb(0 0 0 / .18)}
+.brand-dialog{width:min(520px,calc(100% - 32px));max-height:calc(100dvh - 40px);padding:24px;border:1px solid var(--border);border-radius:16px;background:var(--bg);color:var(--fg);box-shadow:0 8px 24px rgb(0 0 0 / .18)}
 .brand-dialog::backdrop{background:rgb(0 0 0 / .48)}
 .brand-dialog h2{font-size:20px;margin:0}
 .brand-dialog-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:18px}
@@ -489,10 +490,10 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
 .brand-dialog .search{min-width:0;width:100%;margin-bottom:12px}
 .brand-options{max-height:50dvh;overflow:auto;overscroll-behavior:contain;scrollbar-color:var(--muted) var(--bg)}
 .brand-option{display:flex;gap:12px;align-items:center;min-height:48px;padding:8px 4px;border-bottom:1px solid var(--border);cursor:pointer}
-.brand-option input{width:18px;height:18px;flex:none;accent-color:var(--text)}
+.brand-option input{width:18px;height:18px;flex:none;accent-color:var(--fg)}
 .brand-option span{flex:1;overflow-wrap:anywhere;min-width:0}
 .brand-option .num{flex:none;color:var(--muted)}
-.group-label{font-size:12px;font-weight:600;color:var(--muted);margin-right:2px}
+.group-label{flex:none;white-space:nowrap;font-size:12px;font-weight:600;color:var(--muted);margin-right:2px}
 #catalogNotice{font-size:13px;color:var(--muted);overflow-wrap:anywhere}
 @media(max-width:640px){
  .brand-dialog{width:100%;max-width:none;max-height:85dvh;margin:auto 0 0;padding:20px 16px;border-radius:18px 18px 0 0}
@@ -542,7 +543,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       <span class="kpi-val num" id="kLowest">—</span>
     </button>
     <button class="kpi-card is-down" type="button" data-filter="drop" aria-pressed="false" data-od-id="kpi-drop">
-      <span class="kpi-label">어제보다 하락</span>
+      <span class="kpi-label">직전 관측 대비 하락</span>
       <span class="kpi-val num" id="kDrop">—</span>
     </button>
     <button class="kpi-card is-out" type="button" data-filter="out" aria-pressed="false" data-od-id="kpi-soldout">

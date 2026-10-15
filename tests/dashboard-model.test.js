@@ -53,3 +53,18 @@ test('legacy state and serialized factory work without free variables',()=>{
  const factory=vm.runInNewContext('('+createDashboardModel.toString()+')()');
  assert.equal(factory.resolveKey('3'),'musinsa:3');
 });
+test('sorts order actual prices, categories and ties without mutating input',()=>{
+ const want={
+ category:['musinsa:2','4910:3','4910:4','4910:1','musinsa:1'],
+ rate:['4910:4','musinsa:2','4910:1','musinsa:1','4910:3'],
+ priceAsc:['4910:4','musinsa:2','4910:1','musinsa:1','4910:3'],
+ priceDesc:['4910:3','musinsa:1','4910:1','4910:4','musinsa:2'],
+ dropAmt:['musinsa:2','4910:1','4910:4','musinsa:1','4910:3'],
+ brand:['4910:1','musinsa:1','4910:3','musinsa:2','4910:4'],
+ new:['4910:4','4910:3','musinsa:2','4910:1','musinsa:1']};
+ const before=JSON.stringify(items);
+ for(const [sort,keys] of Object.entries(want))assert.deepEqual(m.queryCatalog(items,{...defaultState,sort}).items.map(x=>x.k),keys);
+ assert.equal(JSON.stringify(items),before);
+ const missing=m.summarize({...fixtureRaw()[0],n:99,L:[]});
+ for(const sort of ['priceAsc','priceDesc'])assert.equal(m.queryCatalog([...items,missing],{...defaultState,sort}).items.at(-1).k,'musinsa:99');
+});

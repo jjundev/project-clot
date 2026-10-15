@@ -3,6 +3,10 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
 import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
+import {spawnSync} from 'node:child_process';
+import {writeFixture} from './helpers/dashboard-page.js';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -30,4 +34,12 @@ describe('CLI Visualize Integration', () => {
     assert.ok(output.includes('대시보드가 생성되었습니다'));
     assert.ok(output.includes('6084885'));
   });
+});
+
+test('CLI reports the full deduplicated catalog count',t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'clot-cli-count-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ writeFixture(dir);
+ const result=spawnSync(process.execPath,[CLI_PATH,'visualize','--no-open'],{cwd:ROOT_DIR,encoding:'utf8',env:{...process.env,CLOT_DB_PATH:path.join(dir,'musinsa.db'),CLOT_4910_DB_PATH:path.join(dir,'fixture.db'),CLOT_DASHBOARD_PATH:path.join(dir,'index.html')}});
+ assert.equal(result.status,0,result.stderr);
+ assert.match(result.stdout,/총 5개 상품 반영 완료/);
 });
