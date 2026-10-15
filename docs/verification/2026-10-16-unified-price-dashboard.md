@@ -17,7 +17,7 @@
 - `node --test tests/dashboard-model.test.js tests/dashboard-catalog.test.js tests/dashboard-runtime.test.js tests/dashboard-build.test.js tests/visualizer-data.test.js tests/visualizer-html.test.js tests/cli-visualize.test.js`: 집중 검증 통과.
 - `CLOT_BROWSER_EXECUTABLE='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' npm run test:dashboard:browser`: 브라우저 9/9 통과, 건너뜀 없음.
 - `node scripts/verify-dashboard-build.js /tmp/clot-dashboard-live/index.html`: 실제 DB 생성 산출물의 합계·revision·가격 요약/상세 일치 통과.
-- 전체 테스트와 독립 리뷰의 최종 결과는 아래에 기록한다.
+- 최종 Node.js 24.17.0 전체 테스트 930/930 통과. 독립 리뷰 수정 후 브라우저 전체 14/14 통과, 실패·건너뜀 없음.
 
 ## 화면 점검
 
@@ -32,3 +32,18 @@ Impeccable 정적 검사는 기존 최저가 표식의 두꺼운 border-top 1건
 계획의 무신사 나이키 예시를 90→100으로 명확히 했다. 계획이 요구한 최저가 3개·나이키 최저가 1개와 기존 가격 판정 규칙을 동시에 만족하는 픽스처다. 운영 가격 판정은 바꾸지 않았다.
 
 Pages 워크플로에 의존 파일 경로와 npm ci, 집중 테스트, Chromium 설치·브라우저 테스트, 산출물 검증을 추가했다. 실제 push·main 병합·배포는 수행하지 않았다.
+
+
+## 독립 리뷰와 수정
+
+별도 GPT-6-astra 리뷰어가 `c9d8254..6289746` 전체 변경을 읽기 전용으로 검토했다. Critical 없음, Important 3건, Minor 없음, 판단 보류 없음. 세 Important 모두 회귀 테스트의 실패를 확인한 뒤 한 번의 수정 패스로 처리했다.
+
+1. 상세 최저가 판정 불일치: 공유 모델의 `lowEligible`로 같은 가격 기준의 변동 여부를 전달한다. 변하지 않은 scan의 표·차트 표식을 없애고, 차트 핀은 최신 가격 기준의 실제 전체 이력 최저가만 가리킨다. 현재 가격이 과거 최저가보다 높아도 과거의 유효한 최저가는 남긴다. 변동 없는 scan 및 쿠폰가→표시가 전환·동일 기준 재상승을 실제 생성 페이지에서 검증했다.
+2. 상세 초점 복귀: 최초 진입 시의 초점을 이전/다음·재시도에서도 유지한다. 대상이 재렌더로 사라졌으면 해당 상품 카드 또는 검색창으로 복귀한다. 이동·이력 실패 후 재시도 뒤 닫기를 검증했다.
+3. 0건 브랜드 해제: 옵션 목록을 교체할 때 기존 초점의 브랜드를 찾아 복원하고, 그 옵션이 사라졌으면 브랜드 검색창으로 옮긴다. 키보드 Space로 해제한 직후와 다음 Tab의 초점이 열린 창 안에 있음을 검증했다.
+
+리뷰 지적 회귀 테스트 4/4가 RED→GREEN으로 통과했다. 같은 초점 수정 패스에서, 요약을 기다리는 상품 딥링크가 열린 브랜드 창과 겹치는 경합도 별도 실패 테스트로 재현하고 수정했다. 상품이 실제로 열리는 시점에 브랜드 창을 닫고, 그 창의 close 이벤트가 상품 초점을 빼앗지 않도록 했다. 수정은 재리뷰 대신 회귀 테스트와 전체 테스트로 검증했다. 같은 오류 복구 점검에서 이전 요청이 끝나기 전 재시도하면 동시 요청이 7개가 되는 경우도 실패 테스트로 재현했다. 실패한 배치의 진행 중 요청을 정리한 뒤 재시도하도록 수정했고, 동시 요청 4개 제한의 회귀 테스트가 통과했다. 연기한 Minor 및 판단 보류 항목은 없다.
+
+## 최종 전달 상태
+
+브랜치 `codex/unified-price-dashboard`를 별도 관리 워크트리에 보관한다. 원본 main 작업 폴더의 미추적 파일은 보존했다. main 병합·push·배포는 수행하지 않았다.

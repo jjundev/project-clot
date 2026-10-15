@@ -7,7 +7,7 @@ import {createDashboardModel} from '../../src/dashboard-model.js';
 import {createDashboardRuntime} from '../../src/dashboard-runtime.js';
 import {buildDashboardCatalog} from '../../src/dashboard-catalog.js';
 import {fixtureRaw} from './dashboard-fixture.js';
-export function writeFixture(dir,{scale=false}={}) {
+export function writeFixture(dir,{scale=false,scanScenario=null}={}) {
  const model=createDashboardModel(),raw=fixtureRaw(),scan=raw.find(x=>x.src==='4910all');
  if(!scale) {
    for(const file of ['musinsa.db','fixture.db'])fs.rmSync(path.join(dir,file),{force:true});
@@ -20,7 +20,16 @@ export function writeFixture(dir,{scale=false}={}) {
    const db4910Path=path.join(dir,'fixture.db'),store=new Store4910(db4910Path);
    store.syncLiked(raw.filter(x=>x.src==='4910').map(x=>({sno:x.n,brand:x.b,name:x.g,market_name:'',url:x.u,image_url:null})),'2026-10-15');
    for(const x of raw.filter(x=>x.src==='4910'))for(const r of x.L)store.logLikedPrice({sno:x.n,date:r[0],list_price:r[2],original_price:r[1],member_price:r[3],coupon_price:null,is_soldout:r[4]});
-   store.applyScan('2026-10-16',[{sno:3,brand_sno:9,brand:'나이키',name:'나이키 상품 3',market_sno:1,market_name:'',category:null,sale_price:120,original_price:200,discount_rate:40,image_url:null,url:'',closed:false}],{completeBrands:[9]});
+   const listing={sno:3,brand_sno:9,brand:'나이키',name:'나이키 상품 3',market_sno:1,market_name:'',category:null,sale_price:120,original_price:200,discount_rate:40,image_url:null,url:'',closed:false};
+   if(scanScenario){
+     store.applyScan('2026-10-13',[{...listing,sale_price:100}],{completeBrands:[9]});
+     store.logCouponPriceChanges('2026-10-13',[{sno:3,sale_price:100,coupon_price:80}]);
+     if(scanScenario==='changed'){
+       store.applyScan('2026-10-14',[listing],{completeBrands:[9]});
+       store.applyScan('2026-10-15',[{...listing,sale_price:110}],{completeBrands:[9]});
+     }
+   }
+   store.applyScan('2026-10-16',[listing],{completeBrands:[9]});
    store.recordScanRun({date:'2026-10-16',brandCounts:{},complete:true,changed:0,added:1,dropped:0,durationMs:1});
    store.close();
    const result=generateDashboardHtml({db,db4910Path,outputPath:path.join(dir,'index.html'),openBrowser:false});db.close();return result;

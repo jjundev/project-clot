@@ -44,7 +44,7 @@ export function verifyDashboardBuild(outputPath) {
  }else throw Error('invalid detail reference');
  if(!Array.isArray(L))throw Error('missing detail history');
  const derived=model.summarize({...x,L},{kind:x.kind,detail:x.detail});
- for(const f of ['my','sale','normal','newbie','isOut','isLow','dropAmt','rate','coupon','couponName','lowMy','lowDate','tracked']){
+ for(const f of ['my','sale','normal','newbie','isOut','isLow','lowEligible','dropAmt','rate','coupon','couponName','lowMy','lowDate','tracked']){
  if(derived[f]!==x[f])throw Error('summary history mismatch: '+f);
  }
  }

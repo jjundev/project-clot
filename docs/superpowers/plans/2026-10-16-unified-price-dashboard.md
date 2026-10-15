@@ -1,6 +1,6 @@
 # Unified Price Dashboard Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 모든 수집 상품을 `전체 / 무신사 / 4910`에서 검색하고, 공통 브랜드 필터와 일관된 건수를 제공한다.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node.js 24, ESM, node:sqlite, node:test, 순수 JavaScript/HTML/CSS, 기존 Chart.js, 정적 GitHub Pages, 개발 검증용 Playwright 1.62.1.
 
-**Spec:** [확정 설계](../specs/2026-10-16-unified-price-dashboard.md). 실행자는 두 문서를 함께 읽는다. 이 계획은 아직 구현되지 않았다.
+**Spec:** [확정 설계](../specs/2026-10-16-unified-price-dashboard.md). 실행자는 두 문서를 함께 읽는다. 2026-10-16 별도 워크트리에서 구현했다. 실행 결과와 독립 리뷰 수정은 검증 기록을 참조한다.
 
 ## Global Constraints
 
@@ -61,7 +61,7 @@
 - `Source = 'musinsa' | '4910'`; `Kind = 'musinsa' | 'liked' | 'scan'`; `Key = 'musinsa:ID' | '4910:ID'`.
 - `HistoryRow = [date, normal, sale, my, soldout, basis, discount, newbie?]`: 기존 7/8 슬롯과 nullable 가격을 유지한다.
 - `RawItem = { n,k,src,b,m?,g,u,i,s,c,fs,L,kind?,bs? }`: 기존 빌더의 반환값은 유지하고 kind/bs만 필요한 위치에서 추가한다.
-- `PriceMetrics = { tracked,my,sale,normal,newbie,isOut,isLow,dropAmt,rate,coupon,couponName,lowMy,lowDate }`: 기존 derive 필드와 의미를 유지한다. 금액/날짜의 결측은 null이다.
+- `PriceMetrics = { tracked,my,sale,normal,newbie,isOut,isLow,lowEligible,dropAmt,rate,coupon,couponName,lowMy,lowDate }`: 기존 derive 필드와 의미를 유지한다. 금액/날짜의 결측은 null이다.
 - `DetailRef = { type:'inline' } | { type:'brand', brandSno:number, path:string }`.
 - `Summary = Omit<RawItem,'L'|'src'|'k'> & PriceMetrics & { k:Key,src:Source,kind:Kind,brandKey:string,detail:DetailRef,_hay:string,_init:string }`: 이력 L은 포함하지 않는다. 검색·이미지 placeholder 보조값은 모델이 준비한다. 정렬은 _idx 대신 canonical key를 최종 tie break로 쓴다.
 - `FilterState = { q:string,src:'all'|Source,cat:string,brandKeys:string[],filter:'all'|'lowest'|'drop'|'onsale'|'out',sort:'category'|'rate'|'priceAsc'|'priceDesc'|'dropAmt'|'brand'|'new' }`.
@@ -78,7 +78,7 @@
 
 **Interfaces:** Produces `createDashboardModel() -> { itemKey(source,id), resolveKey(value), brandKey(name), summarize(raw,{kind,detail}), mergeSummaries(base,scan), queryCatalog(items,state), restoreState(saved) }`. `summarize` returns Summary, merge returns unique Summary[], query returns QueryResult. restoreState supplies defaults, validates fields, maps old source/sort aliases. Brand choices use NFC/trim/collapsed whitespace/lowercase equality; no inferred translations. Within a brand selection use OR; across dimensions use AND.
 
-- [ ] **Step 1: Add failing tests and the canonical fixture.** Fixture has `musinsa:1` 나이키 shoes 90→100, `musinsa:2` 아디다스 top 100→80, `4910:1` 나이키 shoes liked 100→90, `4910:3` 나이키 top scan constant 120, `4910:4` GU outer liked soldout 80. A duplicate scan `4910:1` priced 70 must lose to the liked 90. No coupons/price-basis switches in this baseline.
+- [x] **Step 1: Add failing tests and the canonical fixture.** Fixture has `musinsa:1` 나이키 shoes 90→100, `musinsa:2` 아디다스 top 100→80, `4910:1` 나이키 shoes liked 100→90, `4910:3` 나이키 top scan constant 120, `4910:4` GU outer liked soldout 80. A duplicate scan `4910:1` priced 70 must lose to the liked 90. No coupons/price-basis switches in this baseline.
 
   Assertions: `mergeSummaries(...).length === 5`; source counts `{all:5,musinsa:2,'4910':3}`; quick counts `{all:5,lowest:3,drop:2,onsale:4,out:1}`; query `나이키` returns 3 with quick `{all:3,lowest:1,drop:1,onsale:3,out:0}`; add filter lowest and result is only `4910:1`, source counts `{all:1,musinsa:0,'4910':1}`, quick remains the preceding 3-item counts. Compare every facet against an independently written fixture predicate which ignores only that facet; iterate all 3 sources × 5 filters × categories × empty/single/multiple brands × empty/name/no-hit search. Do not derive expected values by calling queryCatalog again.
 
@@ -92,10 +92,10 @@
     assert.deepEqual(r.quick, { all: 3, lowest: 1, drop: 1, onsale: 3, out: 0 });
   });
   ```
-- [ ] **Step 2: Run `node --test tests/dashboard-model.test.js`.** Expect missing-module/export failure before implementation.
-- [ ] **Step 3: Implement the model factory.** Port existing derive rules without changing membership/price math. `kind === 'scan'` replaces the former price-rule dependency on src 4910all. Merge by canonical key with liked precedence. queryCatalog follows the spec facet table and uses stable key tie breaks. Missing categories become `etc`; retain every unique brand, including 0-count selected choices. Do not mutate caller arrays or summaries.
-- [ ] **Step 4: Run the Task 1 command.** Expect PASS for all fixture cases and factory execution in Node/VM. Record the 626/489/119/609/17 local baseline only if the unchanged local DB is available; it is not a hardcoded production assertion.
-- [ ] **Step 5: Inspect staged diff and commit only Task 1 files.** Run `git diff --cached --check`; message `feat(dashboard): share price and facet calculations`.
+- [x] **Step 2: Run `node --test tests/dashboard-model.test.js`.** Expect missing-module/export failure before implementation.
+- [x] **Step 3: Implement the model factory.** Port existing derive rules without changing membership/price math. `kind === 'scan'` replaces the former price-rule dependency on src 4910all. Merge by canonical key with liked precedence. queryCatalog follows the spec facet table and uses stable key tie breaks. Missing categories become `etc`; retain every unique brand, including 0-count selected choices. Do not mutate caller arrays or summaries.
+- [x] **Step 4: Run the Task 1 command.** Expect PASS for all fixture cases and factory execution in Node/VM. Record the 626/489/119/609/17 local baseline only if the unchanged local DB is available; it is not a hardcoded production assertion.
+- [x] **Step 5: Inspect staged diff and commit only Task 1 files.** Run `git diff --cached --check`; message `feat(dashboard): share price and facet calculations`.
 
 ### Task 2: 전체 요약 파일과 상세 이력 빌드
 
@@ -103,7 +103,7 @@
 
 **Interfaces:** Consumes Task 1 factory and existing `buildClotDataPayload()`, `buildScan4910Index()`, `buildScan4910Payload()`. Produces `buildDashboardCatalog({baseItems,scanIndex,readBrand,dir4910,revision,scanState,notice}) -> { items,inlineHistories,catalog }`; `readBrand(brandSno)` supplies one existing compact payload at a time. Existing `generateDashboardHtml(options)` keeps its arguments and returns `{outputPath,targetGoodsNo,totalItems,total4910All,total4910,scanState}`; totalItems is now the unique full catalog count, total4910All stays scan-only for compatibility, total4910 includes liked.
 
-- [ ] **Step 1: Add failing catalog and HTML integration tests.** Reuse the canonical fixture in temporary DBs/output directories. Assert 5 summaries, 2/3 source split, no L in summaries, inline histories for base items, liked 90 wins over scan 70, brand file maps to the same latest metrics as summaries, sum(part.count) equals scanCount, manifest/item keys are unique. For 2,001 scan items assert exactly 2 parts with counts 2,000/1. Evaluate data scripts in VM; verify shared revision, `<script>` closing strings and `$` text round-trip. Preserve existing no-liked-table, no-coupon-table, dropped/unliked exclusion and coupon-carry cases.
+- [x] **Step 1: Add failing catalog and HTML integration tests.** Reuse the canonical fixture in temporary DBs/output directories. Assert 5 summaries, 2/3 source split, no L in summaries, inline histories for base items, liked 90 wins over scan 70, brand file maps to the same latest metrics as summaries, sum(part.count) equals scanCount, manifest/item keys are unique. For 2,001 scan items assert exactly 2 parts with counts 2,000/1. Evaluate data scripts in VM; verify shared revision, `<script>` closing strings and `$` text round-trip. Preserve existing no-liked-table, no-coupon-table, dropped/unliked exclusion and coupon-carry cases.
 
   Inject missing/corrupt DB and a failing second brand: expect usable base data plus explicit partial/unavailable state, no published partial scan files, no stale files after rebuild. Empty valid scan is complete count 0, distinct from unavailable. Set fixture db4910Path explicitly so tests never accidentally read a user's default DB. Existing raw buildClotDataPayload keys/tuples stay compatible; update HTML-only old v2-brand-list assertions to new summary behavior.
 
@@ -116,10 +116,10 @@
     assert.equal(allSummaries.find(x => x.k === '4910:1').my, 90);
   });
   ```
-- [ ] **Step 2: Run `node --test tests/dashboard-catalog.test.js tests/visualizer-data.test.js tests/visualizer-html.test.js`.** New contract tests must fail before implementation.
-- [ ] **Step 3: Implement buildDashboardCatalog and generator integration.** Convert compact history with existing coupon/indicated-price basis rules before Task 1 summarize. Recover liked brandSno from goods by ID when available, and use existing display-name fallback otherwise. Generate summaries/history files in a temporary staging directory; a scan failure discards the staged scan set and rebuilds a base-only manifest with notice. Keep no all-history accumulation in memory. Write all generated files under the requested output directory; preserve the existing default DB/extraction API. Inline model/runtime via distinct placeholder comments separate from the data placeholder. Runtime placeholder is an empty stub until Task 3.
-- [ ] **Step 4: Run the Task 2 command.** Expect all tests PASS; regenerate twice in one disposable output to prove stale scan cleanup. No production DB writes or data/dashboard.html changes.
-- [ ] **Step 5: Commit Task 2 files after staged diff/check.** Message `feat(dashboard): build complete summaries with lazy histories`.
+- [x] **Step 2: Run `node --test tests/dashboard-catalog.test.js tests/visualizer-data.test.js tests/visualizer-html.test.js`.** New contract tests must fail before implementation.
+- [x] **Step 3: Implement buildDashboardCatalog and generator integration.** Convert compact history with existing coupon/indicated-price basis rules before Task 1 summarize. Recover liked brandSno from goods by ID when available, and use existing display-name fallback otherwise. Generate summaries/history files in a temporary staging directory; a scan failure discards the staged scan set and rebuilds a base-only manifest with notice. Keep no all-history accumulation in memory. Write all generated files under the requested output directory; preserve the existing default DB/extraction API. Inline model/runtime via distinct placeholder comments separate from the data placeholder. Runtime placeholder is an empty stub until Task 3.
+- [x] **Step 4: Run the Task 2 command.** Expect all tests PASS; regenerate twice in one disposable output to prove stale scan cleanup. No production DB writes or data/dashboard.html changes.
+- [x] **Step 5: Commit Task 2 files after staged diff/check.** Message `feat(dashboard): build complete summaries with lazy histories`.
 
 ### Task 3: 완료 상태와 요청 충돌을 관리하는 요약·상세 로더
 
@@ -127,7 +127,7 @@
 
 **Interfaces:** Produces external-reference-free `createDashboardRuntime({model,baseItems,inlineHistories,manifest,loadScript,onChange}) -> { getCatalog(),ensureCatalog(),getHistory(key),retryCatalog() }`. `loadScript(path) -> Promise<Part|BrandPayload>` is injected. `getCatalog()` returns `{status:'idle'|'loading'|'ready'|'error',items:Summary[],scanState,notice,error:null|string}`. ensure/retry resolve that state and notify onChange; getHistory resolves HistoryRow[] or rejects. Base items are available while all/4910 queries wait. Browser adapter injects script tags, checks the expected global, and rejects after 15,000ms, removing failed tags and timers.
 
-- [ ] **Step 1: Write deferred-promise tests.** Fail the middle part and assert catalog status error, no scan items become authoritative, and retry yields 5 unique items instead of duplicates. Reject incorrect revision, wrong id/count, duplicate key, duplicate part completion; valid repeated calls reuse one promise. getHistory on inline item does not call loadScript; same brand loads once for two keys; failed promise can retry. Returned history must not change Summary or queryCatalog result/order. A brand with the wrong revision or missing requested ID rejects. VM-evaluate runtime factory with only injected dependencies; test timeout/tag cleanup through the browser adapter in Task 5.
+- [x] **Step 1: Write deferred-promise tests.** Fail the middle part and assert catalog status error, no scan items become authoritative, and retry yields 5 unique items instead of duplicates. Reject incorrect revision, wrong id/count, duplicate key, duplicate part completion; valid repeated calls reuse one promise. getHistory on inline item does not call loadScript; same brand loads once for two keys; failed promise can retry. Returned history must not change Summary or queryCatalog result/order. A brand with the wrong revision or missing requested ID rejects. VM-evaluate runtime factory with only injected dependencies; test timeout/tag cleanup through the browser adapter in Task 5.
 
   ```js
   test('retry replaces a failed staged catalog without duplicates', async () => {
@@ -138,10 +138,10 @@
     assert.equal(new Set(ready.items.map(x => x.k)).size, 5);
   });
   ```
-- [ ] **Step 2: Run `node --test tests/dashboard-runtime.test.js tests/visualizer-html.test.js`.** Expect missing factory or new behavior failure.
-- [ ] **Step 3: Implement the factory and inject its source.** Validate a whole incoming catalog before swapping the authoritative array. Read detail into a separate cache; never append detail-loaded items to the search array. Limit simultaneous summary script requests to 4. Paths must come from the same-build manifest/detail reference. onChange only signals state, never chooses a UI source or reopens a dialog.
-- [ ] **Step 4: Run the Task 3 command.** Expect PASS for deferred races, retry, validation and factory injection. Keep browser-only globals outside the pure factory.
-- [ ] **Step 5: Commit Task 3 files after staged diff/check.** Message `feat(dashboard): isolate catalog and history loading state`.
+- [x] **Step 2: Run `node --test tests/dashboard-runtime.test.js tests/visualizer-html.test.js`.** Expect missing factory or new behavior failure.
+- [x] **Step 3: Implement the factory and inject its source.** Validate a whole incoming catalog before swapping the authoritative array. Read detail into a separate cache; never append detail-loaded items to the search array. Limit simultaneous summary script requests to 4. Paths must come from the same-build manifest/detail reference. onChange only signals state, never chooses a UI source or reopens a dialog.
+- [x] **Step 4: Run the Task 3 command.** Expect PASS for deferred races, retry, validation and factory injection. Keep browser-only globals outside the pure factory.
+- [x] **Step 5: Commit Task 3 files after staged diff/check.** Message `feat(dashboard): isolate catalog and history loading state`.
 
 ### Task 4: 통합 출처·전체 검색·상세 연결
 
@@ -149,7 +149,7 @@
 
 **Interfaces:** Consumes model queryCatalog/restoreState and runtime APIs. Produces one canonical FilterState, result rendering from QueryResult, and `openModal(key)` with a monotonically increasing request token. Existing detail drawing receives `{...summary,L:history}` only when history is ready; summary facts remain visible while loading. Expose no test-only window hooks; browser tests use accessible controls and rendered results.
 
-- [ ] **Step 1: Add failing generated-page browser tests.** Use temporary fixture output over an ephemeral node:http server and file://. Assert exactly three source buttons with counts 5/2/3, initial 5 results, Nike search 3, lowest 1 with quick-all 3, source counts 1/0/1 for that combination. Price-ascending order is identical before/after loading every history. Restore clot.src=4910all as 4910; resolve old `?goods=1`, current canonical keys and `?goods=4910:1&brand=...`; product outside selected category/brand must open and become locatable. Delay A history, open B, resolve A and assert B remains; close before completion and assert closed. Force detail failure and retain counts/cards with a history retry. Test source change to musinsa during delayed catalog completion.
+- [x] **Step 1: Add failing generated-page browser tests.** Use temporary fixture output over an ephemeral node:http server and file://. Assert exactly three source buttons with counts 5/2/3, initial 5 results, Nike search 3, lowest 1 with quick-all 3, source counts 1/0/1 for that combination. Price-ascending order is identical before/after loading every history. Restore clot.src=4910all as 4910; resolve old `?goods=1`, current canonical keys and `?goods=4910:1&brand=...`; product outside selected category/brand must open and become locatable. Delay A history, open B, resolve A and assert B remains; close before completion and assert closed. Force detail failure and retain counts/cards with a history retry. Test source change to musinsa during delayed catalog completion.
 
   Add CLI assertions using child-process fixture paths `CLOT_DB_PATH`, `CLOT_4910_DB_PATH`, `CLOT_DASHBOARD_PATH`: stdout must contain `총 5개 상품 반영 완료.`; generator return totals 5/3/1 remain covered by Task 2. CLI copy becomes `총 N개 상품 반영 완료.` so it does not claim every history was downloaded. Install dev dependency with `npm install --save-dev --save-exact playwright@1.62.1`; add `test:dashboard:browser = node --test tests/browser/dashboard.test.js`. The test launcher uses `CLOT_BROWSER_EXECUTABLE` when provided, otherwise Playwright's installed Chromium. Launch failure is a failure, never a silent skip. Block external image/CDN requests in tests and use a minimal local Chart stub to verify history handoff; Chart rendering itself remains unchanged.
 
@@ -161,10 +161,10 @@
     assert.equal(requestedHistoryPaths.length, 0);
   });
   ```
-- [ ] **Step 2: Run `CLOT_BROWSER_EXECUTABLE='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' npm run test:dashboard:browser` and `node --test tests/cli-visualize.test.js tests/visualizer-html.test.js`.** Expect the old four-source/loaded-only page to fail the new behavior assertions.
-- [ ] **Step 3: Replace duplicated page calculations with the shared contracts.** Remove src=4910all UI/state and brand-gated loading. All/4910 ensureCatalog automatically; musinsa queries only base musinsa immediately. While loading/error, all/4910 show `집계 중`/retry instead of partial totals. Partial/unavailable build notice remains visible alongside available results. Format all counts; KPI mirrors quick facets; count text distinguishes total from rendered. Preserve source/sort persistence and numeric deep links, reset all conflicting dimensions for directly opened products, and invalidate pending detail request tokens on close/step/open. Update CLI totals/copy without changing argument parsing.
-- [ ] **Step 4: Run both Task 4 commands.** Expect PASS over HTTP and file://, including no summary script loaded on a restored musinsa-only view and no history script loaded merely to compute counts.
-- [ ] **Step 5: Commit Task 4 files after staged diff/check.** Message `feat(dashboard): unify source filtering and full catalog search`.
+- [x] **Step 2: Run `CLOT_BROWSER_EXECUTABLE='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' npm run test:dashboard:browser` and `node --test tests/cli-visualize.test.js tests/visualizer-html.test.js`.** Expect the old four-source/loaded-only page to fail the new behavior assertions.
+- [x] **Step 3: Replace duplicated page calculations with the shared contracts.** Remove src=4910all UI/state and brand-gated loading. All/4910 ensureCatalog automatically; musinsa queries only base musinsa immediately. While loading/error, all/4910 show `집계 중`/retry instead of partial totals. Partial/unavailable build notice remains visible alongside available results. Format all counts; KPI mirrors quick facets; count text distinguishes total from rendered. Preserve source/sort persistence and numeric deep links, reset all conflicting dimensions for directly opened products, and invalidate pending detail request tokens on close/step/open. Update CLI totals/copy without changing argument parsing.
+- [x] **Step 4: Run both Task 4 commands.** Expect PASS over HTTP and file://, including no summary script loaded on a restored musinsa-only view and no history script loaded merely to compute counts.
+- [x] **Step 5: Commit Task 4 files after staged diff/check.** Message `feat(dashboard): unify source filtering and full catalog search`.
 
 ### Task 5: 모든 출처 공통 브랜드 선택창과 툴바
 
@@ -172,7 +172,7 @@
 
 **Interfaces:** Consumes QueryResult.brands and FilterState.brandKeys. Produces labelled `브랜드 선택` dialog, independent `브랜드 찾기` input, instant multi-selection, and summary chips with separate remove buttons. The dialog search only filters choices, never state.q or product results. It is available for all three sources; on incomplete all/4910 catalog its choices show loading/error instead of pretending the base list is complete.
 
-- [ ] **Step 1: Add failing browser tests.** For all/musinsa/4910 open the picker and select normalized 나이키: baseline results are respectively 3/1/2. Add GU (OR), change to musinsa and keep selected GU removable even with count 0. NFC/NFD duplicates form one option, distinct untranslated brand names remain separate, empty fallback names render. Removing the last selected chip restores all brands; global reset clears brands and product/brand search fields. At 390×844 and 1440×1000 assert dialog fits viewport, long labels wrap, summary never exceeds two named brands plus `외 N개`, hidden elements have no layout/focus, closed state returns focus. Test Escape, Tab, Shift+Tab, slash shortcut, backdrop dismissal and focus transfer when product detail opens. Test header wrapping does not overlap sticky toolbar and count 0 is visible rather than treated as missing.
+- [x] **Step 1: Add failing browser tests.** For all/musinsa/4910 open the picker and select normalized 나이키: baseline results are respectively 3/1/2. Add GU (OR), change to musinsa and keep selected GU removable even with count 0. NFC/NFD duplicates form one option, distinct untranslated brand names remain separate, empty fallback names render. Removing the last selected chip restores all brands; global reset clears brands and product/brand search fields. At 390×844 and 1440×1000 assert dialog fits viewport, long labels wrap, summary never exceeds two named brands plus `외 N개`, hidden elements have no layout/focus, closed state returns focus. Test Escape, Tab, Shift+Tab, slash shortcut, backdrop dismissal and focus transfer when product detail opens. Test header wrapping does not overlap sticky toolbar and count 0 is visible rather than treated as missing.
 
   ```js
   test('brand dialog returns focus and becomes hidden', async () => {
@@ -183,10 +183,10 @@
     assert.equal(await trigger.evaluate(el => el === document.activeElement), true);
   });
   ```
-- [ ] **Step 2: Run the Task 4 browser command.** Expect picker and hidden-layout failures before UI changes.
-- [ ] **Step 3: Implement the common dialog and toolbar refinement.** Read impeccable craft-floor immediately before UI edits. Use a single native dialog, desktop constrained panel and mobile bottom sheet; instant selection means no apply button. Separate source/category/quick groups with readable labels. Add explicit `[hidden]{display:none!important}` for the page's boolean hidden use. Use ResizeObserver for actual topbar height, with an initial measured fallback. Close dialog on source changes, preserve selected keys, restore focus. Show an `기타` category only when its count is positive or it is selected; unknown categories remain accessible. Preserve incumbent tokens and scope selectors so brand controls do not trigger product shortcut/event handlers.
-- [ ] **Step 4: Run browser tests and inspect the two viewport screenshots in one batch.** Fix demonstrated defects in one batch and confirm once; record screenshot locations in the verification note. Expect no page errors, horizontal overflow, clipped options, or hidden active controls. Run the Impeccable mechanical detector once on the changed template if available, and resolve actionable findings in scope.
-- [ ] **Step 5: Commit Task 5 files after staged diff/check.** Message `feat(dashboard): share accessible brand picker across sources`.
+- [x] **Step 2: Run the Task 4 browser command.** Expect picker and hidden-layout failures before UI changes.
+- [x] **Step 3: Implement the common dialog and toolbar refinement.** Read impeccable craft-floor immediately before UI edits. Use a single native dialog, desktop constrained panel and mobile bottom sheet; instant selection means no apply button. Separate source/category/quick groups with readable labels. Add explicit `[hidden]{display:none!important}` for the page's boolean hidden use. Use ResizeObserver for actual topbar height, with an initial measured fallback. Close dialog on source changes, preserve selected keys, restore focus. Show an `기타` category only when its count is positive or it is selected; unknown categories remain accessible. Preserve incumbent tokens and scope selectors so brand controls do not trigger product shortcut/event handlers.
+- [x] **Step 4: Run browser tests and inspect the two viewport screenshots in one batch.** Fix demonstrated defects in one batch and confirm once; record screenshot locations in the verification note. Expect no page errors, horizontal overflow, clipped options, or hidden active controls. Run the Impeccable mechanical detector once on the changed template if available, and resolve actionable findings in scope.
+- [x] **Step 5: Commit Task 5 files after staged diff/check.** Message `feat(dashboard): share accessible brand picker across sources`.
 
 ### Task 6: 전체 규모·배포 계약 검증과 문서
 
@@ -194,7 +194,7 @@
 
 **Interfaces:** Uses the full generator/runtime/UI contracts. Produces `verifyDashboardBuild(outputPath:string) -> {totalItems:number,total4910:number,scanState:string}` exported from the new script; direct CLI `node scripts/verify-dashboard-build.js PATH` prints that JSON and exits 0 on consistency, nonzero on missing/mismatched parts/revision/count. Importing the script must not run its CLI. Produces deployment checks covering every new source dependency, a reproducible scale scenario, and a verification record separating synthetic/local/live evidence.
 
-- [ ] **Step 1: Add failing scale/build checks.** Generate exactly 140,129 unique summaries (626 musinsa and 139,503 4910 including liked), assert source count arithmetic and rendered cards=120 before auto-pagination; hold IntersectionObserver in this test until explicit load-more. Search a sentinel existing only in the last part, assert exact result and all facet counts. Open details and assert no count/order changes. Check generated summaries contain no L, history requests remain zero until detail, and rebuild does not leave old part/history files. Measure 10 warmed search/facet/sort operations using performance.now and record median/max; this fixture proves scale behavior, not current production quantities.
+- [x] **Step 1: Add failing scale/build checks.** Generate exactly 140,129 unique summaries (626 musinsa and 139,503 4910 including liked), assert source count arithmetic and rendered cards=120 before auto-pagination; hold IntersectionObserver in this test until explicit load-more. Search a sentinel existing only in the last part, assert exact result and all facet counts. Open details and assert no count/order changes. Check generated summaries contain no L, history requests remain zero until detail, and rebuild does not leave old part/history files. Measure 10 warmed search/facet/sort operations using performance.now and record median/max; this fixture proves scale behavior, not current production quantities.
 
   ```js
   test('build verifier rejects incomplete parts instead of passing a subtotal', () => {
@@ -205,14 +205,14 @@
   ```
 
   Also reject wrong revision/count and missing detail files; accept a valid empty scan and a base-only unavailable/partial manifest with its mandatory notice. Verify the script's CLI exits nonzero for invalid output and only prints aggregate fields, not item data.
-- [ ] **Step 2: Run `node --test tests/dashboard-build.test.js tests/dashboard-catalog.test.js` and the browser command.** Expect the missing verifier to fail first; scale assertions must be present and actually execute with no skipped or zero-test success. A deterministic scale failure must be resolved before completion. If individual interactive operations block the browser for at least 1,000ms, record the evidence and revisit scheduling before claiming the UI is ready; do not weaken scope or accuracy to hit the diagnostic threshold.
-- [ ] **Step 3: Implement the verifier, CI and user documentation.** Parse the generator's data placeholder and run only generated data files in an isolated VM; use Task 1 merge/identity rules to cross-check counts, validate every referenced part/detail revision, and reject missing files. Add new model/catalog/runtime/verifier files, relevant tests, package.json/lock to Pages push path filters. In the existing Node 24 job add npm ci, focused dashboard node tests, `npx playwright install --with-deps chromium`, and browser tests before build/upload. Replace the optional 4910 index check with `node scripts/verify-dashboard-build.js _site/index.html`, retaining explicit partial/unavailable behavior when the release is absent. Explain source union, common brands, facet counts, full-summary loading and lazy history in README. Do not publish or push from this task.
-- [ ] **Step 4: Run focused checks, then the full suite once.** Run `node --test tests/dashboard-model.test.js tests/dashboard-catalog.test.js tests/dashboard-runtime.test.js tests/dashboard-build.test.js tests/visualizer-data.test.js tests/visualizer-html.test.js tests/cli-visualize.test.js`; run browser tests; then `npm test`. Expect zero failures and no silent browser skips. Build a representative fixture in a disposable directory and verify file:// plus HTTP. If authorized credentials work, download the real 4910 release to a temporary CLOT_4910_DB_PATH and independently compare DISTINCT IDs and generated summary counts; report lastScan and whether the asset is current or fallback. If unavailable, report that exact limitation without claiming live parity. Record commands, actual output, revision, viewport screenshots and timing in the verification note. Check that CLI/DB tests have not touched source data via git status.
-- [ ] **Step 5: Self-review requirements against the spec and review the complete branch before integration.** Run `git diff --check` and inspect staged changes; commit only Task 6 files with `test(dashboard): verify catalog scale and deployment contract`. Use requesting-code-review in the execution method chosen by the user. Stop at the reviewable branch; no automatic merge, push or deployment.
+- [x] **Step 2: Run `node --test tests/dashboard-build.test.js tests/dashboard-catalog.test.js` and the browser command.** Expect the missing verifier to fail first; scale assertions must be present and actually execute with no skipped or zero-test success. A deterministic scale failure must be resolved before completion. If individual interactive operations block the browser for at least 1,000ms, record the evidence and revisit scheduling before claiming the UI is ready; do not weaken scope or accuracy to hit the diagnostic threshold.
+- [x] **Step 3: Implement the verifier, CI and user documentation.** Parse the generator's data placeholder and run only generated data files in an isolated VM; use Task 1 merge/identity rules to cross-check counts, validate every referenced part/detail revision, and reject missing files. Add new model/catalog/runtime/verifier files, relevant tests, package.json/lock to Pages push path filters. In the existing Node 24 job add npm ci, focused dashboard node tests, `npx playwright install --with-deps chromium`, and browser tests before build/upload. Replace the optional 4910 index check with `node scripts/verify-dashboard-build.js _site/index.html`, retaining explicit partial/unavailable behavior when the release is absent. Explain source union, common brands, facet counts, full-summary loading and lazy history in README. Do not publish or push from this task.
+- [x] **Step 4: Run focused checks, then the full suite once.** Run `node --test tests/dashboard-model.test.js tests/dashboard-catalog.test.js tests/dashboard-runtime.test.js tests/dashboard-build.test.js tests/visualizer-data.test.js tests/visualizer-html.test.js tests/cli-visualize.test.js`; run browser tests; then `npm test`. Expect zero failures and no silent browser skips. Build a representative fixture in a disposable directory and verify file:// plus HTTP. If authorized credentials work, download the real 4910 release to a temporary CLOT_4910_DB_PATH and independently compare DISTINCT IDs and generated summary counts; report lastScan and whether the asset is current or fallback. If unavailable, report that exact limitation without claiming live parity. Record commands, actual output, revision, viewport screenshots and timing in the verification note. Check that CLI/DB tests have not touched source data via git status.
+- [x] **Step 5: Self-review requirements against the spec and review the complete branch before integration.** Run `git diff --check` and inspect staged changes; commit only Task 6 files with `test(dashboard): verify catalog scale and deployment contract`. Use requesting-code-review in the execution method chosen by the user. Stop at the reviewable branch; no automatic merge, push or deployment.
 
 ## 계획 자체 검토
 
 - 제품 범위: 출처 통합(Task 2·4), 공통 브랜드(Task 1·5), 전체 검색과 독립 집계(Task 1·4), 요약/이력 분리(Task 2·3), 실패·기존 상태 복원(Task 3·4), 접근성·표시 오류(Task 5), 배포와 규모(Task 6)를 연결했다.
 - 타입: 모델은 canonical Summary만 조회하고 raw 추출 API는 유지한다. runtime은 이력을 별도 캐시하며 DOM은 모델·runtime 외의 별도 가격/집계 수식을 만들지 않는다.
 - Review Focus의 다섯 항목에 테스트를 배정했다. 각 작업은 실패 확인, 구현, 통과 확인, 범위 커밋 단계를 포함한다.
-- 구현 전 검토 항목: 아직 운영 4910 DB와 실측 성능을 검증하지 않았다. 이 사실은 Task 6의 조건이며 합성 픽스처로 숨기지 않는다. 실행 방식은 사용자가 아직 선택하지 않았다.
+- 구현 전 검토 항목: 아직 운영 4910 DB와 실측 성능을 검증하지 않았다. 이 사실은 Task 6의 조건이며 합성 픽스처로 숨기지 않는다. 사용자는 직접 구현·워크트리·독립 리뷰 방식을 선택했고 해당 방식으로 완료했다.

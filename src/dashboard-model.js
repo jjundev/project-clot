@@ -10,7 +10,7 @@ export function createDashboardModel() {
  x.c=['top','outer','bottom','shoes','bag'].includes(raw.c)?raw.c:'etc';
  x.brandKey=brandKey(x.b);x._hay=brandKey([x.b,x.m,x.g,x.n].join(' '));x._init=x.b.trim().charAt(0).toUpperCase();
  const L=raw.L||[];x.tracked=L.length>0;
- Object.assign(x,{rate:-1,dropAmt:0,isOut:x.s==='SOLDOUT',isLow:false,my:null,sale:null,normal:null,newbie:null,coupon:0,couponName:null,lowMy:null,lowDate:null});
+ Object.assign(x,{rate:-1,dropAmt:0,isOut:x.s==='SOLDOUT',isLow:false,lowEligible:false,my:null,sale:null,normal:null,newbie:null,coupon:0,couponName:null,lowMy:null,lowDate:null});
  if(!L.length)return x;
  const last=L.at(-1),prev=L.at(-2);
  Object.assign(x,{my:last[3],sale:last[2],normal:last[1],newbie:last[7]??null,isOut:last[4]===1||x.isOut,coupon:last[6]>0?last[6]:0,couponName:last[5]});
@@ -21,7 +21,8 @@ export function createDashboardModel() {
  if(r[3]!=null&&(x.lowMy==null||r[3]<x.lowMy)){x.lowMy=r[3];x.lowDate=r[0];}
  if(r[3]!=null){if(first==null)first=r[3];else if(first!==r[3])moved=true;}
  }
- x.isLow=x.lowMy!=null&&x.my!=null&&x.my<=x.lowMy&&(kind!=='scan'||moved);
+ x.lowEligible=kind!=='scan'||moved;
+ x.isLow=x.lowMy!=null&&x.my!=null&&x.my<=x.lowMy&&x.lowEligible;
  x.dropAmt=prev&&(x.src!=='4910'||prev[5]===last[5])&&prev[3]!=null&&x.my!=null&&x.my<prev[3]?prev[3]-x.my:0;
  return x;
  }

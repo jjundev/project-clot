@@ -65,3 +65,20 @@ test('wrong revision and missing IDs reject histories; failed brand request retr
  await assert.rejects(r.getHistory(x.k));fail=false;
  assert.equal((await r.getHistory(x.k))[0][3],120);
 });
+test('a failed attempt settles its in-flight workers before retry starts a new batch',async()=>{
+ let release;const gate=new Promise(r=>release=r);let failed=false,active=0,max=0;
+ const parts=Array.from({length:4},(_,i)=>({id:'p'+i,path:'4910/p'+i+'.js',count:1}));
+ const r=createDashboardRuntime({model,baseItems:[],inlineHistories:{},manifest:{revision:'r',parts,scanCount:4,scanState:'complete'},loadScript:async file=>{
+ active++;max=Math.max(max,active);
+ try {
+ if(file.endsWith('p0.js')&&!failed){failed=true;throw Error('offline');}
+ await gate;
+ const id=file.split('/').at(-1).replace('.js',''),n=Number(id.slice(1))+10;
+ return {v:1,id,revision:'r',items:[{...summaries[3],n,k:'4910:'+n}]};
+ }finally{active--;}
+ }});
+ const first=r.ensureCatalog();await new Promise(resolve=>setImmediate(resolve));
+ const retry=r.retryCatalog();release();await Promise.all([first,retry]);
+ assert.ok(max<=4,'overlapping failed and retry requests: '+max);
+ assert.equal((await r.retryCatalog()).status,'ready');
+});

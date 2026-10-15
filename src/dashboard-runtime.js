@@ -10,13 +10,14 @@ export function createDashboardRuntime({model,baseItems,inlineHistories,manifest
  pending=Promise.resolve().then(async()=>{
  const ids=new Set(),paths=new Set();
  for(const ref of manifest.parts){if(ids.has(ref.id)||paths.has(ref.path))throw Error('중복 요약 파일');ids.add(ref.id);paths.add(ref.path);}
- const loaded=new Array(manifest.parts.length);let next=0;
- const worker=async()=>{while(next<manifest.parts.length){
+ const loaded=new Array(manifest.parts.length);let next=0,failed=null;
+ const worker=async()=>{try{while(!failed&&next<manifest.parts.length){
  const index=next++,ref=manifest.parts[index],part=await loadScript(ref.path);
  if(part?.v!==1||part.revision!==manifest.revision||part.id!==ref.id||!Array.isArray(part.items)||part.items.length!==ref.count)throw Error('요약 파일 불일치: '+ref.id);
  loaded[index]=part.items;
- }};
- await Promise.all(Array.from({length:Math.min(4,manifest.parts.length)},worker));
+ }}catch(err){failed=err;throw err;}};
+ await Promise.allSettled(Array.from({length:Math.min(4,manifest.parts.length)},worker));
+ if(failed)throw failed;
  const scan=loaded.flat(),keys=new Set(baseItems.map(x=>x.k));
  if(scan.length!==manifest.scanCount)throw Error('전체 요약 건수 불일치');
  for(const x of scan){

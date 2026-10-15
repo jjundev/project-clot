@@ -762,7 +762,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   function closeBrand(){if(brandDialog.open)brandDialog.close();}
   brandTrigger.addEventListener('click',function(){brandDialog.showModal();brandOptionKeys='';renderBrandBar();brandSearch.focus();});
   document.getElementById('brandClose').addEventListener('click',closeBrand);
-  brandDialog.addEventListener('close',function(){brandTrigger.focus();});
+  brandDialog.addEventListener('close',function(){if(!scrim||!scrim.classList.contains('open'))brandTrigger.focus();});
   brandDialog.addEventListener('click',function(e){
     if(e.target!==brandDialog)return;
     var r=brandDialog.getBoundingClientRect();
@@ -797,11 +797,17 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     var query=model.brandKey(brandSearch.value);
     var choices=lastQuery.brands.filter(function(b){return !query||model.brandKey(b.label).includes(query);});
     var keys=JSON.stringify(choices.map(function(b){return b.key;}));
+    var optionHadFocus=brandOptions.contains(document.activeElement);
+    var focusedBrand=optionHadFocus?document.activeElement.dataset.brand:null;
     if(keys!==brandOptionKeys){
       brandOptions.innerHTML=choices.length?choices.map(function(b){
         return '<label class="brand-option"><input type="checkbox" data-brand="'+esc(b.key)+'"><span>'+esc(b.label)+'</span><b class="num">'+fmt(b.count)+'</b></label>';
       }).join(''):'<p>조건에 맞는 브랜드가 없습니다</p>';
       brandOptionKeys=keys;
+      if(optionHadFocus){
+        var nextFocus=[].find.call(brandOptions.querySelectorAll("input[data-brand]"),function(el){return el.dataset.brand===focusedBrand;});
+        (nextFocus||brandSearch).focus();
+      }
     }
     brandOptions.querySelectorAll('input[data-brand]').forEach(function(input){
       input.checked=selected.includes(input.dataset.brand);
@@ -997,12 +1003,14 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       it=runtime.getCatalog().items.find(function(x){return x.k===key;});
     }
     if(!it)return;
+    closeBrand();
     if(!view.some(function(x){return x.k===key;})){
       state.filter='all';state.cat='all';state.brandKeys=[];state.q='';qEl.value='';state.src='all';
       runtime.ensureCatalog();
       render();
     }
-    lastFocus=document.activeElement;modalItem=Object.assign({},it,{L:[]});range=0;
+    if(!scrim.classList.contains('open'))lastFocus=document.activeElement;
+    modalItem=Object.assign({},it,{L:[]});range=0;
     fillModal(modalItem);
     scrim.classList.add('open');document.body.style.overflow='hidden';
     document.querySelector('.sheet-body').scrollTop=0;document.getElementById('closeBtn').focus();setUrl(goodsQs(it));
@@ -1023,9 +1031,14 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     scrim.classList.remove('open');
     document.body.style.overflow = '';
     if (chart) { chart.destroy(); chart = null; }
+    var closingKey=modalItem&&modalItem.k;
     modalItem = null;
     setUrl('');
-    if (lastFocus && lastFocus.focus) lastFocus.focus();
+    if(lastFocus&&lastFocus.isConnected&&!scrim.contains(lastFocus)&&lastFocus.offsetParent!==null&&lastFocus!==document.body)lastFocus.focus();
+    else {
+      var card=[].find.call(grid.querySelectorAll('.card'),function(el){return el.dataset.k===closingKey;});
+      (card||qEl).focus();
+    }
   }
   function stepTo(delta) {
     var i = view.findIndex(function(x){return x.k===modalItem.k;});
@@ -1189,7 +1202,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     var okNb = newbies.filter(function (v) { return v != null; });
     var minAll = okNb.length ? Math.min(minMine, Math.min.apply(null, okNb)) : minMine;
     var maxNorm = okNorm.length ? Math.max.apply(null, okNorm) : minMine;
-    var lowIdx = mines.indexOf(minMine);
+    var lowIdx = it.lowEligible ? rows.findIndex(function(r){return r[3]===it.lowMy&&(!on4910||r[5]===it.couponName);}) : -1;
 
     /* U9 — 0원 시작이 아닌 동적 스케일링 */
     var yMin = Math.floor(minAll * 0.9 / 1000) * 1000;
@@ -1228,7 +1241,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         layout: { padding: { top: 30, right: 6, left: 0, bottom: 0 } },
         plugins: {
           legend: { display: false },
-          lowestPin: { at: lowIdx, val: minMine, color: cDown, ink: cssVar('--fg-invert') },
+          lowestPin: { at: lowIdx < 0 ? null : lowIdx, val: it.lowMy, color: cDown, ink: cssVar('--fg-invert') },
           tooltip: {
             backgroundColor: cFg, titleColor: cBg, bodyColor: cBg,
             borderColor: cFg, borderWidth: 1, padding: 10, cornerRadius: 6,
@@ -1272,7 +1285,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         : d < 0 ? '<span class="delta-down num">↓ ' + Math.abs(d).toLocaleString('ko-KR') + '</span>'
         : d > 0 ? '<span class="delta-up num">↑ ' + d.toLocaleString('ko-KR') + '</span>'
         : '<span class="delta-flat">변동 없음</span>';
-      var isLowRow = r[3] === it.lowMy && (!is4910(it) || r[5] === it.couponName);
+      var isLowRow = it.lowEligible && r[3] === it.lowMy && (!is4910(it) || r[5] === it.couponName);
       return '<tr><td>' + r[0] + '</td>' +
         '<td class="mine-c num">' + won(r[3]) + '</td>' +
         '<td>' + dCell + '</td>' +

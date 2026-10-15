@@ -14,7 +14,7 @@ async function fixture(t,options={}) {
  await new Promise(r=>server.listen(0,'127.0.0.1',r));
  const browser=await chromium.launch({executablePath:process.env.CLOT_BROWSER_EXECUTABLE||undefined,headless:true});
  const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
- await page.route(/https:\/\//,route=>route.request().url().includes('chart.umd')?route.fulfill({body:'window.Chart=class {constructor(){} destroy(){}}',contentType:'text/javascript'}):route.abort());
+ await page.route(/https:\/\//,route=>route.request().url().includes('chart.umd')?route.fulfill({body:'window.Chart=class {constructor(canvas,config){canvas.dataset.chartConfig=JSON.stringify(config);} destroy(){}}',contentType:'text/javascript'}):route.abort());
  t.after(async()=>{await browser.close();await new Promise(r=>server.close(r));fs.rmSync(dir,{recursive:true,force:true});assert.deepEqual(errors,[]);});
  return {page,dir,url:'http://127.0.0.1:'+server.address().port+'/index.html'};
 }
@@ -132,4 +132,51 @@ test('brand dialog uses the current theme text color',async t=>{
  await page.evaluate(()=>localStorage.setItem('clot.theme','dark'));await page.reload();
  await page.locator('#brandTrigger').click();
  assert.equal(await page.locator('#brandDialog').evaluate(e=>getComputedStyle(e).color),await page.locator('body').evaluate(e=>getComputedStyle(e).color));
+});
+
+test('constant scan price has no lowest annotation in details or chart',async t=>{
+ const {page,url}=await fixture(t);await page.goto(url);
+ await page.locator('.card[data-k="4910:3"]').click();
+ await page.waitForFunction(()=>document.querySelector('#mRows').textContent.includes('2026-10-16'));
+ assert.equal(await page.locator('#mRows .st.on').count(),0);
+ assert.equal(await page.locator('#chart').evaluate(e=>JSON.parse(e.dataset.chartConfig).options.plugins.lowestPin.at),null);
+});
+test('closing after detail navigation or history retry restores the visible product card',async t=>{
+ const {page,url}=await fixture(t);await page.goto(url);
+ const card=page.locator('.card[data-k="4910:3"]');await card.click();await page.locator('#prevBtn').click();await page.locator('#closeBtn').click();
+ assert.equal(await card.evaluate(e=>e===document.activeElement),true);
+ let fail=true;await page.route('**/4910/b9.js*',r=>fail?r.abort():r.continue());
+ // A fresh page ensures there is no cached successful brand history.
+ await page.reload();await card.click();await page.getByRole('button',{name:'이력 다시 시도'}).waitFor();
+ fail=false;await page.getByRole('button',{name:'이력 다시 시도'}).click();await page.waitForFunction(()=>document.querySelector('#mRows').textContent.includes('2026-10-16'));
+ await page.locator('#closeBtn').click();assert.equal(await card.evaluate(e=>e===document.activeElement),true);
+});
+
+test('detail lowest annotations use the latest basis and retain eligible historical lows',async t=>{
+ for(const scenario of ['basis','changed']){
+ const {page,url}=await fixture(t,{scanScenario:scenario});await page.goto(url);
+ const card=page.locator('.card[data-k="4910:3"]');assert.equal(await card.locator('.pin.low').count(),0);
+ await card.click();await page.waitForFunction(()=>document.querySelector('#mRows').textContent.includes('2026-10-16'));
+ const pin=await page.locator('#chart').evaluate(e=>JSON.parse(e.dataset.chartConfig).options.plugins.lowestPin);
+ if(scenario==='basis'){assert.equal(pin.at,null);assert.equal(await page.locator('#mRows .st.on').count(),0);}
+ else {assert.equal(pin.val,110);assert.equal(pin.at,2);assert.equal(await page.locator('#mRows .st.on').count(),1);assert.match(await page.locator('#mFacts').textContent(),/110원/);}
+ }
+});
+test('removing a zero-count brand keeps keyboard focus inside the open dialog',async t=>{
+ const {page,url}=await fixture(t);await page.goto(url);
+ await page.locator('#brandTrigger').click();await page.getByRole('checkbox',{name:'GU 1',exact:true}).check();await page.keyboard.press('Escape');
+ await page.locator('[data-src=musinsa]').click();await page.locator('#brandTrigger').click();
+ await page.getByRole('checkbox',{name:'GU 0',exact:true}).focus();await page.keyboard.press('Space');
+ assert.equal(await page.locator('#brandDialog').evaluate(e=>e.contains(document.activeElement)&&document.activeElement.offsetParent!==null),true);
+ await page.keyboard.press('Tab');assert.equal(await page.locator('#brandDialog').evaluate(e=>e.contains(document.activeElement)),true);
+});
+test('a delayed deep link closes the brand dialog and transfers focus to the product',async t=>{
+ const {page,url}=await fixture(t);
+ let release;const gate=new Promise(r=>release=r);
+ await page.route('**/4910/catalog-0000.js*',async r=>{await gate;await r.continue();});
+ await page.goto(url+'?goods=4910:3',{waitUntil:'domcontentloaded'});
+ await page.locator('#brandTrigger').click();await page.getByRole('dialog',{name:'브랜드 선택',exact:true}).waitFor();
+ release();await page.locator('#scrim.open').waitFor();
+ assert.equal(await page.getByRole('dialog',{name:'브랜드 선택',exact:true}).count(),0);
+ assert.equal(await page.locator('#closeBtn').evaluate(e=>e===document.activeElement),true);
 });
