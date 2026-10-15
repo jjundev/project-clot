@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'dry-run = anonymous scan, no DB, no Telegram; scan = pull DB, scan + coupon checks, push DB; init = first run (fresh DB) + push --allow-fresh'
+        description: 'dry-run = anonymous scan, no DB, no Telegram; scan = pull DB, scan + coupon checks, push DB; init = first run (fresh DB) + push --allow-fresh; backfill = pull DB, one-time coupon registry fill (~2 h, resumable), push DB'
         type: choice
-        options: [scan, dry-run, init]
+        options: [scan, dry-run, init, backfill]
         default: dry-run
 
 permissions:
@@ -22,7 +22,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: ${{ inputs.mode == 'backfill' && 180 || 45 }}
     env:
       MODE: ${{ github.event_name == 'schedule' && 'scan' || inputs.mode }}
       GH_TOKEN: ${{ github.token }}
@@ -47,12 +47,18 @@ jobs:
       # The steps below chain on success (no status function in their `if`): a failed pull must not reach track-musinsa
       # (it would start from an empty DB), and a failed track-musinsa must not reach push (it would overwrite the Release history).
       - name: Pull musinsa-wide.db from the data-musinsa Release
-        if: env.MODE == 'scan'
+        if: env.MODE == 'scan' || env.MODE == 'backfill'
         run: node src/cli.js musinsa-db pull
 
       - name: Scan categories and check coupons
         if: env.MODE == 'scan'
         run: node src/cli.js track-musinsa
+
+      # Not done (deadline, throttle, expired session) still exits 0, so the next step pushes the saved cursor; the Telegram
+      # digest says to run it again.
+      - name: Fill the coupon registry
+        if: env.MODE == 'backfill'
+        run: node src/cli.js track-musinsa --backfill
 
       - name: Initial scan into a fresh DB
         if: env.MODE == 'init'
@@ -63,7 +69,7 @@ jobs:
         run: node src/cli.js track-musinsa --dry-run
 
       - name: Push musinsa-wide.db to the data-musinsa Release
-        if: env.MODE == 'scan'
+        if: env.MODE == 'scan' || env.MODE == 'backfill'
         run: node src/cli.js musinsa-db push
 
       - name: Push the initial musinsa-wide.db to the data-musinsa Release

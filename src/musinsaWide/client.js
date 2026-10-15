@@ -14,14 +14,22 @@ export const REQUEST_TIMEOUT_MS = 30_000; // per request; undici's default would
 const PAGE_ATTEMPTS = 3;
 const PAGE_BACKOFF_MS = [2000, 4000]; // waits before attempt 2 and 3
 
+// Anonymous coupon goods list (no cookie). size above 300 comes back empty without an error, so it stays fixed.
+export const PLP_API = 'https://api.musinsa.com/api2/coupon/plp/v1/goods';
+export const PLP_PAGE_SIZE = 300;
+export const ALL_CATEGORIES_PARAM = '001,002,003,103,004';
+export const ANON_RETRY_BACKOFF_MS = [2000, 4000]; // waits before attempt 2 and 3
+const ANON_ATTEMPTS = 3;
+
 const realSleep = (ms) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve());
 
 export function firstPageUrl(cat) {
   return `https://www.musinsa.com/categories/item/${cat}?gf=${GENDER_MUSINSA}&sortCode=${SORT_MUSINSA}`;
 }
 
-export function createMusinsaClient({ fetchFn: baseFetch = fetch, pageDelayMs = 300, couponDelayMs = 700, sleep = realSleep } = {}) {
+export function createMusinsaClient({ fetchFn: baseFetch = fetch, pageDelayMs = 300, couponDelayMs = 700, anonDelayMs = 500, sleep = realSleep } = {}) {
   let couponCalls = 0;
+  let anonCalls = 0;
   const fetchFn = (url, opts = {}) => baseFetch(url, { ...opts, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
 
   // pageUrl null = first page (built here); later pages must be the nextPageUrl the API returned (never built: 403).
@@ -63,7 +71,63 @@ export function createMusinsaClient({ fetchFn: baseFetch = fetch, pageDelayMs = 
     return list;
   }
 
-  return { getCategoryPage, getUsableCoupons, sleep };
+  // Anonymous GET against the coupon plp API: no Cookie header. One counter spaces the count and list calls alike.
+  async function anonGetJson(url, what) {
+    if (anonCalls++ > 0) await sleep(anonDelayMs);
+    const res = await fetchFn(url, { headers: { 'User-Agent': USER_AGENT, Referer: 'https://www.musinsa.com/' } });
+    if (!res.ok) {
+      const err = new Error(`Musinsa coupon goods ${what} HTTP ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    return res.json();
+  }
+
+  function plpParams(couponNo, category) {
+    return new URLSearchParams({ couponNo: String(couponNo), couponKind: 'PRODUCT', caller: 'COUPON', gf: GENDER_MUSINSA, category });
+  }
+
+  async function getCouponGoodsCount(couponNo, { category = ALL_CATEGORIES_PARAM } = {}) {
+    const json = await anonGetJson(`${PLP_API}/count?${plpParams(couponNo, category)}`, 'count');
+    const count = json?.data;
+    if (typeof count !== 'number' || !Number.isFinite(count)) throw new Error(`Unexpected coupon goods count response for coupon ${couponNo}`);
+    return count;
+  }
+
+  async function getCouponGoodsPage(couponNo, { page = 1, category = ALL_CATEGORIES_PARAM } = {}) {
+    const params = plpParams(couponNo, category);
+    params.set('sortCode', SORT_MUSINSA);
+    params.set('page', String(page));
+    params.set('size', String(PLP_PAGE_SIZE));
+    const json = await anonGetJson(`${PLP_API}?${params}`, 'list');
+    const list = json?.data?.list;
+    if (json?.meta?.result !== 'SUCCESS' || !Array.isArray(list)) throw new Error(`Unexpected coupon goods list response for coupon ${couponNo}`);
+    return {
+      items: list.map((it) => ({ goodsNo: Number(it.goodsNo), reviewCount: it.reviewCount ?? null, isSoldOut: Boolean(it.isSoldOut) })),
+      totalCount: json.data.pagination?.totalCount ?? list.length,
+      hasNext: Boolean(json.data.pagination?.hasNext),
+    };
+  }
+
+  return { getCategoryPage, getUsableCoupons, getCouponGoodsCount, getCouponGoodsPage, sleep };
+}
+
+// Retry wrapper for the anonymous calls: a 429 is rethrown at once (the caller stops the phase), anything else waits
+// 2s then 4s and retries, three attempts in all; the last error is thrown.
+export async function anonCall(fn, { sleep = realSleep, beforeAttempt } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt < ANON_ATTEMPTS; attempt++) {
+    if (attempt > 0) await sleep(ANON_RETRY_BACKOFF_MS[attempt - 1]);
+    // Outside the retry catch: a deadline, quota or sibling stop must abort immediately.
+    beforeAttempt?.();
+    try {
+      return await fn();
+    } catch (err) {
+      if (err?.status === 429) throw err;
+      lastErr = err;
+    }
+  }
+  throw lastErr;
 }
 
 export function toListingRow(item, cat) {
@@ -82,6 +146,7 @@ export function toListingRow(item, cat) {
     normal_price: item.normalPrice ?? null,
     extra_discount: item.extraDiscountAmount ?? 0,
     is_sold_out: item.isSoldOut ? 1 : 0,
+    review_count: item.reviewCount ?? null,
   };
 }
 
