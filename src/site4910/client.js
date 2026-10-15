@@ -1,5 +1,6 @@
 // 4910.kr (Ably's men's mall) brand listing client. Anonymous-token auth only — no login, no cookies.
 // The listings are reseller posts (Japanese buying agents), so the tracking unit is the listing sno.
+import { parseCouponConditions } from './coupon-eligibility.js';
 import { USER_AGENT } from '../myprice.js';
 
 export const BRANDS_4910 = [
@@ -236,7 +237,7 @@ export function createClient({ fetchFn = fetch, delayMs = 300, retryBaseMs = 100
       percent: c.discount_percent ?? null,
       price: c.discount_price ?? null,
       max: c.max_discount_price ?? Infinity,
-      min: parsePrice(String(c.conditions?.[1] ?? '').match(/([\d,]+)원 이상/)?.[1]) ?? 0,
+      min: parseCouponConditions(c.conditions).minAmount ?? 0,
       finishedAt: c.finished_at ?? null,
       usable: Boolean(c.is_usable && c.is_in_available_period),
       conditions: Array.isArray(c.conditions) ? c.conditions.map(String) : null,

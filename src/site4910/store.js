@@ -96,6 +96,9 @@ export class Store4910 {
     if (!marketCouponCols.has('coupon_snos')) this.db.exec('ALTER TABLE market_coupons ADD COLUMN coupon_snos TEXT');
     const walletCols = new Set(this.db.prepare('PRAGMA table_info(wallet_coupons)').all().map((c) => c.name));
     if (!walletCols.has('scope')) this.db.exec('ALTER TABLE wallet_coupons ADD COLUMN scope TEXT');
+    for (const [col, type] of [['conditions_json', 'TEXT'], ['has_targets', 'INTEGER'], ['app_only', 'INTEGER']]) {
+      if (!walletCols.has(col)) this.db.exec(`ALTER TABLE wallet_coupons ADD COLUMN ${col} ${type}`);
+    }
     const scanRunCols = new Set(this.db.prepare('PRAGMA table_info(scan_runs)').all().map((c) => c.name));
     if (!scanRunCols.has('coupons_ok')) this.db.exec('ALTER TABLE scan_runs ADD COLUMN coupons_ok INTEGER');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_goods_market ON goods (market_sno)');
@@ -330,11 +333,12 @@ export class Store4910 {
   #putCoupon(c, marketSno, date) {
     this.db
       .prepare(`
-        INSERT OR REPLACE INTO wallet_coupons (coupon_sno, name, type, percent, price, max, min, finished_at, market_sno, seen_date, scope)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO wallet_coupons (coupon_sno, name, type, percent, price, max, min, finished_at, market_sno, seen_date, scope, conditions_json, has_targets, app_only)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(c.couponSno, c.name ?? null, c.type ?? null, c.percent ?? null, c.price ?? null,
-        Number.isFinite(c.max) ? c.max : null, c.min ?? null, c.finishedAt ?? null, marketSno, date, c.scope ?? null);
+        Number.isFinite(c.max) ? c.max : null, c.min ?? null, c.finishedAt ?? null, marketSno, date, c.scope ?? null, c.conditions == null ? null : JSON.stringify(c.conditions),
+        c.hasTargets == null ? null : Number(c.hasTargets), c.appOnly == null ? null : Number(c.appOnly));
   }
 
   // Replaces a coupon's goods list in one transaction (a list runs to a few thousand rows).
@@ -360,7 +364,10 @@ export class Store4910 {
 
   // Rows as stored, except max: null means uncapped.
   getWallet() {
-    return this.db.prepare('SELECT * FROM wallet_coupons ORDER BY coupon_sno').all();
+    return this.db.prepare('SELECT * FROM wallet_coupons ORDER BY coupon_sno').all().map((r) => ({ ...r,
+      conditions: r.conditions_json == null ? null : JSON.parse(r.conditions_json),
+      hasTargets: r.has_targets == null ? null : Boolean(r.has_targets), appOnly: r.app_only == null ? null : Boolean(r.app_only),
+    }));
   }
 
   // coupon_snos is an array of coupon snos; left out, it is stored NULL (a row from before the column existed).
