@@ -583,6 +583,19 @@ test('recordObservations writes seen 1/0 only for USABLE coupons whose list hold
   assert.deepEqual(obs(11, 1), [{ date: D1, seen: 1 }]);
 });
 
+test('a revived coupon seen outside its PLP list keeps its positive observation and is not retired again', () => {
+  s.upsertMemberCoupons(D1, [mc(10)]);
+  for (const date of ['2026-10-12', '2026-10-13', '2026-10-14']) {
+    s.db.prepare('INSERT INTO coupon_observations VALUES (?, ?, ?, ?)').run(10, 1, date, 0);
+  }
+  setState(10, 'RETIRED');
+  s.upsertMemberCoupons('2026-10-15', [mc(10)]);
+  s.recordObservations('2026-10-15', [{ goods_no: 2, couponNos: [10] }]);
+  assert.deepEqual(obs(10, 2), [{ date: '2026-10-15', seen: 1 }]);
+  assert.deepEqual(s.retireDead('2026-10-15'), []);
+  assert.equal(stateOf(10), 'USABLE');
+});
+
 test('retireDead retires after 3 unseen observations within 7 days, not with 2, not when one was seen, not with an 8-day-old observation', () => {
   const D = '2026-10-15';
   s.upsertMemberCoupons(D, [mc(1), mc(2), mc(3), mc(4), mc(5)]);

@@ -132,12 +132,12 @@ export function createMemberChecker({ withClient, sessionProvider, concurrency =
     return base;
   }
 
-  async function checkOne(client, goods, onResult) {
+  async function checkOne(client, goods, onResult, reserve, deadline) {
     let renewed = false; // this goods already went through the checker's refresh: another rejection ends checking
     let rotated = false; // this goods already retried on a cookie another response rotated in
     let next = null; // the cookie to retry with, when it is not simply the current one
     for (;;) {
-      if (stop) return;
+      if (stop || now() >= deadline || (reserve && !reserve())) return;
       const used = next ?? cookie;
       next = null;
       let coupons;
@@ -181,12 +181,12 @@ export function createMemberChecker({ withClient, sessionProvider, concurrency =
     }
   }
 
-  async function check(goodsList, { deadline = Infinity, onResult } = {}) {
+  async function check(goodsList, { deadline = Infinity, onResult, reserve } = {}) {
     if (base !== 'ok') return;
     await mapConcurrent(goodsList, concurrency, async (goods) => {
       if (stop || now() > deadline) return;
       try {
-        await withClient((client) => checkOne(client, goods, onResult));
+        await withClient((client) => checkOne(client, goods, onResult, reserve, deadline));
       } catch {
         failed++; // onResult or the pool broke for this goods, not the API
         log(`⚠️ [무신사] 쿠폰 저장 실패 goods ${goods.goods_no}`);
@@ -234,7 +234,7 @@ export function bestCoupon(salePrice, coupons) {
  *  1. the usable, unexpired registry coupons whose goods list holds the goods and that have started (start_date NULL or
  *     ≤ date), and
  *  2. the goods' own direct member check, when made within COUPON_TTL_DAYS and for each coupon in it only while it is
- *     unexpired (until NULL or ≥ date) and the registry has not RETIRED it. A coupon the registry never saw still counts.
+ *     started and unexpired (start NULL or ≤ date, until NULL or ≥ date), and the registry has not RETIRED it. A coupon the registry never saw still counts.
  * A coupon that fails any of these is skipped on its own; the goods' other coupons still apply. A goods in no list and
  * with no direct coupon is priced sale − extra.
  * Not `ready` (the registry is still being built) or no coupon list stored yet: every price is null, nothing is
@@ -274,7 +274,7 @@ export function applyCouponPrices({ store, date, ready = false }) {
     }
     if (row.coupons != null && row.coupon_checked_date != null && today - dayNumber(row.coupon_checked_date) <= COUPON_TTL_DAYS) {
       for (const c of row.coupons) {
-        if (byId.has(c.id) || (c.until && c.until < date) || isRetired(c.id)) continue;
+        if (byId.has(c.id) || (c.until && c.until < date) || (c.start && c.start > date) || isRetired(c.id)) continue;
         byId.set(c.id, c);
       }
     }
@@ -304,8 +304,8 @@ export function applyCouponPrices({ store, date, ready = false }) {
 /**
  * How well the registry predicted a day's member-checked sample. For each { goods, coupons } (the coupons a member call
  * returned, parseCoupon results) the prediction is the biggest discount among the goods' listed coupons that were USABLE
- * in `before` (coupon_no → state, taken when classification ended) and unexpired; the actual is the biggest among the
- * returned unexpired coupons. Equal is `exact`, a smaller prediction is `under` (a price too high), a bigger one is
+ * in `before` (coupon_no → state, taken when classification ended), started and unexpired; the actual is the biggest
+ * among the returned started, unexpired coupons. Equal is `exact`, a smaller prediction is `under` (a price too high), a bigger one is
  * `over`. An under is blamed on the state `before` held for the actual best coupon: USABLE → `listGap` (the registry
  * knew it, its goods list did not hold this goods), RETIRED → `retired`, anything else or absent → `unregistered`.
  */
@@ -317,10 +317,10 @@ export function sampleAccuracy({ store, date, results, before }) {
     const predicted = (listed.get(goods.goods_no) ?? []).flatMap((no) => {
       if (before.get(no) !== COUPON_STATE.USABLE) return [];
       const c = store.getCoupon(no);
-      return c && (c.until_date == null || c.until_date >= date) ? [registryCouponToCalc(c)] : [];
+      return c && (c.until_date == null || c.until_date >= date) && (c.start_date == null || c.start_date <= date) ? [registryCouponToCalc(c)] : [];
     });
     const guess = bestCoupon(goods.sale_price, predicted)?.discount ?? 0;
-    const actual = bestCoupon(goods.sale_price, coupons.filter((c) => c.until == null || c.until >= date));
+    const actual = bestCoupon(goods.sale_price, coupons.filter((c) => (c.until == null || c.until >= date) && (c.start == null || c.start <= date)));
     const real = actual?.discount ?? 0;
     out.checked++;
     if (guess === real) out.exact++;

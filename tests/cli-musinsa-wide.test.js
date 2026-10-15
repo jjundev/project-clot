@@ -1,10 +1,15 @@
 import './setup-env.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseArgs, runMusinsaWideStep, runMusinsaDb } from '../src/cli.js';
+import { parseArgs, runMusinsaWideStep, runMusinsaDb, musinsaRunDate } from '../src/cli.js';
 import { CATEGORIES_MUSINSA, DEPTH_PAGES } from '../src/musinsaWide/client.js';
 
 const TODAY = '2026-10-14';
+
+test('Musinsa run dates use KST on both sides of midnight', () => {
+  assert.equal(musinsaRunDate(new Date('2026-10-14T14:59:59Z')), '2026-10-14');
+  assert.equal(musinsaRunDate(new Date('2026-10-14T15:00:00Z')), '2026-10-15');
+});
 
 function fakeStore() {
   const store = { calls: [], closed: false };

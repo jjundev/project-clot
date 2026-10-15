@@ -14,8 +14,8 @@ export const WALK_EXTRA_PAGES = 1; // pages read after the one whose last goods 
  * whose last goods has fewer reviews than that category's floor (no floor: after page 1), or at MAX_PAGES_PER_CAT.
  * Each page call is retried by anonCall; a 429 or an error that outlasts the retries is thrown.
  */
-export async function walkCoupon(client, couponNo, floors) {
-  const page = (p, category) => anonCall(() => client.getCouponGoodsPage(couponNo, { page: p, category }), { sleep: client.sleep });
+export async function walkCoupon(client, couponNo, floors, { checkStop } = {}) {
+  const page = (p, category) => anonCall(() => client.getCouponGoodsPage(couponNo, { page: p, category }), { sleep: client.sleep, beforeAttempt: checkStop });
   const goodsNos = new Set();
   const add = (items) => {
     for (const it of items) goodsNos.add(it.goodsNo);
@@ -56,12 +56,16 @@ export async function walkCoupon(client, couponNo, floors) {
 /**
  * Walks the given coupons' lists (ANON_CONCURRENCY at a time) and replaces each one's coupon_goods. A coupon whose walk
  * fails, or comes back empty although a stored member check holds it (suspectEmpty), keeps yesterday's rows. The first
- * 429 ('throttled') or the deadline stops new coupons from starting; coupons not started keep yesterday's rows too.
+ * 429 ('throttled') or the deadline stops new page requests, including retries; incomplete coupons keep yesterday's rows.
  * `calls` counts page requests, retries included.
  */
 export async function walkCouponLists({ withClient, store, date, couponNos, deadline = Infinity, concurrency = ANON_CONCURRENCY, now = Date.now }) {
   const floors = store.categoryReviewFloors();
   const result = { walked: 0, failed: 0, suspectEmpty: 0, calls: 0, stop: null, failedCoupons: [] };
+  const checkStop = () => {
+    if (now() >= deadline) result.stop ??= 'deadline';
+    if (result.stop) throw Object.assign(new Error('Coupon walk stopped'), { code: 'WALK_STOP' });
+  };
 
   await mapConcurrent(couponNos, concurrency, async (couponNo) => {
     if (result.stop) return;
@@ -74,7 +78,8 @@ export async function walkCouponLists({ withClient, store, date, couponNos, dead
         walkCoupon(
           { ...client, getCouponGoodsPage: (...args) => (result.calls++, client.getCouponGoodsPage(...args)) },
           couponNo,
-          floors
+          floors,
+          { checkStop }
         )
       );
       if (goodsNos.length === 0 && store.goodsHasDirectCoupon(couponNo)) {

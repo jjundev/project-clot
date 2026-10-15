@@ -618,7 +618,12 @@ export function run4910Db({ sub, allowFresh = false, dbPath = default4910DbPath(
   }
 }
 
-// `--category a,b` (each one of CATEGORIES_MUSINSA) and `--depth n` (integer 1-100); either one makes the run partial.
+// Registry dates and daily budgets follow the Korean calendar, regardless of the runner timezone.
+export function musinsaRunDate(now = new Date()) {
+  return now.toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+}
+
+// Either --category or --depth makes the category scan partial.
 function parseMusinsaScope(flags) {
   let categories = CATEGORIES_MUSINSA;
   let depthPages = DEPTH_PAGES;
@@ -1312,7 +1317,7 @@ async function main() {
       break;
     }
     case 'track-musinsa': {
-      const today = new Date().toISOString().split('T')[0];
+      const today = musinsaRunDate();
       const res = await runMusinsaWideStep({ flags, today });
       if (!res.ok) process.exitCode = 1;
       break;

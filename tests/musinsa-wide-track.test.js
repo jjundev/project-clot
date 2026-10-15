@@ -96,6 +96,28 @@ const scanRun = (date) => store.db.prepare('SELECT * FROM scan_runs WHERE date =
 const catalog3 = () => ({ '001': [item(1, 10000), item(2, 20000)], '002': [item(3, 30000)] });
 const NO_REASONS = { unregistered: 0, listGap: 0, retired: 0 };
 
+test('daily member budgets persist across same-day runs and reset on the next date', async () => {
+  makeReady();
+  const catalog = Object.fromEntries(['001', '002', '003', '103', '004'].map((cat, i) => [cat,
+    Array.from({ length: 150 }, (_, j) => item(i * 150 + j + 1, 10000))]));
+  // Each pending coupon needs a separate member goods check.
+  for (let i = 1; i <= 450; i++) store.recordHit(2000 + i, DAY0, 1, { scopeGoods: [i] });
+  const api = {};
+  const args = { makeClient: fakeMakeClient(catalog, api), categories: Object.keys(catalog), sessionProvider: session() };
+  const first = await run(args);
+  assert.equal(first.registry.classify.calls, 200);
+  const count = ofKind(api.calls, 'member').length;
+  assert.ok(count <= 400);
+  await run(args);
+  const dailyTotal = ofKind(api.calls, 'member').length;
+  assert.ok(dailyTotal <= 400);
+  await run(args);
+  assert.equal(ofKind(api.calls, 'member').length, dailyTotal);
+  await run({ ...args, date: DAY2 });
+  assert.ok(ofKind(api.calls, 'member').length > dailyTotal);
+  assert.ok(ofKind(api.calls, 'member').length <= dailyTotal + 400);
+});
+
 test('budgets are 20 and 35 minutes; enumeration 12 and classification 15', () => {
   assert.equal(BUDGET_MS_MUSINSA, 20 * 60_000);
   assert.equal(RUN_BUDGET_MS_MUSINSA, 35 * 60_000);
@@ -382,13 +404,13 @@ test('phase deadlines: enumeration stops at 12 min, classification at 15 min', a
   assert.equal(res.registry.enum.probed, counts.length);
   assert.ok(counts.length > 0 && counts.every((c) => c.t < T0 + ENUM_BUDGET_MS));
   assert.deepEqual(res.registry.recheck, { probed: 0, newPositive: 0, stop: 'deadline' });
-  // Classification starts at minute 12; goods start until the clock is past minute 15, one at a time.
+  // Classification starts at minute 12; no request starts at or after minute 15.
   const members = ofKind(api.calls, 'member');
-  assert.equal(res.registry.classify.calls, 4);
-  assert.ok(members.slice(0, 4).every((c) => c.t <= T0 + CLASSIFY_BUDGET_MS));
-  assert.equal(res.registry.classify.pending, 2);
-  // The sample (run deadline 35 min) still checks the two goods classification never reached.
-  assert.equal(res.registry.sample.checked, 2);
+  assert.equal(res.registry.classify.calls, 3);
+  assert.ok(members.slice(0, 3).every((c) => c.t < T0 + CLASSIFY_BUDGET_MS));
+  assert.equal(res.registry.classify.pending, 3);
+  // The sample (run deadline 35 min) still checks the three goods classification never reached.
+  assert.equal(res.registry.sample.checked, 3);
   assert.equal(members.length, 6);
 });
 

@@ -202,8 +202,8 @@ test('onCursor reports the next number after every batch', async () => {
   assert.equal(r.highest, null);
   assert.equal(r.stop, null);
   assert.deepEqual(cursors, [1050, 1100, 1150, 1200]);
-  // nothing found: the empties below no hit are not recorded, the frontier is not touched
-  assert.equal(store.getMeta('frontier'), null);
+  // No hit: no empties are recorded; the safe starting boundary remains the frontier.
+  assert.equal(store.getMeta('frontier'), '999');
 });
 
 test('frontier meta advances only upward', async () => {
@@ -254,6 +254,47 @@ test('probeNeighbors probes ±50 of each center, skips known numbers, caps at 30
   assert.ok(g.calls.count.includes(950) && g.calls.count.includes(1070));
   assert.ok(!g.calls.count.includes(20000));
   s2.close();
+});
+
+test('neighbor count budget survives a reopened store and resets on the next date', async () => {
+  const f = fakeClient();
+  const args = { withClient: f.withClient, store, date: DATE, centers: [1000, 5000, 9000] };
+  await probeNeighbors({ ...args, cap: 250 });
+  const reopened = new MusinsaWideStore(path.join(dir, 'musinsa-wide.db'));
+  try {
+    const rest = await probeNeighbors({ ...args, store: reopened });
+    assert.equal(rest.probed, 50);
+    assert.equal(f.calls.count.length, 300);
+    assert.equal((await probeNeighbors(args)).probed, 0);
+    assert.equal((await probeNeighbors({ ...args, date: '2026-10-16' })).probed, 300);
+  } finally { reopened.close(); }
+});
+
+test('a slow failed count cannot lift a missing daily frontier past the missing number', async () => {
+  const client = {
+    sleep: async () => {},
+    async getCouponGoodsCount(no) {
+      if (no === 100) { await new Promise(setImmediate); throw Object.assign(new Error('429'), { status: 429 }); }
+      return 1;
+    },
+    async getCouponGoodsPage() { return { items: [] }; },
+  };
+  const r = await enumerateNumbers({ withClient: (fn) => fn(client), store, date: DATE, from: 100 });
+  assert.equal(r.stop, 'throttled');
+  assert.equal(store.getMeta('frontier'), '99');
+  assert.equal(r.highest, null);
+  const retry = fakeClient();
+  await enumerateNumbers({ withClient: retry.withClient, store, date: DATE, from: Number(store.getMeta('frontier')) + 1, mustReach: store.maxCouponNo() });
+  assert.ok(retry.calls.count.includes(100));
+});
+
+test('failed neighbor count attempts and retries also spend the daily budget', async () => {
+  const f = fakeClient({ failing: [950] });
+  await probeNeighbors({ withClient: f.withClient, store, date: DATE, centers: [1000], cap: 1 });
+  const g = fakeClient();
+  const r = await probeNeighbors({ withClient: g.withClient, store, date: DATE, centers: [1000, 5000, 9000] });
+  assert.equal(f.calls.count.length + g.calls.count.length, 300);
+  assert.equal(r.stop, null);
 });
 
 test('a stop mid-batch leaves next and the cursor at that batch\'s first number', async () => {

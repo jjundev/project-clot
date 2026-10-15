@@ -17,7 +17,7 @@ export const ANON_CONCURRENCY = 2;
  * in `empties`. The first 429 ('throttled'), a number that still fails after the retries ('error') or the deadline stops
  * the phase; numbers not reached are in neither list, and what was recorded stays.
  */
-export async function probeNumbers({ withClient, store, date, numbers, deadline = Infinity, now = Date.now }) {
+export async function probeNumbers({ withClient, store, date, numbers, deadline = Infinity, now = Date.now, beforeCount }) {
   const hits = [];
   const empties = [];
   const newCoupons = [];
@@ -31,7 +31,7 @@ export async function probeNumbers({ withClient, store, date, numbers, deadline 
     }
     try {
       await withClient(async (client) => {
-        const count = await anonCall(() => client.getCouponGoodsCount(n), { sleep: client.sleep });
+        const count = await anonCall(() => client.getCouponGoodsCount(n), { sleep: client.sleep, beforeAttempt: beforeCount });
         if (!(count > 0)) {
           empties.push(n);
           return;
@@ -45,7 +45,7 @@ export async function probeNumbers({ withClient, store, date, numbers, deadline 
         hits.push(n);
       });
     } catch (err) {
-      stop ??= err?.status === 429 ? 'throttled' : 'error';
+      stop ??= err?.code === 'NEIGHBOR_CAP' ? 'limit' : err?.status === 429 ? 'throttled' : 'error';
     }
   });
 
@@ -56,13 +56,16 @@ export async function probeNumbers({ withClient, store, date, numbers, deadline 
 /**
  * Walks coupon numbers upward from `from` in batches of ENUM_BATCH. The walk ends after ENUM_EMPTY_STOP empties in a
  * row, once it is past `mustReach`, unless one of the ENUM_PROBES past the last hit has goods; then it walks on up to
- * that number. `highest` (the last number with goods, null if none) lifts meta.frontier. With recordEmpties, the empty
+ * that number. `highest` (the last hit in a fully processed batch, null if none) lifts meta.frontier. With recordEmpties, the empty
  * numbers below `highest` are remembered for a later re-check; a backfill leaves that off.
  * `next` is where the walk would go on (the cursor): the first number of a batch that a stop cut short, else past the last batch; `stop` is null when the walk finished by itself.
  */
 export async function enumerateNumbers({ withClient, store, date, from, mustReach = null, deadline = Infinity, recordEmpties = true, onCursor = null, now = Date.now }) {
+  // Persist the starting boundary before parallel probes register higher numbers: maxCouponNo is not a resume cursor.
+  if (store.getMeta('frontier') == null) store.setMeta('frontier', from - 1);
   let n = from;
   let lastHit = from - 1;
+  let completedHit = lastHit; // only fully processed batches may lift the daily frontier
   let run = 0;
   let reach = mustReach ?? -Infinity;
   let probed = 0;
@@ -97,6 +100,7 @@ export async function enumerateNumbers({ withClient, store, date, from, mustReac
       stop = r.stop;
       break;
     }
+    completedHit = lastHit;
     n += ENUM_BATCH;
     onCursor?.(n);
     if (run >= ENUM_EMPTY_STOP && n > reach) {
@@ -117,7 +121,7 @@ export async function enumerateNumbers({ withClient, store, date, from, mustReac
     }
   }
 
-  const highest = lastHit >= from ? lastHit : null;
+  const highest = completedHit >= from ? completedHit : null;
   if (highest !== null && highest > Number(store.getMeta('frontier') ?? -Infinity)) store.setMeta('frontier', highest);
   if (recordEmpties && highest !== null) for (const no of empties) if (no < highest) store.recordEmpty(no, date);
   return { from, next: n, probed, hits, newCoupons, highest, stop };
@@ -129,18 +133,25 @@ export async function recheckEmpties({ withClient, store, date, deadline = Infin
   return { probed: r.probed, newPositive: r.hits.length, stop: r.stop };
 }
 
-// Counts the numbers within NEIGHBOR_RADIUS of each center that the registry does not know, up to `cap` of them.
+// Counts unknown neighbors up to `cap` numbers, with at most NEIGHBOR_CAP HTTP count attempts per KST date, including retries.
 export async function probeNeighbors({ withClient, store, date, centers, cap = NEIGHBOR_CAP, deadline = Infinity, now = Date.now }) {
+  const saved = JSON.parse(store.getMeta('neighbor_budget') ?? 'null');
+  let used = saved?.date === date ? saved.calls : 0;
+  const remaining = Math.min(cap, Math.max(0, NEIGHBOR_CAP - used));
+  const beforeCount = () => {
+    if (used >= NEIGHBOR_CAP) throw Object.assign(new Error('Neighbor budget spent'), { code: 'NEIGHBOR_CAP' });
+    store.setMeta('neighbor_budget', JSON.stringify({ date, calls: ++used }));
+  };
   const picked = new Set();
   outer: for (const center of centers) {
     for (let no = center - NEIGHBOR_RADIUS; no <= center + NEIGHBOR_RADIUS; no++) {
-      if (picked.size >= cap) break outer;
+      if (picked.size >= remaining) break outer;
       if (no < 1 || picked.has(no) || store.getCoupon(no)) continue;
       picked.add(no);
     }
   }
-  const r = await probeNumbers({ withClient, store, date, numbers: [...picked], deadline, now });
-  return { probed: r.probed, hits: r.hits.length, stop: r.stop };
+  const r = await probeNumbers({ withClient, store, date, numbers: [...picked], deadline, now, beforeCount });
+  return { probed: r.probed, hits: r.hits.length, stop: r.stop === 'limit' ? null : r.stop };
 }
 
 /**
@@ -218,7 +229,7 @@ export function planClassification(pending, goodsInfo) {
  * what each goods returned, for recordObservations; `added` the numbers newly registered by the results.
  * A checker that is not 'ok' does nothing.
  */
-export async function classifyPending({ store, checker, date, cap = CLASSIFY_CAP, deadline = Infinity }) {
+export async function classifyPending({ store, checker, date, cap = CLASSIFY_CAP, deadline = Infinity, reserve }) {
   const result = { calls: 0, usable: 0, other: 0, outOfScope: 0, pending: 0, neighborCenters: [], checks: [], added: [] };
   if (checker.status !== 'ok') {
     result.pending = store.pendingCoupons().length;
@@ -247,6 +258,7 @@ export async function classifyPending({ store, checker, date, cap = CLASSIFY_CAP
   const callsBefore = checker.calls;
   await checker.check(goodsList, {
     deadline,
+    reserve,
     onResult: async (goods, coupons) => {
       const couponNos = coupons.map((c) => Number(c.id));
       const returned = new Set(couponNos);

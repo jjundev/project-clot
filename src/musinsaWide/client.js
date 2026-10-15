@@ -114,10 +114,12 @@ export function createMusinsaClient({ fetchFn: baseFetch = fetch, pageDelayMs = 
 
 // Retry wrapper for the anonymous calls: a 429 is rethrown at once (the caller stops the phase), anything else waits
 // 2s then 4s and retries, three attempts in all; the last error is thrown.
-export async function anonCall(fn, { sleep = realSleep } = {}) {
+export async function anonCall(fn, { sleep = realSleep, beforeAttempt } = {}) {
   let lastErr;
   for (let attempt = 0; attempt < ANON_ATTEMPTS; attempt++) {
     if (attempt > 0) await sleep(ANON_RETRY_BACKOFF_MS[attempt - 1]);
+    // Outside the retry catch: a deadline, quota or sibling stop must abort immediately.
+    beforeAttempt?.();
     try {
       return await fn();
     } catch (err) {

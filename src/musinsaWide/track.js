@@ -81,6 +81,15 @@ const sumWalks = (a, b) => ({
 async function runRegistry({ withClient, store, date, checker, started, runDeadline, now, log }) {
   const phase = phaseRunner(log);
   const enumDeadline = started + ENUM_BUDGET_MS;
+  // Persist attempts before the HTTP request, including failures and authentication retries. Reruns share the day caps.
+  const savedBudget = JSON.parse(store.getMeta('member_budget') ?? 'null');
+  const budget = savedBudget?.date === date ? savedBudget : { date, classify: 0, sample: 0 };
+  const reserve = (kind, cap) => () => {
+    if (budget[kind] >= cap) return false;
+    budget[kind]++;
+    store.setMeta('member_budget', JSON.stringify(budget));
+    return true;
+  };
 
   const enumerated = await phase('번호 순회', { probed: 0, hits: 0, newCoupons: 0, highest: null }, async () => {
     // A ready registry has a frontier; without one, carry on from the highest number known (or the backfill start).
@@ -95,7 +104,7 @@ async function runRegistry({ withClient, store, date, checker, started, runDeadl
   ));
 
   const classified = await phase('판별', { calls: 0, usable: 0, other: 0, outOfScope: 0, pending: 0, neighborCenters: [], checks: [], added: [] }, () => (
-    classifyPending({ store, checker, date, cap: CLASSIFY_CAP, deadline: started + CLASSIFY_BUDGET_MS })
+    classifyPending({ store, checker, date, cap: CLASSIFY_CAP, deadline: started + CLASSIFY_BUDGET_MS, reserve: reserve('classify', CLASSIFY_CAP) })
   ));
   const { neighborCenters, checks: classifyChecks, added: classifyAdded, ...classify } = classified;
 
@@ -114,6 +123,7 @@ async function runRegistry({ withClient, store, date, checker, started, runDeadl
     phase('표본 조회', {}, async () => {
       await checker.check(store.pickSample(SAMPLE_PER_DAY, date), {
         deadline: runDeadline,
+        reserve: reserve('sample', SAMPLE_PER_DAY),
         onResult: (goods, coupons) => {
           store.putGoodsCoupons(goods.goods_no, date, coupons, goods);
           const { added, revived } = store.upsertMemberCoupons(date, coupons);
@@ -344,7 +354,7 @@ export async function backfillMusinsaCoupons({
   const checker = createMemberChecker({ withClient, sessionProvider, concurrency, log, now });
   await checker.start();
   if (checker.status !== 'ok') log(`⚠️ [무신사] 회원 세션 ${checker.status} — 판별 생략`);
-  const classified = await phase('판별', { calls: 0, usable: 0, other: 0, outOfScope: 0, pending: 0 }, () => (
+  const classified = await phase('판별', { calls: 0, usable: 0, other: 0, outOfScope: 0, pending: 0, neighborCenters: [] }, () => (
     classifyPending({ store, checker, date, cap: BACKFILL_CLASSIFY_CAP, deadline: started + budgetMs })
   ));
   const { neighborCenters, checks, added, stop: classifyStop, ...classify } = classified;

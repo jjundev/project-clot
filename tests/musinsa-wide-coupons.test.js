@@ -353,10 +353,10 @@ test('the deadline is read from the injected clock', async () => {
   let t = 1000;
   const calls = [];
   const client = { async getUsableCoupons(args) { calls.push(args.goodsNo); t += 10; return []; } };
-  // Each call moves the clock 10 past 1000: goods 1 starts at 1000, goods 2 at 1010 (not past 1010), goods 3 at 1020 is.
+  // Each call moves the clock by 10: the second goods reaches the deadline exactly and must not start.
   const res = await run({ withClient: withClientOf(client), sessionProvider: provider(), deadline: 1010, now: () => t });
-  assert.equal(res.checked, 2);
-  assert.deepEqual(calls, [1, 2]);
+  assert.equal(res.checked, 1);
+  assert.deepEqual(calls, [1]);
 });
 
 // ---- applyCouponPrices from the registry's coupon lists + fresh direct checks ----
@@ -512,4 +512,33 @@ test('sampleAccuracy counts exact/under/over and names the reason of each under'
     checked: 7, exact: 2, under: 4, over: 1, reasons: { unregistered: 2, listGap: 1, retired: 1 },
   });
   assert.deepEqual(sampleAccuracy({ store, date: DAY, results: [], before }), { checked: 0, exact: 0, under: 0, over: 0, reasons: { unregistered: 0, listGap: 0, retired: 0 } });
+});
+
+test('future coupons are excluded from direct prices and both sides of sample accuracy until their start date', () => {
+  store.applyScan(DAY, [goodsRow(1, 100000)], { cat: '001', complete: true });
+  addCoupon(11, { rate: '20', start: '2026-10-15T00:00:00+09:00' });
+  putList(11, [1]);
+  const coupon = parseCoupon(raw({ id: 11, rate: '20', max: 0, min: 0, start: '2026-10-15T00:00:00+09:00' }));
+  store.putGoodsCoupons(1, DAY, [coupon], { sale_price: 100000, extra_discount: 0 });
+  applyCouponPrices({ store, date: DAY, ready: true });
+  assert.deepEqual(prices(1), [100000]);
+  const before = new Map([[11, 'USABLE']]);
+  const accuracy = (coupons, date = DAY) => sampleAccuracy({ store, date, before, results: [{ goods: goodsRow(1, 100000), coupons }] });
+  assert.equal(accuracy([]).exact, 1);
+  assert.equal(accuracy([coupon]).exact, 1);
+  applyCouponPrices({ store, date: '2026-10-15', ready: true });
+  assert.deepEqual(prices(1), [80000]);
+  assert.equal(accuracy([coupon], '2026-10-15').exact, 1);
+});
+
+test('member quota reserves HTTP attempts, including authentication retries', async () => {
+  let calls = 0;
+  let remaining = 1;
+  const checker = createMemberChecker({ withClient: (fn) => fn({
+    async getUsableCoupons() { calls++; throw Object.assign(new Error('auth'), { code: 'MEMBER_AUTH' }); },
+  }), sessionProvider: provider(), log });
+  await checker.start();
+  await checker.check([goodsRow(1, 10000), goodsRow(2, 10000)], { reserve: () => remaining-- > 0 });
+  assert.equal(calls, 1);
+  assert.equal(checker.calls, 0);
 });

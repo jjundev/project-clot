@@ -525,8 +525,8 @@ export class MusinsaWideStore {
   }
 
   /**
-   * One member check per goods: every USABLE coupon whose list holds that goods gets seen = 1 when the check returned it,
-   * else 0. INSERT OR REPLACE, so a same-day rerun leaves one row per (coupon, goods, date). Returns the rows written.
+   * Member returns always count as positive observations, including PLP gaps. A missing coupon is observed negatively
+   * only when its PLP list includes the goods. Same-day reruns replace the (coupon, goods, date) observation.
    */
   recordObservations(date, checks) {
     const listed = this.db.prepare(`
@@ -539,7 +539,9 @@ export class MusinsaWideStore {
     try {
       for (const { goods_no, couponNos } of checks) {
         const returned = new Set((couponNos ?? []).map(Number));
-        for (const { coupon_no } of listed.all(Number(goods_no))) {
+        const observed = new Set(listed.all(Number(goods_no)).map((c) => c.coupon_no));
+        for (const no of returned) if (this.getCoupon(no)?.state === COUPON_STATE.USABLE) observed.add(no);
+        for (const coupon_no of observed) {
           put.run(coupon_no, Number(goods_no), date, returned.has(coupon_no) ? 1 : 0);
           written++;
         }

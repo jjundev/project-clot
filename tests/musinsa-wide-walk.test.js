@@ -167,11 +167,44 @@ test('429 stops the walk: started coupons finish or fail, unstarted ones keep ye
 
 test('a coupon is not started once the deadline has passed', async () => {
   addGoods([1]);
-  const f = fakeClient(() => ({ items: [item(1)], totalCount: 1, hasNext: false }));
   let t = 0;
-  const r = await walkCouponLists({ withClient: f.withClient, store, date: DATE, couponNos: [1, 2, 3], concurrency: 1, deadline: 2, now: () => t++ });
+  const f = fakeClient(() => { t++; return { items: [item(1)], totalCount: 1, hasNext: false }; });
+  const r = await walkCouponLists({ withClient: f.withClient, store, date: DATE, couponNos: [1, 2, 3], concurrency: 1, deadline: 2, now: () => t });
   assert.equal(r.stop, 'deadline');
   assert.equal(r.walked, 2);
   assert.deepEqual(r.failedCoupons, []);
   assert.deepEqual(f.calls.map((c) => c.couponNo), [1, 2]);
+});
+
+test('a deadline between pages keeps the previous complete list and starts no further requests', async () => {
+  addGoods([1, 2]);
+  store.replaceCouponGoods(10, '2026-10-14', [2]);
+  let t = 0;
+  const f = fakeClient(() => { t = 10; return { items: [item(1)], totalCount: 2, hasNext: true }; });
+  const r = await walkCouponLists({ withClient: f.withClient, store, date: DATE, couponNos: [10, 11], deadline: 10, now: () => t });
+  assert.equal(r.stop, 'deadline');
+  assert.equal(r.walked, 0);
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual(store.couponsByGoods().get(2), [10]);
+  assert.equal(store.couponsByGoods().has(1), false);
+});
+
+test('a 429 in another worker stops an in-flight coupon before its next page', async () => {
+  addGoods([1, 2]);
+  store.replaceCouponGoods(10, '2026-10-14', [2]);
+  let release;
+  const barrier = new Promise((resolve) => { release = resolve; });
+  const f = fakeClient(async (no) => {
+    if (no === 11) {
+      setImmediate(release);
+      throw Object.assign(new Error('429'), { status: 429 });
+    }
+    await barrier;
+    return { items: [item(1)], totalCount: 2, hasNext: true };
+  });
+  const r = await walkCouponLists({ withClient: f.withClient, store, date: DATE, couponNos: [10, 11], concurrency: 2 });
+  assert.equal(r.stop, 'throttled');
+  assert.equal(r.walked, 0);
+  assert.equal(f.calls.length, 2);
+  assert.deepEqual(store.couponsByGoods().get(2), [10]);
 });
