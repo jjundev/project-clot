@@ -941,7 +941,8 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         (it.coupon > 0 ? '<span class="tag">' + esc(it.couponName || '쿠폰') + ' −' + it.coupon.toLocaleString('ko-KR') + '원</span>' : '');
     }
     if (is4910(it) && it.my == null && it.tracked) body = '<div class="waitprice">가격 재검증 필요</div>';
-    if (is4910(it) && it.vd) body += '<div class="was">검증일 ' + esc(it.vd.slice(0, 10)) + '</div>';
+    if (is4910(it) && it.vd) body += '<div class="was">' + (it.my == null ? '검토일 ' : '검증일 ') + esc(new Date(it.vd).toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })) + '</div>';
+    if (it.vs === 'corrected') body += '<div class="was">가격 교정됨</div>';
     var tags = (it.c ? '<span class="cat-tag">' + esc(CAT_NAMES[it.c] || it.c) + '</span>' : '') +
       (is4910(it) ? '<span class="cat-tag">4910</span>' : '');
     return '<button class="card' + (it.isOut ? ' out' : '') + '" type="button" data-k="' + esc(it.k) +
@@ -1264,7 +1265,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         (it.normal !== it.my ? '<span class="base num">' + won(it.normal) + '</span>' : '');
       var f = [];
       if (on4910 && it.my == null) f.push('<span class="fact">가격 재검증 필요</span>');
-      if (on4910 && it.vd) f.push('<span class="fact">검증일 ' + esc(it.vd.slice(0,10)) + '</span>');
+      if (on4910 && it.vd) f.push('<span class="fact">' + (it.my == null ? '검토일 ' : '검증일 ') + esc(new Date(it.vd).toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })) + '</span>');
       f.push('<span class="fact' + (it.isLow ? ' low' : '') + '">역대 최저가 <b class="num">' + won(it.lowMy) +
         '</b> · ' + md(it.lowDate) + '</span>');
       f.push('<span class="fact">' + (on4910 ? '4910 표시가' : '무신사 판매가') + ' <b class="num">' + won(it.sale) + '</b></span>');

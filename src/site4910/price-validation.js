@@ -9,7 +9,8 @@ export function effective4910Price({ raw, validation }) {
   return Number.isFinite(price) && price >= 0 ? price : null;
 }
 
-export function readPriceValidations(db, kind) {
+export function readPriceValidations(db, kind, { brandSno = null } = {}) {
   if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='price_validations'").get()) return new Map();
-  return new Map(db.prepare('SELECT * FROM price_validations WHERE kind=?').all(kind).map(r => [`${r.sno}:${r.date}`, r]));
+  const sql = brandSno == null ? 'SELECT * FROM price_validations WHERE kind=?' : `SELECT * FROM price_validations WHERE kind=? AND sno IN (SELECT sno FROM goods WHERE brand_sno=?)`;
+  return new Map(db.prepare(sql).all(...(brandSno == null ? [kind] : [kind, Number(brandSno)])).map(r => [`${r.sno}:${r.date}`, r]));
 }

@@ -1,8 +1,4 @@
-// 4910 coupon price = list price − the best coupon that reaches the listing (docs/verify/4910-member-price.md §2–3).
-// Which coupons reach a seller is decided per seller, so once a day each qualified seller's 1–2 sample listings are
-// asked for their best coupon, and every ACTIVE listing is then priced locally. The member token is only ever passed
-// to the client and never logged. Sellers are sampled concurrently, each on a client of its own (one client's
-// request spacing does not hold across concurrent calls), and each seller-only coupon's scope is looked up once.
+// 4910 single-item prices: direct option evidence or owned coupon with complete goods scope.
 import { mapConcurrent } from '../pool.js';
 
 // A seller-only coupon is not always seller-wide (docs/verify/4910-member-price.md §3): one limited to an event list
@@ -109,7 +105,7 @@ export async function learnMarketCoupons({ client, withClient = fn => fn(client)
         if (ok) verified++;
         store.putPriceValidation({ kind: 'scan', sno: sample.sno, date, status: ok ? 'verified' : 'unverified',
           reason: resolved.reason, corrected: ok ? { sale_price: detail.listPrice, coupon_price: resolved.price } : null,
-          evidence: { priceBasis: detail?.priceBasis ?? null, optionSno: detail?.optionSno ?? null,
+          evidence: { observedDate: date, bestOptionSno: best?.optionSno ?? null, priceBasis: detail?.priceBasis ?? null, optionSno: detail?.optionSno ?? null,
             basePrice: detail?.listPrice ?? null, couponSno: best?.couponSno ?? null,
             discount: best?.discount ?? null, isApplied: best?.isApplied ?? null } });
       }

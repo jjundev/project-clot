@@ -67,6 +67,7 @@ function buildLikedItems(db4910) {
     k: `4910:${g.sno}`,
     src: '4910',
     vd: validations.get(`${g.sno}:${logsBySno.get(g.sno)?.at(-1)?.[0]}`)?.checked_at ?? null,
+    vs: validations.get(`${g.sno}:${logsBySno.get(g.sno)?.at(-1)?.[0]}`)?.status ?? 'unverified',
     b: g.brand || g.market_name || '4910',
     m: g.market_name,
     g: g.name || '상품',
@@ -182,7 +183,7 @@ export function buildScan4910Payload(db4910, { brandSno = null } = {}) {
 
   // A 4910.db from before the coupon history has neither the table nor scan_runs.coupons_ok: no coupon prices then.
   const hasCouponHistory = !!db4910.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'coupon_price_changes'").get();
-  const validations = readPriceValidations(db4910, 'scan');
+  const validations = readPriceValidations(db4910, 'scan', { brandSno });
   const couponsBySno = hasCouponHistory
     ? group(
         db4910

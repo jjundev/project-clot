@@ -146,7 +146,7 @@ export async function syncLiked4910({
     const prev = store.getPrevLikedPrice(item.sno, date);
     store.logLikedPrice(logRow);
     store.putPriceValidation({ kind: 'liked', sno: item.sno, date, status: memberPrice == null ? 'unverified' : 'verified', reason,
-      evidence: { priceBasis: anon.priceBasis ?? null, optionSno: anon.optionSno, basePrice: anon.listPrice,
+      evidence: { observedDate: date, bestOptionSno: best?.optionSno ?? null, priceBasis: anon.priceBasis ?? null, optionSno: anon.optionSno, basePrice: anon.listPrice,
         couponSno: best?.couponSno ?? null, discount: best?.discount ?? null, isApplied: best?.isApplied ?? null } });
     result.validation[memberPrice == null ? 'unverified' : 'verified']++;
     result.validation.reasons[reason] = (result.validation.reasons[reason] ?? 0) + 1;
