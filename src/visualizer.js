@@ -5,6 +5,7 @@
 
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { createDashboardRuntime } from './dashboard-runtime.js';
 import { createDashboardModel } from './dashboard-model.js';
 import { buildDashboardCatalog } from './dashboard-catalog.js';
 import path from 'node:path';
@@ -472,6 +473,7 @@ export function generateDashboardHtml({
   }
 
   rendered = rendered.replace('/* __CLOT_MODEL__ */', () => 'window.__CLOT_MODEL__ = ('+createDashboardModel.toString()+')();');
+  rendered = rendered.replace('/* __CLOT_RUNTIME__ */', () => 'window.__CLOT_RUNTIME_FACTORY__ = ('+createDashboardRuntime.toString()+');');
   fs.writeFileSync(outputPath, rendered, 'utf-8');
 
   if (openBrowser) {
