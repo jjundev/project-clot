@@ -51,7 +51,7 @@ export function writeFixture(dir,{scale=false,scanScenario=null,wide=false,histo
    }
    const result=generateDashboardHtml({db,dbMusinsaPath,db4910Path,outputPath:path.join(dir,'index.html'),openBrowser:false});db.close();return result;
  }
- const n=139501;
+ const n=439501;
  const compact={v:1,brandSno:9,b:['나이키'],m:[''],imgBase:'',r:Array.from({length:n},(_,i)=>[i+3,0,0,i===n-1&&scale?'LAST_SENTINEL':'나이키 상품 '+(i+3),'','','top',[['2026-10-16',200,120,null]]])};
  // Scale uses IDs outside the liked range so the target total is exact.
  if(scale)for(let i=0;i<n;i++)compact.r[i][0]=i+10;

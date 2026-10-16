@@ -916,7 +916,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     var wideNotice=document.getElementById('musinsaNotice'), wm=D.musinsa;
     wideNotice.hidden=!wm;
     if(wm)wideNotice.textContent='무신사 '+wm.date+' 기준 · 조사 '+fmt(wm.selected)+'개 · 제공 '+fmt(wm.active)+'개(이전 회차 잔류 '+fmt(wm.retained||0)+'개 포함) · 직접 확인 '+fmt(wm.direct)+'개 · 추정 '+fmt(wm.estimated)+'개'+(wm.unknown?' · 출처 미확인 '+fmt(wm.unknown)+'개':'')+'. '+(wm.exceptionCoupons.length?'쿠폰 '+wm.exceptionCoupons.length+'종의 적용 상품 목록을 확인하지 못했습니다 ('+wm.exceptionCoupons.join(', ')+'). 추정가는 확인된 혜택 기준이며 실제 결제 가격이 더 낮을 수 있습니다.':'추정가는 확인된 혜택 기준이며 실제 결제 가격과 다를 수 있습니다.');
-    var notice=document.getElementById('catalogNotice');notice.hidden=!data.notice;notice.textContent=data.notice||'';
+    var notice=document.getElementById('catalogNotice');notice.hidden=!data.notice&&!(isV2&&data.status==='error'&&!waiting);notice.textContent=data.notice||'';if(isV2&&data.status==='error'&&!waiting)notice.innerHTML=esc(data.error||'전체 검색 준비 실패')+' · <button type="button" data-retry-catalog>다시 시도</button>';
     shown=0;renderBrandBar();
     grid.innerHTML=waiting ? '<div class="empty"><b>'+(data.status==='error'?'전체 상품 요약을 불러오지 못했습니다':'전체 상품 집계 중…')+'</b>'+(data.status==='error'?'<button class="more" data-retry-catalog type="button">다시 시도</button>':'')+'</div>' :
       view.length?'':'<div class="empty"><b>조건에 맞는 상품이 없습니다</b>검색어를 지우거나 다른 필터를 선택해 보세요.</div>';
@@ -932,7 +932,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       if(shown<view.length){grid.insertAdjacentHTML('beforeend',view.slice(shown,shown+PAGE).map(cardHtml).join(''));shown=Math.min(shown+PAGE,view.length);}
       else if(lastQuery.nextOffset!=null&&runtime.getState().status==='ready'){
         pageBusy=true;var token=queryToken,id=lastQuery.resultId;
-        try{var p=await runtime.page(id,lastQuery.nextOffset);if(token!==queryToken)return;view=view.concat(p.items);grid.insertAdjacentHTML('beforeend',p.items.map(cardHtml).join(''));lastQuery.nextOffset=p.nextOffset;shown=view.length;
+        try{var p=await runtime.page(id,lastQuery.nextOffset);if(token!==queryToken||(view.length>=360&&grid.contains(document.activeElement)))return;view=view.concat(p.items);grid.insertAdjacentHTML('beforeend',p.items.map(cardHtml).join(''));lastQuery.nextOffset=p.nextOffset;shown=view.length;
           if(view.length>360&&!grid.contains(document.activeElement)){var oldTop=grid.getBoundingClientRect().height;Array.from(grid.querySelectorAll('.card')).slice(0,120).forEach(function(c){c.remove();});var removed=oldTop-grid.getBoundingClientRect().height;topHeight+=removed;topSpacer.style.height=topHeight+'px';view=view.slice(120);firstOffset+=120;shown=view.length;}
         }catch(error){if(token===queryToken&&error.code!=='STALE_RESULT'){moreBtn.textContent='목록을 불러오지 못했습니다 · 다시 시도';return;}}finally{pageBusy=false;}
       }
@@ -1024,6 +1024,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   var scrim = document.getElementById('scrim');
   var modalItem = null, chart = null, range = 90, lastFocus = null;
 
+  document.getElementById('catalogNotice').addEventListener('click',function(e){if(e.target.closest('[data-retry-catalog]'))runtime.retryCatalog();});
   grid.addEventListener('click', function (e) {
     if(e.target.closest('[data-retry-catalog]')){runtime.retryCatalog();return;}
     var c = e.target.closest('.card');
@@ -1038,19 +1039,19 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   }
 
   var detailToken=0;
-  async function openModal(key) {
+  async function openModal(key,withinResult) {
     closeBrand();
     key=model.resolveKey(key);
-    var token=++detailToken;
-    var it=isV2?D.items.find(function(x){return x.k===key;})||await runtime.lookup(key):runtime.getCatalog().items.find(function(x){return x.k===key;});
-    if(token!==detailToken)return;
+    var token=++detailToken,selectionQuery=JSON.stringify(state);
+    var it;try{it=isV2?D.items.find(function(x){return x.k===key;})||await runtime.lookup(key):runtime.getCatalog().items.find(function(x){return x.k===key;});}catch(error){return;}
+    if(token!==detailToken||selectionQuery!==JSON.stringify(state))return;
     if(!it){
       await runtime.ensureCatalog();if(token!==detailToken)return;
       it=runtime.getCatalog().items.find(function(x){return x.k===key;});
     }
     if(!it)return;
     closeBrand();
-    if(!view.some(function(x){return x.k===key;})){
+    if(!withinResult&&!view.some(function(x){return x.k===key;})){
       state.filter='all';state.cat='all';state.brandKeys=[];state.q='';qEl.value='';state.src='all';
       runtime.ensureCatalog();
       render();
@@ -1087,7 +1088,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     }
   }
   async function stepTo(delta) {
-    if(isV2){if(!modalItem||!lastQuery?.resultId)return;try{var token=detailToken,next=await runtime.neighbor(lastQuery.resultId,modalItem.k,delta);if(token===detailToken&&next)openModal(next.k);}catch(error){}return;}
+    if(isV2){if(!modalItem||!lastQuery?.resultId)return;try{var token=detailToken,next=await runtime.neighbor(lastQuery.resultId,modalItem.k,delta);if(token===detailToken&&next)openModal(next.k,true);}catch(error){}return;}
     var i = view.findIndex(function(x){return x.k===modalItem.k;});
     if (i < 0) return;
     var j = i + delta;
@@ -1119,7 +1120,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   }
   window.addEventListener('scroll',async function(){
     if(!isV2||!firstOffset||pageBusy||grid.contains(document.activeElement)||!lastQuery?.resultId||window.scrollY>topSpacer.offsetTop+topHeight+100)return;
-    pageBusy=true;var token=queryToken;try{var p=await runtime.page(lastQuery.resultId,firstOffset-120);if(token!==queryToken)return;firstOffset-=120;view=p.items.concat(view);if(view.length>360)view=view.slice(0,360);grid.innerHTML=view.map(cardHtml).join('');shown=view.length;topHeight=Math.max(0,topHeight-grid.getBoundingClientRect().height/3);topSpacer.style.height=topHeight+'px';lastQuery.nextOffset=firstOffset+view.length<lastQuery.total?firstOffset+view.length:null;}finally{pageBusy=false;}
+    pageBusy=true;var token=queryToken,target=window.scrollY<=topSpacer.offsetTop?0:firstOffset-120;try{var pages=await Promise.all([0,120,240].filter(function(i){return target+i<lastQuery.total;}).map(function(i){return runtime.page(lastQuery.resultId,target+i);}));if(token!==queryToken)return;firstOffset=target;view=pages.flatMap(function(p){return p.items;});grid.innerHTML=view.map(cardHtml).join('');shown=view.length;topHeight=target===0?0:Math.max(0,topHeight-grid.getBoundingClientRect().height/3);topSpacer.style.height=topHeight+'px';lastQuery.nextOffset=firstOffset+view.length<lastQuery.total?firstOffset+view.length:null;}catch(error){}finally{pageBusy=false;}
   },{passive:true});
   document.addEventListener('keydown', function (e) {
     if(brandDialog.open&&e.key==='Escape'){e.preventDefault();closeBrand();return;}
