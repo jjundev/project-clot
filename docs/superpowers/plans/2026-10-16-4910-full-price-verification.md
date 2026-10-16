@@ -32,3 +32,5 @@ Files: .github/workflows/4910-full.yml, .github/workflows/pages.yml, README.md, 
 - [ ] Commit/merge/push only scoped files; run full verification until pending=0 or actionable external blocker; confirm Release/live prices and record limitations.
 
 Operational ruling: first production shard returned 510 HTTP 429 failures; halve per-shard clients from four to two for subsequent resumed runs. Keep completed proofs and bounded retry handling.
+
+Operational ruling: restore matching same-day proofs from the last three successful main workflow artifact sets before preparing the next queue; a regular collector had reset same-day validation rows. Do not modify source DB bytes during recovery. Independent follow-up review: no publication blocker; 17 focused tests pass. Deferred minor: an incompatible newer DB proof can cause extra recollection rather than accepting an older matching artifact proof; worker/merge validation still prevents publication of mismatched prices.
