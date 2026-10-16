@@ -30,7 +30,7 @@ if(mode==='prepare'){
   let existing=readExisting(db,meta.date);db.close();
   if(fs.existsSync(output))existing=resumeProofs({existing,checkpoint:JSON.parse(fs.readFileSync(output)),meta,partition,targets});
   const seconds=Number(flag('budget-seconds','3000'));if(!Number.isFinite(seconds)||seconds<1||seconds>3000)throw Error('invalid verification budget');
-  const result=await verifyPartition({...meta,targets,partition,memberToken,existing,priority:new Set(meta.priority),makeClient:()=>createClient(),concurrency:4,deadline:Date.now()+seconds*1000,onCheckpoint:r=>write(output,r)});
+  const result=await verifyPartition({...meta,targets,partition,memberToken,existing,priority:new Set(meta.priority),makeClient:()=>createClient(),concurrency:2,deadline:Date.now()+seconds*1000,onCheckpoint:r=>write(output,r)});
   write(output,result);console.log(JSON.stringify({partition,target:result.targetCount,checked:result.results.length,pending:result.pending,errors:result.errors.length}));
  }else if(mode==='merge'){
   db.close();const shards=Array.from({length:meta.partitions},(_,i)=>JSON.parse(fs.readFileSync(path.join(dir,`part-${i}.json`))));
