@@ -20,7 +20,9 @@ test('single item never receives multi-item coupons or missing terms', () => {
 test('usable wallet and category count cannot establish product scope', () => {
   assert.equal(check().status, 'eligible');
   assert.equal(check(coupon, { ...scope, goodsSnos: new Set([2]) }).status, 'ineligible');
-  assert.equal(check(coupon, { ...scope, complete: false }).status, 'unknown');
+  assert.equal(check(coupon, { ...scope, complete: false }).status, 'eligible');
+  assert.equal(check(coupon, { ...scope, complete: false, goodsSnos: new Set([2]) }).status, 'unknown');
+  assert.equal(check({ ...coupon, conditions: ['상품 2개 이상', '1원 이상'] }, { ...scope, complete: false }).status, 'ineligible');
   assert.equal(check(coupon, { kind: 'unknown', complete: false }).status, 'unknown');
   assert.equal(check({ ...coupon, appOnly: true }).status, 'ineligible');
   assert.equal(check({ ...coupon, name: '네이버 유입 전용' }).status, 'ineligible');

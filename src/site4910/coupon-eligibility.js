@@ -20,8 +20,9 @@ export function evaluateCouponEligibility({ coupon, goodsSno, quantity = 1, base
   if (minAmount == null || minQuantity == null) return result('unknown', 'conditions');
   if (!Number.isFinite(basePrice) || basePrice <= 0) return result('unknown', 'base-price');
   if (basePrice < minAmount) return result('ineligible', 'minimum');
-  if (scopeEvidence?.kind === 'goods' && scopeEvidence.complete === true && scopeEvidence.goodsSnos instanceof Set) {
-    return scopeEvidence.goodsSnos.has(Number(goodsSno)) ? result('eligible', 'complete-goods-list') : result('ineligible', 'outside-goods-list');
+  if (scopeEvidence?.kind === 'goods' && scopeEvidence.goodsSnos instanceof Set) {
+    if (scopeEvidence.goodsSnos.has(Number(goodsSno))) return result('eligible', scopeEvidence.complete ? 'complete-goods-list' : 'positive-goods-membership');
+    return scopeEvidence.complete ? result('ineligible', 'outside-goods-list') : result('unknown', 'scope');
   }
   // A seller sample or category count is never proof of seller-wide eligibility.
   return result('unknown', 'scope');
