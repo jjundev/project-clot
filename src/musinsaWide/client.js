@@ -46,7 +46,7 @@ export function createMusinsaClient({ fetchFn: baseFetch = fetch, pageDelayMs = 
         return { ok: true, json: async () => body };
       }
       return res;
-    });
+    }, { strictPagination: true });
     if (pagination?.hasNext && !pagination?.nextPageUrl) throw new Error('Category page promises next page without cursor');
     const nextPageUrl = pagination?.hasNext && pagination?.nextPageUrl ? pagination.nextPageUrl : null;
     return { items: Array.isArray(items) ? items : [], nextPageUrl };
@@ -135,7 +135,10 @@ export function createMusinsaClient({ fetchFn: baseFetch = fetch, pageDelayMs = 
     params.set('size', String(PLP_PAGE_SIZE));
     const json = await anonGetJson(`${PLP_API}?${params}`, 'list');
     const list = json?.data?.list;
-    if (json?.meta?.result !== 'SUCCESS' || !Array.isArray(list)) throw new Error(`Unexpected coupon goods list response for coupon ${couponNo}`);
+    if (json?.meta?.result !== 'SUCCESS' || !Array.isArray(list) || typeof json.data?.pagination?.hasNext !== 'boolean' ||
+        list.some(it => !Number.isSafeInteger(Number(it?.goodsNo)) || Number(it.goodsNo) <= 0)) {
+      throw new Error(`Unexpected coupon goods list response for coupon ${couponNo}`);
+    }
     return {
       items: list.map((it) => ({ goodsNo: Number(it.goodsNo), reviewCount: it.reviewCount ?? null, isSoldOut: Boolean(it.isSoldOut) })),
       totalCount: json.data.pagination?.totalCount ?? list.length,

@@ -95,6 +95,7 @@ export function formatMusinsaWideDigest(result, { limit = 10, lookup = () => und
     const warning = couponWarning(coupons.memberStatus, coupons.checked);
     if (warning) head.push(warning);
     if (!coupons.ready) head.push('⚠️ 쿠폰 등록부 미완성 — backfill 필요');
+    if (coupons.refreshDeferred) head.push('⚠️ 목록 불완전 — 쿠폰가 갱신 보류, 기존 값 유지');
   }
   if (registry) head.push(...registryLines(registry));
   // A suppressed first day shows no drops at all: the sale-price list would stand in for coupon prices that moved at once.

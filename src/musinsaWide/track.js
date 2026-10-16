@@ -241,7 +241,12 @@ export async function trackMusinsa({
     log(NOT_READY_LINE);
   }
 
-  const prices = applyCouponPrices({ store, date, ready });
+  // A failed full-list refresh cannot prove absence, especially for newly selected goods.
+  // Preserve cached prices and leave new goods null until every list is verified.
+  const refreshDeferred = ready && !registry?.walk.complete;
+  const prices = refreshDeferred
+    ? { priced: 0, withCoupon: 0, best: new Map(store.getActivePriceRows().map(r => [r.goods_no, null])), drops: [], lateDrops: [] }
+    : applyCouponPrices({ store, date, ready });
   let { drops } = prices;
   let lateDrops = prices.lateDrops.length;
   // The first day priced from the registry moves many prices at once (per-goods lists → per-coupon lists): no drop
@@ -277,6 +282,7 @@ export async function trackMusinsa({
 
   const coupons = {
     memberStatus,
+    refreshDeferred,
     checked: checker.calls,
     failed: checker.failed,
     priced: prices.priced,

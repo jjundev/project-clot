@@ -370,3 +370,19 @@ test('category page preserves throttling status and rejects missing JSON list or
   await assert.rejects(createMusinsaClient({ fetchFn: async () => ({ ok: true, json: async () => ({ data: { pagination: { hasNext: false } } }) }), sleep: noSleep }).getCategoryPage('001', NEXT(2)), /malformed/);
   await assert.rejects(createMusinsaClient({ fetchFn: async () => jsonPage([item(1)], { hasNext: true }), sleep: noSleep }).getCategoryPage('001', NEXT(2)), /cursor/);
 });
+
+test('missing or nonboolean pagination cannot turn category HTML into a completed chain', async () => {
+  for (const pagination of [undefined, {}, { hasNext: 'false' }]) {
+    const client = createMusinsaClient({ fetchFn: async () => htmlPage([item(1)], pagination), sleep: noSleep });
+    await assert.rejects(client.getCategoryPage('001'), /pagination|malformed/i);
+  }
+});
+
+test('coupon pagination and IDs must be valid before a list can replace stored mappings', async () => {
+  for (const pagination of [undefined, {}, { hasNext: 'false' }]) {
+    const client = createMusinsaClient({ fetchFn: async () => ({ok:true,json:async()=>({meta:{result:'SUCCESS'},data:{list:[{goodsNo:1}],pagination}})}), sleep: noSleep });
+    await assert.rejects(client.getCouponGoodsPage(7), /Unexpected coupon goods list/);
+  }
+  const client = createMusinsaClient({ fetchFn: async () => ({ok:true,json:async()=>({meta:{result:'SUCCESS'},data:{list:[{goodsNo:'oops'}],pagination:{hasNext:false}}})}), sleep: noSleep });
+  await assert.rejects(client.getCouponGoodsPage(7), /Unexpected coupon goods list/);
+});

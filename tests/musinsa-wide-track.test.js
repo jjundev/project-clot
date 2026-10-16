@@ -211,7 +211,7 @@ test('not ready: no coupon API calls at all, prices null, ready false in the res
   assert.equal(sessionReads, 0);
   assert.equal(res.registry, null);
   assert.deepEqual(res.coupons, {
-    memberStatus: 'skipped', checked: 0, failed: 0, priced: 0, withCoupon: 0, stale: 3, drops: [], lateDrops: 0, dropsSuppressed: false, ready: false,
+    memberStatus: 'skipped', refreshDeferred: false, checked: 0, failed: 0, priced: 0, withCoupon: 0, stale: 3, drops: [], lateDrops: 0, dropsSuppressed: false, ready: false,
   });
   assert.deepEqual([1, 2, 3].map((n) => store.getGoods(n).coupon_price), [null, null, null]);
   assert.ok(lines.includes('⚠️ [무신사] 쿠폰 등록부 미완성 — backfill 필요'));
@@ -244,7 +244,7 @@ test('ready: phases run in order and the registry metrics land in scan_runs.coup
     counts: { usable: 2, pending: 0, expiredYesterday: 0, added: 1, retired: 0 },
   });
   assert.deepEqual(res.coupons, {
-    memberStatus: 'ok', checked: 3, failed: 0, priced: 3, withCoupon: 2, stale: 0, drops: [], lateDrops: 0, dropsSuppressed: true, ready: true,
+    memberStatus: 'ok', refreshDeferred: false, checked: 3, failed: 0, priced: 3, withCoupon: 2, stale: 0, drops: [], lateDrops: 0, dropsSuppressed: true, ready: true,
   });
   // The coupon found by the enumeration was classified USABLE, walked and now prices its goods.
   assert.equal(store.getCoupon(1001).state, 'USABLE');
@@ -313,7 +313,8 @@ test('anonymous 429 during the walk: unwalked coupons keep yesterday\'s lists, p
   assert.deepEqual(listOf(950), [{ goods_no: 1, date: DAY1 }]);
   assert.deepEqual(listOf(960), [{ goods_no: 2, date: DAY1 }]);
   assert.deepEqual([1, 2, 3].map((n) => store.getGoods(n).coupon_price), [9000, 16000, 30000]);
-  assert.equal(res.coupons.priced, 3);
+  assert.equal(res.coupons.priced, 0);
+  assert.equal(res.coupons.refreshDeferred, true);
   const row = scanRun(DAY2);
   assert.ok(row);
   assert.equal(JSON.parse(row.coupon_metrics_json).walk.stop, 'throttled');
@@ -773,4 +774,19 @@ test('target mode aggregates partition rows under existing top-level categories'
   assert.equal(r.categoryCounts[0].complete, true);
   assert.equal(store.getGoods(1).cat, '001');
   assert.equal(store.getGoods(3), undefined);
+});
+
+test('incomplete coupon coverage defers prices, preserving cached prices and unknown new goods', async () => {
+  makeReady();
+  await run({ makeClient: fakeMakeClient({'001':[item(1,10000)]}), categories:['001'], date:DAY0 });
+  addUsable(DAY0,[950,10]);
+  store.replaceCouponGoods(950,DAY0,[1]);
+  store.setCouponPrices(new Map([[1,8000]]));
+  const api={pageError:no=>no===950 ? new Error('list unavailable') : null};
+  const r=await run({makeClient:fakeMakeClient(catalog3(),api),sessionProvider:session()});
+  assert.equal(r.registry.walk.complete,false);
+  assert.equal(store.getGoods(1).coupon_price,8000);
+  assert.equal(store.getGoods(2).coupon_price,null);
+  assert.equal(r.coupons.refreshDeferred,true);
+  assert.deepEqual(r.coupons.drops,[]);
 });
