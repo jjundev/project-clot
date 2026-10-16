@@ -15,7 +15,7 @@ on:
       - .github/workflows/pages.yml
   # Pushes made with GITHUB_TOKEN (the Actions daily run) do not fire `push`, so follow it explicitly.
   workflow_run:
-    workflows: ['Daily price tracker', '4910 tracker']
+    workflows: ['Daily price tracker', '4910 tracker', '4910 full price verification']
     types: [completed]
     branches: [main]
   workflow_dispatch:
