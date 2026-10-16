@@ -1,0 +1,9 @@
+import './setup-env.js';import {test} from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {writeFixture} from './helpers/dashboard-page.js';import {verifyDashboardBuild} from '../scripts/verify-dashboard-build.js';
+test('V2 build has exact bootstrap and no inline histories',t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'v2-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));writeFixture(dir,{wide:true});const file=path.join(dir,'index.html'),html=fs.readFileSync(file,'utf8'),D=JSON.parse(html.match(/window\.__CLOT_DATA__ = ([^\n]+);/)[1]);
+ assert.equal(D.catalog.v,2);assert.deepEqual(D.inlineHistories,{});assert.ok(D.items.length<=120);assert.equal(D.catalog.bootstrap.total,D.catalog.totalItems);assert.equal(D.items.length,Math.min(120,D.catalog.totalItems));assert.equal(D.items.some(x=>'L' in x),false);assert.equal(verifyDashboardBuild(file).totalItems,D.catalog.totalItems);
+ const ref=D.catalog.indexParts[0],target=path.join(dir,ref.path),s=fs.readFileSync(target,'utf8');fs.writeFileSync(target,s.replace(D.catalog.revision,'wrong'));assert.throws(()=>verifyDashboardBuild(file),/revision|asset/);
+});
+test('card byte split accounts for deferred history references',async t=>{
+ const {createDashboardBuilder}=await import('../src/dashboard-builder.js');const dir=fs.mkdtempSync(path.join(os.tmpdir(),'v2-size-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));const b=createDashboardBuilder({outDir:dir,revision:'r'});for(let n=0;n<1000;n++)b.add({src:'musinsa',n,g:'긴 상품명'.repeat(20),b:'브랜드',L:[['2026-10-16',200,100,90,0,'가격',10]]});const p=b.finish({scanState:'complete'});assert.equal(p.catalog.totalItems,1000);for(const file of fs.readdirSync(path.join(dir,'assets')))assert.ok(fs.statSync(path.join(dir,'assets',file)).size<=262144);
+});

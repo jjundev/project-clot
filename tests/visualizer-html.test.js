@@ -212,7 +212,7 @@ describe('Visualizer HTML Generation', () => {
   // Values from another vm realm fail deepStrictEqual on prototypes alone.
   const plain = (v) => JSON.parse(JSON.stringify(v));
 
-  test('generateDashboardHtml writes 4910/index.js and one file per brand, and removes 4910-all.js', () => {
+  test('generateDashboardHtml writes bounded V2 assets and removes legacy scan files', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clot-html-4910brands-'));
     tempFiles.push(dir);
     fs.writeFileSync(path.join(dir, '4910-all.js'), 'stale');
@@ -226,24 +226,10 @@ describe('Visualizer HTML Generation', () => {
     const tempOutput = path.join(dir, 'index.html');
     const res = generateDashboardHtml({ db: createTestDb(), outputPath: tempOutput, openBrowser: false, db4910Path });
     assert.equal(fs.existsSync(path.join(dir, '4910-all.js')), false);
-    assert.deepEqual(fs.readdirSync(path.join(dir, '4910')).sort(), ['b13647.js', 'b2421.js', 'catalog-0000.js', 'index.js']);
-
-    const indexJs = fs.readFileSync(path.join(dir, '4910', 'index.js'), 'utf-8');
-    assert.ok(indexJs.startsWith('window.__CLOT_4910_INDEX__ = {'));
-    assert.ok(indexJs.endsWith(';\n'));
-    const idx = runScript(path.join(dir, '4910', 'index.js')).__CLOT_4910_INDEX__;
-    assert.equal(idx.v, 2);
-    assert.equal(idx.lastScan, '2026-10-10');
-    assert.deepEqual(plain(idx.brands), [[2421, '유니클로', 2], [13647, 'GU', 1]]);
-
-    // Brand files accumulate on one window object, keyed by brand sno.
-    const win = runScript(path.join(dir, '4910', 'b2421.js'));
-    runScript(path.join(dir, '4910', 'b13647.js'), win);
-    assert.deepEqual(Object.keys(win.__CLOT_4910_B__).sort(), ['13647', '2421']);
-    const uniqlo = win.__CLOT_4910_B__[2421];
-    assert.equal(uniqlo.brandSno, 2421);
-    assert.deepEqual(plain(uniqlo.r.map((r) => [r[0], r[7].at(-1)[3]])), [[71863924, 18000], [71863925, null]]);
-
+    const htmlData=JSON.parse(fs.readFileSync(tempOutput,'utf8').match(/window\.__CLOT_DATA__ = ([^\n]+);/)[1]);
+    assert.equal(htmlData.catalog.v,2);assert.ok(fs.existsSync(path.join(dir,'assets')));
+    assert.equal(htmlData.catalog.bootstrap.items.find(x=>x.n===71863924).my,18000);
+    assert.equal(htmlData.catalog.bootstrap.items.find(x=>x.n===71863925).my,null);
     assert.equal(res.total4910All, 3);
     const html = fs.readFileSync(tempOutput, 'utf-8');
     assert.ok(html.includes('"has4910All":true'));
@@ -259,7 +245,7 @@ describe('Visualizer HTML Generation', () => {
     const { store, db4910Path } = scanDb(dir, [scanListing(71863924, 2421, '유니클로')]);
     store.close();
     generateDashboardHtml({ db: createTestDb(), outputPath: path.join(dir, 'index.html'), openBrowser: false, db4910Path });
-    assert.deepEqual(fs.readdirSync(path.join(dir, '4910')).sort(), ['b2421.js', 'catalog-0000.js', 'index.js']);
+    assert.equal(fs.existsSync(path.join(dir,'4910','b999.js')),false);assert.ok(fs.readdirSync(path.join(dir,'assets')).length>0);
   });
 
   test('without a 4910.db the dashboard reports has4910All false and writes no 4910 files', () => {

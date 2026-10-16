@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import vm from 'node:vm';
 import {MusinsaWideStore} from '../src/musinsaWide/store.js';
 import {buildMusinsaCatalog} from '../src/dashboard-musinsa.js';
+import {createDashboardIndex} from '../src/dashboard-index.js';import {createHistoryLoader} from '../src/dashboard-history.js';import {createDashboardTransport} from '../src/dashboard-worker.js';
 import {createDashboardModel} from '../src/dashboard-model.js';
 function fixture(t){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'web-musinsa-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));const store=new MusinsaWideStore(path.join(dir,'wide.db'));t.after(()=>store.close());
 for(const [n,source,price] of [[1,'DIRECT',80],[2,'ESTIMATED',70]]){
@@ -34,11 +35,9 @@ const {dir,store}=fixture(t);const {DatabaseSync}=await import('node:sqlite');co
 const db=new DatabaseSync(':memory:');t.after(()=>db.close());db.exec("CREATE TABLE items(goods_no INTEGER,goods_name TEXT,brand_name TEXT,url TEXT,image_url TEXT,status TEXT,first_seen_at TEXT,last_checked_at TEXT);CREATE TABLE price_logs(id INTEGER,goods_no INTEGER,date TEXT,normal_price INTEGER,sale_price INTEGER,my_price INTEGER,is_sold_out INTEGER,coupon_name TEXT,coupon_discount INTEGER);INSERT INTO items VALUES(1,'old','old','','','ACTIVE','','');INSERT INTO price_logs VALUES(1,1,'2026-10-15',200,100,99,0,'old',1)");
 const output=path.join(dir,'index.html');generateDashboardHtml({db,db4910Path:null,dbMusinsaPath:path.join(dir,'wide.db'),outputPath:output,openBrowser:false});
 const html=fs.readFileSync(output,'utf8'),D=JSON.parse(html.match(/window\.__CLOT_DATA__ = ([^\n]+);/)[1]);
-assert.equal(D.items.some(x=>x.k==='musinsa:1'),false);assert.equal(D.musinsa.active,2);assert.equal(D.catalog.scanCount,2);
-const w={};const runtime=createDashboardRuntime({model:createDashboardModel(),baseItems:D.items,inlineHistories:D.inlineHistories,manifest:D.catalog,loadScript:async file=>{
-vm.runInNewContext(fs.readFileSync(path.join(dir,file),'utf8'),{window:w});const ref=D.catalog.parts.find(p=>p.path===file);return ref?w.__CLOT_CATALOG_PARTS__[ref.id]:w.__CLOT_MUSINSA_H__.h0;
-}});
-await runtime.ensureCatalog();assert.equal(runtime.getCatalog().status,'ready');assert.equal(runtime.getCatalog().items[0].my,80);assert.equal((await runtime.getHistory('1')).at(-1)[3],80);
+assert.equal(D.items.find(x=>x.k==='musinsa:1').my,80);assert.equal(D.musinsa.active,2);assert.equal(D.catalog.scanCount,2);
+const runtime=createDashboardRuntime({model:createDashboardModel(),manifest:D.catalog,indexFactory:createDashboardIndex,historyFactory:createHistoryLoader,transportFactory:createDashboardTransport,loadAsset:async ref=>{const w={};const text=fs.readFileSync(path.join(dir,ref.path),'utf8');vm.runInNewContext(text,w);return {payload:w.__CLOT_ASSETS__[ref.id],bytes:Buffer.byteLength(text)};}});
+await runtime.start();assert.equal(runtime.getState().status,'ready');assert.equal((await runtime.lookup('1')).my,80);assert.equal((await runtime.getHistory('1')).rows.at(-1)[3],80);
 assert.equal(verifyDashboardBuild(output).totalItems,2);
 });
 test('change-only source persists across a successful pricing day without inventing provenance on failed days',t=>{

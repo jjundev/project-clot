@@ -3,7 +3,7 @@ import {createDashboardModel} from './dashboard-model.js';
 export function createDashboardIndex(model) {
  const fields=['k','src','kind','n','b','m','g','c','fs','my','sale','normal','newbie','rate','dropAmt','isOut','isLow','lowEligible','lowMy','lowDate','tracked','priceSource','observedDate','card'];
  function packIndex(items,{revision,id}) {
- const dictionaries={};for(const f of ['src','kind','b','m','c','priceSource'])dictionaries[f]=[...new Set(items.map(x=>x[f]??null))];
+ const dictionaries={};for(const f of ['src','kind','b','m','c','priceSource','card'])dictionaries[f]=[...new Set(items.map(x=>x[f]??null))];
  const maps=Object.fromEntries(Object.entries(dictionaries).map(([f,a])=>[f,new Map(a.map((x,i)=>[x,i]))]));
  return {v:2,revision,id,dictionaries,rows:items.map(x=>fields.map(f=>maps[f]?maps[f].get(x[f]??null):x[f]??null))};
  }
@@ -19,7 +19,7 @@ export function createDashboardIndex(model) {
  async query(state,requestId){const q=model.queryCatalog(rows,state),{items,...facets}=q;const resultId=++serial;current={resultId,requestId,facets,keys:items.map(x=>x.k)};return page(resultId,0);},
  page,
  async lookup(key){if(!byKey.has(key))return null;return (await loadCards([key]))[0]||null;},
- async neighbor(id,key,delta){const r=requireResult(id),i=r.keys.indexOf(key);if(i<0)return null;const target=r.keys[i+delta];if(!target)return null;const card=(await loadCards([target]))[0]||null;requireResult(id);return card;}
+ async neighbor(id,key,delta){const r=requireResult(id),i=r.keys.indexOf(key);if(i<0)return null;const target=r.keys[i+delta];if(!target)return null;const card=(await loadCards([target]))[0]||null;requireResult(id);return card?{...card,_position:i+delta}:null;}
  };
  }
  return {packIndex,unpackIndex,createDashboardQueryEngine};

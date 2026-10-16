@@ -5,6 +5,10 @@ import { effective4910Price, readPriceValidations } from './site4910/price-valid
  */
 
 import fs from 'node:fs';
+import {createDashboardTransport,runDashboardWorker} from './dashboard-worker.js';
+import {createDashboardBuilder} from './dashboard-builder.js';
+import {createDashboardIndex} from './dashboard-index.js';
+import {createHistoryLoader} from './dashboard-history.js';
 import { randomUUID } from 'node:crypto';
 import { createDashboardRuntime } from './dashboard-runtime.js';
 import { createDashboardModel } from './dashboard-model.js';
@@ -167,10 +171,10 @@ export function mergeCouponHistory4910({ changes, coupons, okDates, lastScan }) 
  * @param {{ brandSno?: number|null }} [options]
  * @returns {{ v: 1, brandSno: number|null, lastScan: string|null, imgBase: string, b: string[], m: string[], r: any[][] }}
  */
-export function buildScan4910Payload(db4910, { brandSno = null } = {}) {
+export function buildScan4910Payload(db4910, { brandSno = null, snoFrom = null, snoTo = null, context = null } = {}) {
   const brandFilter = brandSno != null ? 'AND brand_sno = :brand' : '';
-  const where = `status = 'ACTIVE' ${likedFilterSql(db4910)} ${brandFilter}`;
-  const params = brandSno != null ? { brand: Number(brandSno) } : {};
+  const where = `status = 'ACTIVE' ${likedFilterSql(db4910)} ${brandFilter} ${snoFrom!=null?'AND sno >= :lo AND sno <= :hi':''}`;
+  const params = {...(brandSno != null ? { brand: Number(brandSno) } : {}),...(snoFrom!=null?{lo:snoFrom,hi:snoTo}:{})};
   const goods = db4910
     .prepare(`SELECT sno, brand, market_name, name, image_url, first_seen_date FROM goods WHERE ${where} ORDER BY sno ASC`)
     .all(params);
@@ -229,7 +233,8 @@ export function buildScan4910Payload(db4910, { brandSno = null } = {}) {
     runCols.has('coupons_ok') ? 'SELECT date FROM scan_runs WHERE coupons_ok = 1' : null,
     hasCouponHistory ? 'SELECT date FROM coupon_price_changes' : null,
   ].filter(Boolean);
-  const okDates = okSql.length ? db4910.prepare(`${okSql.join(' UNION ')} ORDER BY date`).all().map((r) => r.date) : [];
+  const okDates = context?.okDates ?? (okSql.length ? db4910.prepare(`${okSql.join(' UNION ')} ORDER BY date`).all().map((r) => r.date) : []);
+  if(context)context.okDates=okDates;
   const lastScan = lastScanDate(db4910);
 
   const b = [];
@@ -451,6 +456,7 @@ export function generateDashboardHtml({
   const gNo = digits.length > 0 ? Number(digits) : undefined;
   let payload, packaged;
   const revision = randomUUID();
+  const sink=createDashboardBuilder({outDir,revision});
   let total4910All = 0;
   let wide = null;
   // Fail the build on a supplied but invalid wide snapshot; never silently publish a subtotal.
@@ -458,7 +464,7 @@ export function generateDashboardHtml({
     const wideDb=new DatabaseSync(dbMusinsaPath,{readOnly:true});
     try {
       if(process.env.CLOT_REQUIRE_MUSINSA_WIDE==='1')verifyDailyCoverage(wideDb.prepare('SELECT * FROM scan_runs ORDER BY date DESC LIMIT 1').get());
-      wide=buildMusinsaCatalog(wideDb,{outDir,revision});
+      wide=buildMusinsaCatalog(wideDb,{outDir,revision,sink});
     } finally { wideDb.close(); }
   } else {
     if(process.env.CLOT_REQUIRE_MUSINSA_WIDE==='1')throw Error('Required Musinsa wide snapshot missing');
@@ -475,25 +481,29 @@ export function generateDashboardHtml({
       packaged = buildDashboardCatalog({
         baseItems:payload.items, scanIndex,
         readBrand:brandSno=>buildScan4910Payload(db4910,{brandSno}),
-        dir4910,revision,scanState,notice,
+        iterateBrand:(()=>{const context={};return function*(brandSno){const ids=db4910.prepare("SELECT sno FROM goods WHERE status='ACTIVE' AND brand_sno=? "+likedFilterSql(db4910)+" ORDER BY sno").all(brandSno);for(let i=0;i<ids.length;i+=200)yield buildScan4910Payload(db4910,{brandSno,snoFrom:ids[i].sno,snoTo:ids[Math.min(i+199,ids.length-1)].sno,context});};})(),
+        dir4910,revision,scanState,notice,sink,
       });
     } catch(err) {
       console.warn('⚠️ [4910] 대시보드에서 4910 항목 제외: '+err.message);
       payload = buildClotDataPayload(activeDb, {targetGoodsNo:gNo});
       if(wide)payload.items=payload.items.filter(x=>x.src!=='musinsa'||!wide.goodsIds.has(x.n));
-      packaged = buildDashboardCatalog({baseItems:payload.items,dir4910,revision,scanState:'unavailable',notice:'4910 데이터 미포함: '+err.message});
+      packaged = buildDashboardCatalog({baseItems:payload.items,dir4910,revision,sink,scanState:'unavailable',notice:'4910 데이터 미포함: '+err.message});
     } finally { if(db4910)db4910.close(); }
   } finally { if(shouldCloseDb)activeDb.close(); }
   total4910All = packaged.catalog.scanCount;
   if(wide) {
     payload.musinsa=wide.metadata;
     payload.lastRun=wide.metadata.completedAt;
-    packaged.catalog.parts.push(...wide.parts);
-    packaged.catalog.scanCount+=wide.metadata.active;
+
+
     packaged.catalog.musinsaCount=wide.metadata.active;
   }
+  const base4910=payload.items.filter(x=>x.src==='4910').length;
+  packaged=sink.finish({scanState:packaged.catalog.scanState,notice:packaged.catalog.notice,musinsaCount:wide?.metadata.active||0,scanCount:total4910All+(wide?.metadata.active||0)});
+  payload.dates=payload.dates?.length?[payload.dates[0],payload.dates.at(-1)]:[];payload.runs=payload.runs?.slice(-1)||[];
   Object.assign(payload,packaged,{has4910All:packaged.catalog.scanState==='complete',total4910All});
-  const total4910 = payload.items.filter(x=>x.src==='4910').length + total4910All;
+  const total4910 = base4910 + total4910All;
   const templateContent = fs.readFileSync(templatePath, 'utf-8');
 
   // Replace data placeholder using a function replacer to prevent '$' corruption (CRLF tolerant)
@@ -513,7 +523,8 @@ export function generateDashboardHtml({
   }
 
   rendered = rendered.replace('/* __CLOT_MODEL__ */', () => 'window.__CLOT_MODEL__ = ('+createDashboardModel.toString()+')();');
-  rendered = rendered.replace('/* __CLOT_RUNTIME__ */', () => 'window.__CLOT_RUNTIME_FACTORY__ = ('+createDashboardRuntime.toString()+');');
+  rendered = rendered.replace('/* __CLOT_RUNTIME__ */', () => 'window.__CLOT_TRANSPORT_FACTORY__ = ('+createDashboardTransport.toString()+');window.__CLOT_INDEX_FACTORY__ = ('+createDashboardIndex.toString()+');window.__CLOT_HISTORY_FACTORY__ = ('+createHistoryLoader.toString()+');window.__CLOT_RUNTIME_FACTORY__ = ('+createDashboardRuntime.toString()+');');
+  fs.writeFileSync(path.join(outDir,'dashboard-worker.js'),'const model=('+createDashboardModel.toString()+')();const index=('+createDashboardIndex.toString()+')(model);('+runDashboardWorker.toString()+')({model,index,transport:('+createDashboardTransport.toString()+')});');
   fs.writeFileSync(outputPath, rendered, 'utf-8');
 
   if (openBrowser) {
@@ -533,7 +544,7 @@ export function generateDashboardHtml({
   return {
     outputPath,
     targetGoodsNo: gNo !== undefined ? gNo : undefined,
-    totalItems: payload.items.length + packaged.catalog.scanCount,
+    totalItems: packaged.catalog.totalItems,
     total4910,
     scanState: payload.catalog.scanState,
     total4910All: payload.total4910All,

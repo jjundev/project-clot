@@ -6,7 +6,12 @@ const json=x=>JSON.stringify(x).replace(/<\/script/gi,'<\\/script');
 export function expandScanHistory(rows) {
  return rows.map(h=>[h[0],h[1],h[2],h[3]??null,0,h[3]!=null?'4910 검증가':'가격 재검증 필요',h[3]!=null?h[2]-h[3]:0]);
 }
-export function buildDashboardCatalog({baseItems,scanIndex={brands:[]},readBrand,dir4910,revision,scanState='complete',notice=null}) {
+export function buildDashboardCatalog({baseItems,scanIndex={brands:[]},readBrand,dir4910,revision,scanState='complete',notice=null,sink,iterateBrand}) {
+ if(sink){
+ const model=createDashboardModel(),keys=new Set();for(const x of baseItems){keys.add(model.itemKey(x.src,x.n));sink.add(x);}
+ let scanCount=0; if(scanState==='complete')for(const [bs,,expected] of scanIndex.brands){let actual=0;for(const P of iterateBrand?iterateBrand(Number(bs)):[readBrand(bs)]){if(P.brandSno!==Number(bs)||!Array.isArray(P.r))throw Error('브랜드 추출 건수 불일치');actual+=P.r.length;for(const r of P.r){const k=model.itemKey('4910',r[0]);if(keys.has(k))continue;keys.add(k);sink.add({n:r[0],src:'4910all',bs:Number(bs),b:P.b[r[1]],m:P.m[r[2]],g:r[3],u:'https://4910.kr/goods/'+r[0],i:!r[4]?'':/^https?:/.test(r[4])?r[4]:P.imgBase+r[4],s:'ACTIVE',c:r[6],fs:r[5],L:expandScanHistory(r[7])},{kind:'scan'});scanCount++;}}if(expected!=null&&actual!==expected)throw Error('브랜드 추출 건수 불일치');}
+ return {catalog:{scanCount,scanState,notice},items:[],inlineHistories:{}};
+ }
  const model=createDashboardModel(),items=model.mergeSummaries([],baseItems.map(x=>model.summarize(x))),inlineHistories={};
  for(const x of baseItems)inlineHistories[model.itemKey(x.src,x.n)]=x.L||[];
  const catalog={v:1,revision,scanState,scanCount:0,parts:[],notice};
