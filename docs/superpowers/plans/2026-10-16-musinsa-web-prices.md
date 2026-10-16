@@ -29,9 +29,9 @@ Files: src/dashboard-musinsa.js, src/visualizer.js, src/dashboard-model.js, test
 Files: src/dashboard-runtime.js, src/dashboard.template.html, scripts/verify-dashboard-build.js, .github/workflows/pages.yml, tests/browser/dashboard.test.js.
 - [x] 무신사 분할 로드·재시도·가격 출처/예외 표시 브라우저 테스트 실패 확인.
 - [x] 카드·상세·이력 가격 명칭과 예외 안내 추가. Release pull을 필수로 하고 wide 성공 후 배포 연결.
-- [ ] 전체 테스트, 브라우저, 실제 DB 빌드 전수 검증 및 데스크톱/모바일 점검.
+- [x] 전체 테스트, 브라우저, 실제 DB 빌드 전수 검증 및 데스크톱/모바일 점검.
 
 ### Task 3: publish and evidence
-- [ ] 독립 코드 리뷰와 필요한 회귀 수정 후 선별 커밋/PR/병합/배포.
-- [ ] 실제 사이트 요약 전체 수, 직접·추정 상세, 경고, 검색 및 모바일을 확인.
-- [ ] docs/verify/2026-10-16-musinsa-web-prices-final.md에 실행/배포와 한계 기록 및 push.
+- [x] 독립 코드 리뷰와 필요한 회귀 수정 후 선별 커밋/PR/병합/배포.
+- [x] 실제 사이트 요약 전체 수, 직접·추정 상세, 경고, 검색 및 모바일을 확인.
+- [x] docs/verify/2026-10-16-musinsa-web-prices-final.md에 실행/배포와 한계 기록 및 push.

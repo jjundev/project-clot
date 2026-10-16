@@ -100,3 +100,8 @@ HTTP 오류, 비정상 스키마, 빈 페이지+hasNext, 반복 페이지,429,�
 ## 원자료
 
 최신 실행 메타데이터·Actions 로그·DB 출처/이력 대조·직접 가격 대조·정책 검사JSON은 `/Users/hyunjun_macbook_pro/.codex/visualizations/2026/10/15/01a13fff-7a91-7603-9120-81a93dc3d18f/musinsa-estimate-policy-final/`에 저장했다. 최초 실패 실행의 원자료도 기존 `musinsa-300k-final-run/`에 보존했다. DB 사본은 `/tmp/clot-estimate-online/snapshot.db`이며 운영 DB를 로컬에서 다시 업로드하지 않았다. 비밀 쿠키·토큰은 문서에 기록하지 않았다.
+
+
+## 웹사이트 반영 후속 결과 (2026-10-16 14:04 KST)
+
+[PR #12](https://github.com/jjundev/project-clot/pull/12) 병합 후 [Pages 실행](https://github.com/jjundev/project-clot/actions/runs/38853678493)이 성공했다. [실제 사이트](https://jjundev.github.io/project-clot/)에서 무신사 300,226개(대량 수집 ACTIVE 300,153개 + 중복 없는 기존 목록 73개), 전체 439,823개를 확인했다. 직접 확인 가격 258개 / 추정가 299,895개와 쿠폰 API 예외 8종을 구분해 표시한다. 상세 가격과 이력, 모바일 표시 및 브라우저 오류 0건을 확인했다. 전체 웹 검증과 정확한 한계는 [웹 반영 최종 보고서](2026-10-16-musinsa-web-prices-final.md)에 기록했다.
