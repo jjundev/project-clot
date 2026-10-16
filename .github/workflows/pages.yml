@@ -9,6 +9,7 @@ on:
       - src/visualizer.js
       - src/dashboard-*.js
       - scripts/verify-dashboard-build.js
+      - scripts/measure-dashboard-loading.js
       - tests/**
       - package.json
       - package-lock.json
@@ -72,6 +73,7 @@ jobs:
           CLOT_DASHBOARD_PATH=_site/index.html node src/cli.js visualize --no-open
           printf 'User-agent: *\nDisallow: /\n' > _site/robots.txt
           test -s _site/index.html
+          test -s _site/dashboard-worker.js
           node scripts/verify-dashboard-build.js _site/index.html
 
       - uses: actions/configure-pages@v5
