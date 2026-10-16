@@ -1,6 +1,6 @@
 # Dashboard Loading Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 전체 상품 다운로드 전에 첫 목록을 표시하고, 검색·정렬과 이력 조회가 누적 데이터로 화면을 멈추게 하지 않도록 개선한 뒤 실제 배포 결과를 기록한다.
 
@@ -66,11 +66,11 @@
 
 **Interfaces:** `packIndex(summaries,{revision,id}) -> IndexPart`; `unpackIndex(part) -> SearchRow[]`; `createDashboardQueryEngine({rows,loadCards}) -> {query(state,requestId),page(resultId,offset,limit=120),lookup(key),neighbor(resultId,key,delta)}`. 조회 메서드는 Promise이며 `loadCards(keys) -> Promise<Summary[]>`를 소비한다. 전체 행/결과는 엔진 내부 소유다.
 
-- [ ] **Step 1: 실패 테스트 작성.** `compact index preserves canonical query semantics`: 원본 `model.queryCatalog`와 모든 기존 sort, 교차 facet, 0원/null/한글 브랜드/다중 브랜드의 key 순서·총수·집계가 같다. `page boundary and stale result`: 121개 fixture에서 첫 페이지 120개, 다음 1개, neighbor 119→120, 이전 resultId 거부, 마지막 상품 lookup 성공을 assert한다.
-- [ ] **Step 2: RED 확인.** `node --test tests/dashboard-index.test.js` → 새 export 부재로 FAIL.
-- [ ] **Step 3: codec/엔진 구현.** 가격 재계산 없이 기존 모델의 정렬·facet 의미를 공유한다. Worker가 전체 결과 key 순서를 보유하고 loadCards는 요청 페이지에만 호출한다. 불필요한 전 상품 객체 복제·메인 스레드 전송 없음.
-- [ ] **Step 4: GREEN 확인.** `node --test tests/dashboard-index.test.js tests/dashboard-model.test.js` → 실패 0, 기존 모델 테스트 유지.
-- [ ] **Step 5: 선별 커밋.** 해당 source/test만 add, `git diff --cached --check`, `git commit -m "feat: add paged dashboard query engine"`.
+- [x] **Step 1: 실패 테스트 작성.** `compact index preserves canonical query semantics`: 원본 `model.queryCatalog`와 모든 기존 sort, 교차 facet, 0원/null/한글 브랜드/다중 브랜드의 key 순서·총수·집계가 같다. `page boundary and stale result`: 121개 fixture에서 첫 페이지 120개, 다음 1개, neighbor 119→120, 이전 resultId 거부, 마지막 상품 lookup 성공을 assert한다.
+- [x] **Step 2: RED 확인.** `node --test tests/dashboard-index.test.js` → 새 export 부재로 FAIL.
+- [x] **Step 3: codec/엔진 구현.** 가격 재계산 없이 기존 모델의 정렬·facet 의미를 공유한다. Worker가 전체 결과 key 순서를 보유하고 loadCards는 요청 페이지에만 호출한다. 불필요한 전 상품 객체 복제·메인 스레드 전송 없음.
+- [x] **Step 4: GREEN 확인.** `node --test tests/dashboard-index.test.js tests/dashboard-model.test.js` → 실패 0, 기존 모델 테스트 유지.
+- [x] **Step 5: 선별 커밋.** 해당 source/test만 add, `git diff --cached --check`, `git commit -m "feat: add paged dashboard query engine"`.
 
 ### Task 2: 기간별 이력과 byte 제한 자산·캐시
 
@@ -78,11 +78,11 @@
 
 **Interfaces:** `createAssetWriter({outDir,revision,maxBytes=262144}) -> {writeRows(kind,rows),writeRecord(kind,record)}` returns AssetRef(s). `createHistoryExporter({writer}) -> {add(key,iterableRows),finish()}`; `add` returns `{firstDate,lastDate,parts:[{...AssetRef,from,to}]}`. `createHistoryLoader({revision,loadAsset,maxBytes=16777216}) -> {get(key,ref,{days=90}),stats(),clear()}` returns HistoryResult. `loadAsset(ref)` returns `{payload,bytes}` validated against ref/envelope.
 
-- [ ] **Step 1: 실패 테스트 작성.** `recent window retains original boundary anchor`: observedDate 2026-10-16이면 from 2026-07-19, 이전 행은 anchor에만 존재, 행 날짜/출처 불변. `all loads archived history only on request`: 90일 요청은 최근 구간과 anchor 확보에 필요한 마지막 이전 구간만 요청하고 더 오래된 파일 요청은 0, days=0에서 전체 행 일치. `oversized product spans bounded files`: 1년 이상 고밀도 이력도 각 파일 ≤262144 bytes, 조합 후 행 누락/중복 0. `LRU and shared requests`: 작은 시험 예산에서 성공 cacheBytes≤예산, 동시 요청 1회, 실패 후 재시도, 퇴출 후 재요청 동일 결과.
-- [ ] **Step 2: RED 확인.** `node --test tests/dashboard-history.test.js` → 새 export 부재로 FAIL.
-- [ ] **Step 3: writer/exporter/loader 구현.** 실제 UTF-8 wrapper 포함 byte로 분할하고 revision/id/path 검증. 구간 경계를 넘는 anchor는 필요한 이전 마지막 구간만 요청한다. 한 행 자체가 상한 초과면 잘라 버리지 말고 식별 가능한 빌드 오류. in-flight Map과 성공 byte LRU를 분리하고 표시용 반환값은 캐시 상한의 heap 보장으로 해석하지 않는다.
-- [ ] **Step 4: GREEN 확인.** `node --test tests/dashboard-history.test.js tests/dashboard-build.test.js` → 실패 0.
-- [ ] **Step 5: 선별 커밋.** 해당 source/test만 add/check 후 `git commit -m "feat: bound dashboard history loading and cache"`.
+- [x] **Step 1: 실패 테스트 작성.** `recent window retains original boundary anchor`: observedDate 2026-10-16이면 from 2026-07-19, 이전 행은 anchor에만 존재, 행 날짜/출처 불변. `all loads archived history only on request`: 90일 요청은 최근 구간과 anchor 확보에 필요한 마지막 이전 구간만 요청하고 더 오래된 파일 요청은 0, days=0에서 전체 행 일치. `oversized product spans bounded files`: 1년 이상 고밀도 이력도 각 파일 ≤262144 bytes, 조합 후 행 누락/중복 0. `LRU and shared requests`: 작은 시험 예산에서 성공 cacheBytes≤예산, 동시 요청 1회, 실패 후 재시도, 퇴출 후 재요청 동일 결과.
+- [x] **Step 2: RED 확인.** `node --test tests/dashboard-history.test.js` → 새 export 부재로 FAIL.
+- [x] **Step 3: writer/exporter/loader 구현.** 실제 UTF-8 wrapper 포함 byte로 분할하고 revision/id/path 검증. 구간 경계를 넘는 anchor는 필요한 이전 마지막 구간만 요청한다. 한 행 자체가 상한 초과면 잘라 버리지 말고 식별 가능한 빌드 오류. in-flight Map과 성공 byte LRU를 분리하고 표시용 반환값은 캐시 상한의 heap 보장으로 해석하지 않는다.
+- [x] **Step 4: GREEN 확인.** `node --test tests/dashboard-history.test.js tests/dashboard-build.test.js` → 실패 0.
+- [x] **Step 5: 선별 커밋.** 해당 source/test만 add/check 후 `git commit -m "feat: bound dashboard history loading and cache"`.
 
 ### Task 3: 전체 export와 첫 화면 빌드 연결
 
@@ -90,11 +90,11 @@
 
 **Interfaces:** `buildDashboardCatalog` produces `{catalog:ManifestV2,items:bootstrap.items,inlineHistories:{}}`. `buildMusinsaCatalog` and 4910/base adapters feed canonical Summary + iterable original history into the shared asset/history writers. `generateDashboardHtml` public options/result remain compatible. `verifyDashboardBuild(outputPath)` returns existing totalItems/total4910/scanState plus byte/part diagnostics and throws on invalid artifacts.
 
-- [ ] **Step 1: 실패 테스트 작성.** `all sources exclude inline history`: wide/무신사찜/4910찜/scan fixture에 1일→365일 이력을 넣어 HTML 이력 행 0과 초기 데이터가 기록 수에 비례하지 않음을 assert. `bootstrap is exact first page`: 기존 모델의 첫 min(120,N) key·가격·출처·집계와 동일. `wrong revision or missing asset fails verification`: 카드/이력/인덱스 각각 변조 시 FAIL. 기존 중복 우선순위와 partial 4910 notice도 보존한다.
-- [ ] **Step 2: RED 확인.** `node --test tests/dashboard-build.test.js tests/dashboard-musinsa.test.js tests/dashboard-catalog.test.js` → V2/인라인 제거 기대에서 FAIL.
-- [ ] **Step 3: export 변경.** wide/4910/base 이력을 상품 key 범위별 SQLite iterator로 읽어 writer에 전달한다. 전체 과거 `.all()`/전 상품 이력 Map을 생성하지 않는다. 기존 공개 데이터 helper 호환은 유지하되 사이트 빌드 경로는 bounded iterator로 전환한다. bootstrap 집계·요약은 전체 과거를 반영한 기존 모델 의미를 유지한다. card 파일 참조는 검색 행에, 이력 참조는 카드에 둔다. HTML의 전 기간 dates/runs 배열도 최신·최초 기준일 등 고정 개수 메타데이터로 대체해 날짜 누적을 숨겨 넣지 않는다. Worker 파일은 런타임 코드와 함께 출력해 HTTP/file에서 쓸 수 있게 한다.
-- [ ] **Step 4: GREEN 확인.** `node --test tests/dashboard-*.test.js tests/visualizer-data.test.js tests/visualizer-html.test.js tests/cli-visualize.test.js` → 실패 0. 생성 전체 상품 수와 원본 DB 교차 확인.
-- [ ] **Step 5: 선별 커밋.** 해당 source/test/verifier만 add/check 후 `git commit -m "feat: build dashboard bootstrap and compact assets"`.
+- [x] **Step 1: 실패 테스트 작성.** `all sources exclude inline history`: wide/무신사찜/4910찜/scan fixture에 1일→365일 이력을 넣어 HTML 이력 행 0과 초기 데이터가 기록 수에 비례하지 않음을 assert. `bootstrap is exact first page`: 기존 모델의 첫 min(120,N) key·가격·출처·집계와 동일. `wrong revision or missing asset fails verification`: 카드/이력/인덱스 각각 변조 시 FAIL. 기존 중복 우선순위와 partial 4910 notice도 보존한다.
+- [x] **Step 2: RED 확인.** `node --test tests/dashboard-build.test.js tests/dashboard-musinsa.test.js tests/dashboard-catalog.test.js` → V2/인라인 제거 기대에서 FAIL.
+- [x] **Step 3: export 변경.** wide/4910/base 이력을 상품 key 범위별 SQLite iterator로 읽어 writer에 전달한다. 전체 과거 `.all()`/전 상품 이력 Map을 생성하지 않는다. 기존 공개 데이터 helper 호환은 유지하되 사이트 빌드 경로는 bounded iterator로 전환한다. bootstrap 집계·요약은 전체 과거를 반영한 기존 모델 의미를 유지한다. card 파일 참조는 검색 행에, 이력 참조는 카드에 둔다. HTML의 전 기간 dates/runs 배열도 최신·최초 기준일 등 고정 개수 메타데이터로 대체해 날짜 누적을 숨겨 넣지 않는다. Worker 파일은 런타임 코드와 함께 출력해 HTTP/file에서 쓸 수 있게 한다.
+- [x] **Step 4: GREEN 확인.** `node --test tests/dashboard-*.test.js tests/visualizer-data.test.js tests/visualizer-html.test.js tests/cli-visualize.test.js` → 실패 0. 생성 전체 상품 수와 원본 DB 교차 확인.
+- [x] **Step 5: 선별 커밋.** 해당 source/test/verifier만 add/check 후 `git commit -m "feat: build dashboard bootstrap and compact assets"`.
 
 ### Task 4: Worker 전송과 화면·기간 선택 통합
 
@@ -102,12 +102,12 @@
 
 **Interfaces:** Worker request `{requestId,method,args}`, reply `{requestId,ok,result,error:{code,message}|null}`. `createDashboardRuntime({manifest,loadAsset,createWorker,onChange})` exposes `start(),query(state),page(resultId,offset),lookup(key),neighbor(resultId,key,delta),getHistory(key,{days=90}),retry(),dispose()`. `getState()` exposes readiness/query/error/bootstrap, never a full items array. Runtime maps engine query/page into QueryResult and uses Task 2 history loader. file transport uses Task 1 engine with cooperative loading/yields and identical results.
 
-- [ ] **Step 1: 실패 테스트 작성.** `bootstrap survives stalled index`: 인덱스를 gate로 막아도 120개 기본 카드·경고·정확한 집계 표시. `saved nondefault state waits honestly`: 저장 필터에 기본 집계를 잘못 표시하지 않음. `stale replies cannot replace current selection`: 지연 query/page/history 이후 새 검색·모달 유지. `HTTP and file parity`: 필터·브랜드·상품 최종 페이지 검색 결과 동일. `deep link and neighbor cross unloaded page`: 처음 120개 밖 상품 직접 열기와 119→120 이동 성공. `90 day default and all retry`: 초기 90일 선택, archive 요청 0, 전체 선택 후 과거 표시, 실패 재시도/기간 변경 경쟁 검증. `worker failure retries without partial counts`: 인덱스 revision 변조/Worker 시작 실패가 확정 숫자를 만들지 않음.
-- [ ] **Step 2: RED 확인.** `node --test tests/dashboard-runtime.test.js` 및 `npm run test:dashboard:browser` → 신규 계약/기간/초기 gate 기대에서 FAIL.
-- [ ] **Step 3: runtime/Worker 연결.** Worker init에 revision·index refs 전달, 최대 4개 자산 동시 요청, 로드 완료 검증 후 전체 검색 허용. HTTP Worker 시작 실패는 오류/재시도, file은 명시적 대체 전송. bootstrap 첫 paint 뒤 백그라운드 start. 요청 번호와 결과 식별자 검증, dispose 시 Worker 종료 및 늦은 응답 무시.
-- [ ] **Step 4: UI 연결.** 초기 전체 items 기반 render/brand Map/stepper를 Task 1 계약으로 교체. 페이지는 120개씩 받고 화면 카드 DOM은 최대 360개를 유지하는 window/spacer 방식으로 앞뒤 스크롤과 키보드 포커스 보존. 상세 range 기본 90, 전체=0. 기간 전환 시 HistoryResult 재요청, anchor는 이월 기준으로 표시하고 관측 테이블 행/확정 가격 이벤트로 만들지 않는다. 역대 최저가 등 전체 기간 지표는 Summary를 유지하고 보이는 기간으로 재판정하지 않는다.
-- [ ] **Step 5: GREEN 확인.** `node --test tests/dashboard-runtime.test.js`; `CLOT_BROWSER_EXECUTABLE='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' npm run test:dashboard:browser` → HTTP/file, desktop/mobile, 오류 0. DOM 상한·focus·뒤로 스크롤도 assert한다.
-- [ ] **Step 6: 선별 커밋.** 해당 source/test만 add/check 후 `git commit -m "feat: stream dashboard pages and recent history"`.
+- [x] **Step 1: 실패 테스트 작성.** `bootstrap survives stalled index`: 인덱스를 gate로 막아도 120개 기본 카드·경고·정확한 집계 표시. `saved nondefault state waits honestly`: 저장 필터에 기본 집계를 잘못 표시하지 않음. `stale replies cannot replace current selection`: 지연 query/page/history 이후 새 검색·모달 유지. `HTTP and file parity`: 필터·브랜드·상품 최종 페이지 검색 결과 동일. `deep link and neighbor cross unloaded page`: 처음 120개 밖 상품 직접 열기와 119→120 이동 성공. `90 day default and all retry`: 초기 90일 선택, archive 요청 0, 전체 선택 후 과거 표시, 실패 재시도/기간 변경 경쟁 검증. `worker failure retries without partial counts`: 인덱스 revision 변조/Worker 시작 실패가 확정 숫자를 만들지 않음.
+- [x] **Step 2: RED 확인.** `node --test tests/dashboard-runtime.test.js` 및 `npm run test:dashboard:browser` → 신규 계약/기간/초기 gate 기대에서 FAIL.
+- [x] **Step 3: runtime/Worker 연결.** Worker init에 revision·index refs 전달, 최대 4개 자산 동시 요청, 로드 완료 검증 후 전체 검색 허용. HTTP Worker 시작 실패는 오류/재시도, file은 명시적 대체 전송. bootstrap 첫 paint 뒤 백그라운드 start. 요청 번호와 결과 식별자 검증, dispose 시 Worker 종료 및 늦은 응답 무시.
+- [x] **Step 4: UI 연결.** 초기 전체 items 기반 render/brand Map/stepper를 Task 1 계약으로 교체. 페이지는 120개씩 받고 화면 카드 DOM은 최대 360개를 유지하는 window/spacer 방식으로 앞뒤 스크롤과 키보드 포커스 보존. 상세 range 기본 90, 전체=0. 기간 전환 시 HistoryResult 재요청, anchor는 이월 기준으로 표시하고 관측 테이블 행/확정 가격 이벤트로 만들지 않는다. 역대 최저가 등 전체 기간 지표는 Summary를 유지하고 보이는 기간으로 재판정하지 않는다.
+- [x] **Step 5: GREEN 확인.** `node --test tests/dashboard-runtime.test.js`; `CLOT_BROWSER_EXECUTABLE='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' npm run test:dashboard:browser` → HTTP/file, desktop/mobile, 오류 0. DOM 상한·focus·뒤로 스크롤도 assert한다.
+- [x] **Step 6: 선별 커밋.** 해당 source/test만 add/check 후 `git commit -m "feat: stream dashboard pages and recent history"`.
 
 ### Task 5: 운영 크기 검증·성능 측정·재배포
 
@@ -115,13 +115,13 @@
 
 **Interfaces:** `node scripts/measure-dashboard-loading.js <url> <output.json>` writes viewport/환경/HTML revision/첫 카드 표시/검색 준비/요약·카드·이력 요청수와 byte/long-task/heap/오류를 기록한다. CLI 실패는 nonzero. file과 HTTP 결과는 구분한다. 성능 로그에 원시 회원 응답/secret 없음.
 
-- [ ] **Step 1: 실패 회귀 검증 추가.** 44만 상품과 365일 이력 fixture에서 첫 목록 전 전체 인덱스 완료 불필요, HTML 이력 행 0, 모든 history asset≤262144 bytes, 성공 캐시≤16777216 bytes를 assert. 인덱스 중간 실패/재시도와 두 배포 revision 혼합을 browser gate로 재현한다.
-- [ ] **Step 2: RED 확인.** 해당 scale/build/browser 테스트를 실행해 새 제약을 실제로 검사하고 기존 산출물에서 실패함을 기록한다. 이미 구현으로 만족하는 항목은 Task 1–4의 RED 기록을 참조하며 고의로 코드를 되돌리지 않는다.
-- [ ] **Step 3: 측정 도구·배포 배선 구현.** Pages 테스트에 새 dashboard 테스트와 생성 Worker 검증 포함. `Musinsa wide scan` 성공 후 workflow_run, required wide DB 검증, 가격 출처 검사 유지. node24·기존 Playwright 사용. 기준 브라우저/viewport에서 같은 DB의 기존/신규 빌드를 각각 3회 cold context로 측정해 중앙값 비교. CPU/네트워크 제한 실험은 별도 조건으로 기록한다.
-- [ ] **Step 4: 전체 검증.** `npm test`; Chrome executable 지정 `npm run test:dashboard:browser`; 실제 읽기 전용 Release DB로 `CLOT_REQUIRE_MUSINSA_WIDE=1 CLOT_DASHBOARD_PATH=<별도 임시 디렉터리>/index.html node src/cli.js visualize --no-open`; `node scripts/verify-dashboard-build.js <생성 HTML>` → 모두 성공. 입력 DB SHA256 전후 동일. 실제 전체 상품 정합성, DIRECT/ESTIMATED와 예외 8종 표시 확인. 독립 리뷰 지적 수정 후 필요한 회귀 재실행.
-- [ ] **Step 5: 커밋·PR·병합·배포.** fetch 후 unrelated 변경 보존, 선별 add와 `git diff --cached --check`, `git commit -m "perf: verify bounded dashboard loading"`. codex/ 브랜치 push→PR 생성·이 채팅 attach→검사 통과 후 병합. 사용자가 재배포를 명시 승인했으므로 별도 배포 승인 요청 없이 Pages 실행을 확인한다. 계획 검토 후 실행 시작 때 기존 첨부 worktree 재사용 가능 여부부터 확인한다.
-- [ ] **Step 6: 실제 사이트 확인.** 배포 Actions success와 공개 HTML revision 일치 확인. 새 cold context에서 초기 120개, 전체 검색, 마지막 페이지 상품, DIRECT/ESTIMATED, 90일/전체 기간, 쿠폰 경고, 모바일 overflow와 pageerror, 검색 요청 경쟁을 확인하고 URL·시각·관측값·스크린샷 보관. 단기 운영 이력에 90일 이전 기록이 없으면 오래된 기간 확장은 fixture 증거로 구분해 보고한다.
-- [ ] **Step 7: 최종 결과 저장·선별 push.** 최종 MD에 source SHA/PR/run/실측 전후/동일 입력 비교·공개 사이트 비교 구분/테스트 수/정합성/남은 한계·전체 검색은 상품 수에 비례한다는 점을 기록. 결과 문서만 선별 커밋·push하고 로컬 파일 및 공개 사이트 링크로 완료 보고한다.
+- [x] **Step 1: 실패 회귀 검증 추가.** 44만 상품과 365일 이력 fixture에서 첫 목록 전 전체 인덱스 완료 불필요, HTML 이력 행 0, 모든 history asset≤262144 bytes, 성공 캐시≤16777216 bytes를 assert. 인덱스 중간 실패/재시도와 두 배포 revision 혼합을 browser gate로 재현한다.
+- [x] **Step 2: RED 확인.** 해당 scale/build/browser 테스트를 실행해 새 제약을 실제로 검사하고 기존 산출물에서 실패함을 기록한다. 이미 구현으로 만족하는 항목은 Task 1–4의 RED 기록을 참조하며 고의로 코드를 되돌리지 않는다.
+- [x] **Step 3: 측정 도구·배포 배선 구현.** Pages 테스트에 새 dashboard 테스트와 생성 Worker 검증 포함. `Musinsa wide scan` 성공 후 workflow_run, required wide DB 검증, 가격 출처 검사 유지. node24·기존 Playwright 사용. 기준 브라우저/viewport에서 같은 DB의 기존/신규 빌드를 각각 3회 cold context로 측정해 중앙값 비교. CPU/네트워크 제한 실험은 별도 조건으로 기록한다.
+- [x] **Step 4: 전체 검증.** `npm test`; Chrome executable 지정 `npm run test:dashboard:browser`; 실제 읽기 전용 Release DB로 `CLOT_REQUIRE_MUSINSA_WIDE=1 CLOT_DASHBOARD_PATH=<별도 임시 디렉터리>/index.html node src/cli.js visualize --no-open`; `node scripts/verify-dashboard-build.js <생성 HTML>` → 모두 성공. 입력 DB SHA256 전후 동일. 실제 전체 상품 정합성, DIRECT/ESTIMATED와 예외 8종 표시 확인. 독립 리뷰 지적 수정 후 필요한 회귀 재실행.
+- [x] **Step 5: 커밋·PR·병합·배포.** fetch 후 unrelated 변경 보존, 선별 add와 `git diff --cached --check`, `git commit -m "perf: verify bounded dashboard loading"`. codex/ 브랜치 push→PR 생성·이 채팅 attach→검사 통과 후 병합. 사용자가 재배포를 명시 승인했으므로 별도 배포 승인 요청 없이 Pages 실행을 확인한다. 계획 검토 후 실행 시작 때 기존 첨부 worktree 재사용 가능 여부부터 확인한다.
+- [x] **Step 6: 실제 사이트 확인.** 배포 Actions success와 공개 HTML revision 일치 확인. 새 cold context에서 초기 120개, 전체 검색, 마지막 페이지 상품, DIRECT/ESTIMATED, 90일/전체 기간, 쿠폰 경고, 모바일 overflow와 pageerror, 검색 요청 경쟁을 확인하고 URL·시각·관측값·스크린샷 보관. 단기 운영 이력에 90일 이전 기록이 없으면 오래된 기간 확장은 fixture 증거로 구분해 보고한다.
+- [x] **Step 7: 최종 결과 저장·선별 push.** 최종 MD에 source SHA/PR/run/실측 전후/동일 입력 비교·공개 사이트 비교 구분/테스트 수/정합성/남은 한계·전체 검색은 상품 수에 비례한다는 점을 기록. 결과 문서만 선별 커밋·push하고 로컬 파일 및 공개 사이트 링크로 완료 보고한다.
 
 ## Self-Review
 
@@ -130,3 +130,7 @@
 - Review Focus 다섯 조건 모두 소유 task에 구체적인 입력·assert·실행 명령을 연결했다.
 - 바이트 상한은 wrapper 포함 UTF-8, 캐시는 raw bytes 기준이며 메모리 절대 상한으로 과장하지 않는다. 새로운 제품 결정이나 유료 서비스 없음.
 - 이 계획은 구현 전 체크리스트다. 테스트·배포·개선 수치는 실행 후에만 완료로 기록한다.
+
+## 실행 완료
+
+2026-10-16. Native 구현·독립 리뷰 수정·997개 전체 테스트·23개 브라우저 테스트·PR13 병합·Pages38856924582 배포 및 공개439823상품 확인 완료. 실제 수치와 실행 중 판단은 `docs/verify/2026-10-16-dashboard-loading-final.md`에 기록했다.
