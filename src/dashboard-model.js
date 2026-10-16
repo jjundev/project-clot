@@ -13,17 +13,17 @@ export function createDashboardModel() {
  Object.assign(x,{rate:-1,dropAmt:0,isOut:x.s==='SOLDOUT',isLow:false,lowEligible:false,my:null,sale:null,normal:null,newbie:null,coupon:0,couponName:null,lowMy:null,lowDate:null});
  if(!L.length)return x;
  const last=L.at(-1),prev=L.at(-2);
- Object.assign(x,{my:last[3],sale:last[2],normal:last[1],newbie:last[7]??null,isOut:last[4]===1||x.isOut,coupon:last[6]>0?last[6]:0,couponName:last[5]});
+ Object.assign(x,{my:last[3],sale:last[2],normal:last[1],newbie:last[7]??null,isOut:last[4]===1||x.isOut,coupon:last[6]>0?last[6]:0,couponName:last[5],priceSource:last[8]??null,observedDate:last[0]});
  x.rate=x.normal&&x.my!=null?Math.round((1-x.my/x.normal)*100):0;
  let first=null,moved=false;
  for(const r of L) {
- if(x.src==='4910'&&r[5]!==last[5])continue;
+ if((x.src==='4910'||kind==='wide')&&r[5]!==last[5])continue;
  if(r[3]!=null&&(x.lowMy==null||r[3]<x.lowMy)){x.lowMy=r[3];x.lowDate=r[0];}
  if(r[3]!=null){if(first==null)first=r[3];else if(first!==r[3])moved=true;}
  }
- x.lowEligible=kind!=='scan'||moved;
+ x.lowEligible=kind==='wide' ? moved&&x.priceSource==='DIRECT' : kind!=='scan'||moved;
  x.isLow=x.lowMy!=null&&x.my!=null&&x.my<=x.lowMy&&x.lowEligible;
- x.dropAmt=prev&&(x.src!=='4910'||prev[5]===last[5])&&prev[3]!=null&&x.my!=null&&x.my<prev[3]?prev[3]-x.my:0;
+ x.dropAmt=prev&&(x.src!=='4910'&&kind!=='wide'||prev[5]===last[5])&&(kind!=='wide'||x.priceSource==='DIRECT')&&prev[3]!=null&&x.my!=null&&x.my<prev[3]?prev[3]-x.my:0;
  return x;
  }
  function mergeSummaries(base,scan) {

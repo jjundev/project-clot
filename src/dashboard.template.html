@@ -275,6 +275,7 @@ a{color:inherit}
 .card.out .mine,.card.out .rate{color:var(--muted)}
 .was{font-size:11px;color:var(--muted);text-decoration:line-through;margin-top:2px}
 .was.nb{text-decoration:none}
+.price-source{font-size:11px;line-height:1.5;color:var(--muted);margin-top:4px}
 .tag{
   display:inline-block;margin-top:7px;font-size:10px;font-weight:700;
   letter-spacing:0.03em;padding:3px 6px;border-radius:4px;
@@ -494,6 +495,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
 .brand-option span{flex:1;overflow-wrap:anywhere;min-width:0}
 .brand-option .num{flex:none;color:var(--muted)}
 .group-label{flex:none;white-space:nowrap;font-size:12px;font-weight:600;color:var(--muted);margin-right:2px}
+#musinsaNotice{font-size:13px;line-height:1.7;color:var(--fg);border-left:3px solid var(--muted);padding:8px 12px;overflow-wrap:anywhere}
 #catalogNotice{font-size:13px;color:var(--muted);overflow-wrap:anywhere}
 @media(max-width:640px){
  .brand-dialog{width:100%;max-width:none;max-height:85dvh;margin:auto 0 0;padding:20px 16px;border-radius:18px 18px 0 0}
@@ -609,6 +611,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     <button class="linkbtn" id="resetBtn" type="button" hidden>초기화</button>
   </div>
 
+  <p id="musinsaNotice" role="status" hidden></p>
   <p id="catalogNotice" role="status" hidden></p>
   <section class="grid" id="grid" data-od-id="product-grid" aria-label="추적 상품 목록"></section>
   <button class="more" id="gridMore" type="button" hidden data-od-id="grid-more"></button>
@@ -666,7 +669,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         <div class="legend">
           <span class="l-normal"><i></i>정상가</span>
           <span class="l-sale"><i></i>판매가</span>
-          <span class="l-mine"><i></i>나의 실구매가</span>
+          <span class="l-mine"><i></i>혜택 적용 가격</span>
           <span class="l-nb"><i></i>쿠폰적용가(신규회원 기준)</span>
         </div>
       </div>
@@ -674,7 +677,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         <div class="tbl-title">가격 변동 기록</div>
         <table data-od-id="history-table">
           <thead><tr>
-            <th scope="col">일자</th><th scope="col">나의 실구매가</th><th scope="col">직전 관측 대비</th>
+            <th scope="col">일자</th><th scope="col">혜택 적용 가격</th><th scope="col">직전 관측 대비</th>
             <th scope="col">판매가</th><th scope="col" class="nb-col">신규회원가</th><th scope="col">정상가</th><th scope="col">상태</th>
           </tr></thead>
           <tbody id="mRows"></tbody>
@@ -741,12 +744,14 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       var tag = document.createElement('script'), done = false;
       var ref = D.catalog.parts.find(function(p){return p.path===src;});
       var brand = !ref && /^4910\/b(\d+)\.js$/.exec(src);
-      if(!ref && !brand){reject(new Error('알 수 없는 데이터 경로'));return;}
+      var musinsa = !ref && /^musinsa\/(h\d+)\.js$/.exec(src);
+      if(!ref && !brand && !musinsa){reject(new Error('알 수 없는 데이터 경로'));return;}
       function finish(error) {
         if(done)return;done=true;clearTimeout(timer);tag.remove();
         if(error){reject(error);return;}
-        var value = ref ? (window.__CLOT_CATALOG_PARTS__||{})[ref.id] : (window.__CLOT_4910_B__||{})[brand[1]];
+        var value = ref ? (window.__CLOT_CATALOG_PARTS__||{})[ref.id] : musinsa ? (window.__CLOT_MUSINSA_H__||{})[musinsa[1]] : (window.__CLOT_4910_B__||{})[brand[1]];
         if(ref)delete (window.__CLOT_CATALOG_PARTS__||{})[ref.id];
+        else if(musinsa)delete (window.__CLOT_MUSINSA_H__||{})[musinsa[1]];
         else delete (window.__CLOT_4910_B__||{})[brand[1]];
         if(!value)reject(new Error('데이터 파일 내용 없음'));else resolve(value);
       }
@@ -791,7 +796,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       (!selected.length?'<span class="group-label">모든 브랜드</span>':'');
     if(!brandDialog.open)return;
     var data=runtime.getCatalog();
-    if(state.src!=='musinsa'&&data.status!=='ready'){
+    if((state.src!=='musinsa'||D.catalog.musinsaCount>0)&&data.status!=='ready'){
       brandOptions.innerHTML='<p>'+(data.status==='error'?'브랜드 목록을 불러오지 못했습니다. 창을 닫고 다시 시도해 주세요.':'브랜드 집계 중…')+'</p>';brandOptionKeys='';return;
     }
     var query=model.brandKey(brandSearch.value);
@@ -828,6 +833,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       ' onerror="this.parentNode.innerHTML=&quot;<div class=\\&quot;ph\\&quot;>' + esc(it._init) + '</div>&quot;">';
   }
 
+  function priceKind(source){return source==='DIRECT'?'직접 확인 가격':source==='ESTIMATED'?'확인된 혜택 기준 추정가':'출처 미확인 가격';}
   function cardHtml(it) {
     var pins = '';
     if (!it.tracked) pins += '<span class="pin wait">관측 대기</span>';
@@ -846,6 +852,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         (it.newbie != null && it.newbie !== it.my ? '<div class="was nb num">쿠폰적용가(신규회원 기준) ' + won(it.newbie) + '</div>' : '') +
         (it.coupon > 0 ? '<span class="tag">' + esc(it.couponName || '쿠폰') + ' −' + it.coupon.toLocaleString('ko-KR') + '원</span>' : '');
     }
+    if(it.kind==='wide')body+='<div class="price-source">'+esc(priceKind(it.priceSource))+' · '+esc(it.observedDate||'')+' 기준'+(it.retained?' · 이번 목록 미포함':'')+'</div>';
     if (is4910(it) && it.my == null && it.tracked) body = '<div class="waitprice">가격 재검증 필요</div>';
     if (is4910(it) && it.vd) body += '<div class="was">' + (it.my == null ? '검토일 ' : '검증일 ') + esc(new Date(it.vd).toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })) + '</div>';
     if (it.vs === 'corrected') body += '<div class="was">가격 교정됨</div>';
@@ -865,7 +872,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
 
   function fmt(n) { return Number(n||0).toLocaleString('ko-KR'); }
   function render() {
-    var data=runtime.getCatalog(), waiting=state.src!=='musinsa'&&data.status!=='ready';
+    var data=runtime.getCatalog(), waiting=(state.src!=='musinsa'||D.catalog.musinsaCount>0)&&data.status!=='ready';
     var query=model.queryCatalog(data.items,state);lastQuery=query;
     view=waiting?[]:query.items;
     document.getElementById('shownN').textContent=waiting?'집계 중':fmt(query.total);
@@ -882,10 +889,13 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       if(b.dataset.cat==='etc')b.hidden=!query.categories.etc&&state.cat!=='etc';
     });
     [['sAll','all'],['sMusinsa','musinsa'],['s4910','4910']].forEach(function(p){
-      document.getElementById(p[0]).textContent=data.status!=='ready'&&p[1]!=='musinsa'?'집계 중':fmt(query.sources[p[1]]);
+      document.getElementById(p[0]).textContent=data.status!=='ready'&&(p[1]!=='musinsa'||D.catalog.musinsaCount>0)?'집계 중':fmt(query.sources[p[1]]);
     });
     document.querySelectorAll('[data-src]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.src===state.src));});
     document.querySelectorAll('[data-filter]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.filter===state.filter));});
+    var wideNotice=document.getElementById('musinsaNotice'), wm=D.musinsa;
+    wideNotice.hidden=!wm;
+    if(wm)wideNotice.textContent='무신사 '+wm.date+' 기준 · 조사 '+fmt(wm.selected)+'개 · 제공 '+fmt(wm.active)+'개(이전 회차 잔류 '+fmt(wm.retained||0)+'개 포함) · 직접 확인 '+fmt(wm.direct)+'개 · 추정 '+fmt(wm.estimated)+'개'+(wm.unknown?' · 출처 미확인 '+fmt(wm.unknown)+'개':'')+'. '+(wm.exceptionCoupons.length?'쿠폰 '+wm.exceptionCoupons.length+'종의 적용 상품 목록을 확인하지 못했습니다 ('+wm.exceptionCoupons.join(', ')+'). 추정가는 확인된 혜택 기준이며 실제 결제 가격이 더 낮을 수 있습니다.':'추정가는 확인된 혜택 기준이며 실제 결제 가격과 다를 수 있습니다.');
     var notice=document.getElementById('catalogNotice');notice.hidden=!data.notice;notice.textContent=data.notice||'';
     shown=0;renderBrandBar();
     grid.innerHTML=waiting ? '<div class="empty"><b>'+(data.status==='error'?'전체 상품 요약을 불러오지 못했습니다':'전체 상품 집계 중…')+'</b>'+(data.status==='error'?'<button class="more" data-retry-catalog type="button">다시 시도</button>':'')+'</div>' :
@@ -897,7 +907,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
 
   var moreBtn = document.getElementById('gridMore');
   function renderMore() {
-    var loading = state.src !== 'musinsa' && runtime.getCatalog().status !== 'ready';
+    var loading = (state.src !== 'musinsa'||D.catalog.musinsaCount>0) && runtime.getCatalog().status !== 'ready';
     if (!loading && shown < view.length) {
       grid.insertAdjacentHTML('beforeend', view.slice(shown, shown + PAGE).map(cardHtml).join(''));
       shown = Math.min(shown + PAGE, view.length);
@@ -928,7 +938,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       closeBrand();
       state.src = (state.src === b.dataset.src && b.dataset.src !== 'all') ? 'all' : b.dataset.src;
       store('src', state.src);
-      if (state.src !== 'musinsa') runtime.ensureCatalog();
+      if (state.src !== 'musinsa'||D.catalog.musinsaCount>0) runtime.ensureCatalog();
       render();
     });
   });
@@ -952,7 +962,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   document.getElementById('resetBtn').addEventListener('click', function () {
     brandSearch.value='';
     state.filter = 'all'; state.cat = 'all'; state.src = 'all'; state.q = ''; state.brandKeys = []; qEl.value = '';
-    store('filter', 'all'); store('cat', 'all'); store('src', 'all'); if(state.src!=='musinsa')runtime.ensureCatalog(); render();
+    store('filter', 'all'); store('cat', 'all'); store('src', 'all'); if(state.src!=='musinsa'||D.catalog.musinsaCount>0)runtime.ensureCatalog(); render();
   });
 
   /* ── 테마 ───────────────────────────────────────────────── */
@@ -1113,9 +1123,10 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         '<span class="now num">' + won(it.my) + '</span>' +
         (it.normal !== it.my ? '<span class="base num">' + won(it.normal) + '</span>' : '');
       var f = [];
+      if(it.kind==='wide')f.push('<span class="fact">'+esc(priceKind(it.priceSource))+' · '+esc(it.observedDate||'')+' 기준'+(it.retained?' · 이번 목록 미포함':'')+'</span>');
       if (on4910 && it.my == null) f.push('<span class="fact">가격 재검증 필요</span>');
       if (on4910 && it.vd) f.push('<span class="fact">' + (it.my == null ? '검토일 ' : '검증일 ') + esc(new Date(it.vd).toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })) + '</span>');
-      f.push('<span class="fact' + (it.isLow ? ' low' : '') + '">역대 최저가 <b class="num">' + won(it.lowMy) +
+      if(it.kind!=='wide'||it.lowEligible)f.push('<span class="fact' + (it.isLow ? ' low' : '') + '">역대 최저가 <b class="num">' + won(it.lowMy) +
         '</b> · ' + md(it.lowDate) + '</span>');
       f.push('<span class="fact">' + (on4910 ? '4910 표시가' : '무신사 판매가') + ' <b class="num">' + won(it.sale) + '</b></span>');
       if (it.newbie != null) f.push('<span class="fact">쿠폰적용가(신규회원 기준) <b class="num">' + won(it.newbie) + '</b></span>');
@@ -1207,7 +1218,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     var okNb = newbies.filter(function (v) { return v != null; });
     var minAll = okNb.length ? Math.min(minMine, Math.min.apply(null, okNb)) : minMine;
     var maxNorm = okNorm.length ? Math.max.apply(null, okNorm) : minMine;
-    var lowIdx = it.lowEligible ? rows.findIndex(function(r){return r[3]===it.lowMy&&(!on4910||r[5]===it.couponName);}) : -1;
+    var lowIdx = it.lowEligible ? rows.findIndex(function(r){return r[3]===it.lowMy&&((!on4910&&it.kind!=='wide')||r[5]===it.couponName);}) : -1;
 
     /* U9 — 0원 시작이 아닌 동적 스케일링 */
     var yMin = Math.floor(minAll * 0.9 / 1000) * 1000;
@@ -1219,9 +1230,9 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       { label: on4910 ? '4910 표시가' : '무신사 판매가', data: sales, borderColor: cAcc, borderWidth: 2,
         pointRadius: 3, pointBackgroundColor: cAcc, pointBorderColor: cBg, pointBorderWidth: 1.5,
         pointHoverRadius: 5, tension: 0.1, fill: false },
-      { label: '나의 실구매가', data: mines, borderColor: cDown, borderWidth: 3,
+      { label: '혜택 적용 가격', data: mines, borderColor: cDown, borderWidth: 3,
         tension: 0.1, fill: false,
-        segment: { borderDash: function (c) { return outs[c.p1DataIndex] ? [4, 4] : undefined; } },
+        segment: { borderDash: function (c) { return (it.kind==='wide'&&rows[c.p1DataIndex][8]!=='DIRECT')||outs[c.p1DataIndex] ? [4, 4] : undefined; } },
         pointStyle: rows.map(function (r, i) { return outs[i] ? 'crossRot' : 'circle'; }),
         pointRadius: rows.map(function (r, i) { return outs[i] ? 5 : (i === lowIdx ? 6.5 : 3.5); }),
         pointBackgroundColor: rows.map(function (r, i) { return outs[i] ? cMuted : cDown; }),
@@ -1258,7 +1269,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
                 var i = t[0].dataIndex;
                 return rows[i][0] + (outs[i] ? '  ·  품절' : '');
               },
-              label: function (t) { return ' ' + t.dataset.label + '  ' + won(t.parsed.y); }
+              label: function (t) { return ' ' + (it.kind==='wide'&&t.datasetIndex===2?priceKind(rows[t.dataIndex][8]):t.dataset.label) + '  ' + won(t.parsed.y); }
             }
           }
         },
@@ -1284,15 +1295,15 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     var rows = slice(it).slice().reverse();
     tb.innerHTML = rows.map(function (r, i) {
       var older = rows[i + 1];
-      var sameBasis = !older || !is4910(it) || r[5] === older[5];
+      var sameBasis = !older || ((!is4910(it)&&it.kind!=='wide') || r[5] === older[5]);
       var d = (older && sameBasis && r[3] != null && older[3] != null) ? r[3] - older[3] : null;
       var dCell = d == null ? '<span class="delta-flat">—</span>'
         : d < 0 ? '<span class="delta-down num">↓ ' + Math.abs(d).toLocaleString('ko-KR') + '</span>'
         : d > 0 ? '<span class="delta-up num">↑ ' + d.toLocaleString('ko-KR') + '</span>'
         : '<span class="delta-flat">변동 없음</span>';
-      var isLowRow = it.lowEligible && r[3] != null && it.lowMy != null && r[3] === it.lowMy && (!is4910(it) || r[5] === it.couponName);
+      var isLowRow = it.lowEligible && r[3] != null && it.lowMy != null && r[3] === it.lowMy && ((!is4910(it)&&it.kind!=='wide') || r[5] === it.couponName);
       return '<tr><td>' + r[0] + '</td>' +
-        '<td class="mine-c num">' + won(r[3]) + '</td>' +
+        '<td class="mine-c num">' + won(r[3]) + (it.kind==='wide'?'<br><small>'+esc(priceKind(r[8]))+'</small>':'') + '</td>' +
         '<td>' + dCell + '</td>' +
         '<td class="num">' + won(r[2]) + '</td>' +
         '<td class="nb-col num">' + won(r.length > 7 ? r[7] : null) + '</td>' +
@@ -1310,7 +1321,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   if(window.ResizeObserver)new ResizeObserver(measureHeader).observe(document.querySelector('.topbar'));
   else window.addEventListener('resize',measureHeader);
   render();
-  if(state.src!=='musinsa')runtime.ensureCatalog();
+  if(state.src!=='musinsa'||D.catalog.musinsaCount>0)runtime.ensureCatalog();
   var qs=new URLSearchParams(location.search);
   var dl=qs.get('goods')||(D.targetGoodsNo?String(D.targetGoodsNo):null);
   if(dl)openModal(dl);

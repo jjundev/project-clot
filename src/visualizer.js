@@ -8,6 +8,8 @@ import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { createDashboardRuntime } from './dashboard-runtime.js';
 import { createDashboardModel } from './dashboard-model.js';
+import {verifyDailyCoverage} from './musinsaWide/coverage.js';
+import { buildMusinsaCatalog } from './dashboard-musinsa.js';
 import { buildDashboardCatalog } from './dashboard-catalog.js';
 import path from 'node:path';
 import { exec } from 'node:child_process';
@@ -22,6 +24,7 @@ const DATA_DIR = path.join(ROOT_DIR, 'data');
 const DEFAULT_TEMPLATE = path.join(__dirname, 'dashboard.template.html');
 // CLOT_DASHBOARD_PATH keeps test runs from overwriting the real dashboard.
 const DEFAULT_OUTPUT = process.env.CLOT_DASHBOARD_PATH || path.join(DATA_DIR, 'dashboard.html');
+const DEFAULT_MUSINSA_DB = process.env.CLOT_MUSINSA_WIDE_DB_PATH || path.join(DATA_DIR, 'musinsa-wide.db');
 const DEFAULT_4910_DB = process.env.CLOT_4910_DB_PATH || path.join(DATA_DIR, '4910.db');
 
 /**
@@ -417,6 +420,7 @@ export function generateDashboardHtml({
   openBrowser = true,
   targetGoodsNo,
   db4910Path = DEFAULT_4910_DB,
+  dbMusinsaPath = DEFAULT_MUSINSA_DB,
 } = {}) {
   if (!fs.existsSync(templatePath)) {
     throw new Error(`Dashboard template file not found at: ${templatePath}`);
@@ -448,11 +452,24 @@ export function generateDashboardHtml({
   let payload, packaged;
   const revision = randomUUID();
   let total4910All = 0;
+  let wide = null;
+  // Fail the build on a supplied but invalid wide snapshot; never silently publish a subtotal.
+  if(dbMusinsaPath && fs.existsSync(dbMusinsaPath)) {
+    const wideDb=new DatabaseSync(dbMusinsaPath,{readOnly:true});
+    try {
+      if(process.env.CLOT_REQUIRE_MUSINSA_WIDE==='1')verifyDailyCoverage(wideDb.prepare('SELECT * FROM scan_runs ORDER BY date DESC LIMIT 1').get());
+      wide=buildMusinsaCatalog(wideDb,{outDir,revision});
+    } finally { wideDb.close(); }
+  } else {
+    if(process.env.CLOT_REQUIRE_MUSINSA_WIDE==='1')throw Error('Required Musinsa wide snapshot missing');
+    fs.rmSync(path.join(outDir,'musinsa'),{recursive:true,force:true});
+  }
   try {
     let db4910;
     try {
       if (db4910Path && fs.existsSync(db4910Path)) db4910 = new DatabaseSync(db4910Path, {readOnly:true});
       payload = buildClotDataPayload(activeDb, {targetGoodsNo:gNo, db4910});
+      if(wide)payload.items=payload.items.filter(x=>x.src!=='musinsa'||!wide.goodsIds.has(x.n));
       let scanIndex = {brands:[]}, scanState=db4910?'complete':'unavailable', notice=db4910?null:'4910 데이터 미포함: 원본 DB 없음';
       if(db4910)try { scanIndex=buildScan4910Index(db4910); } catch(err) { scanState='partial';notice='4910 데이터 일부 미포함: '+err.message; }
       packaged = buildDashboardCatalog({
@@ -463,10 +480,18 @@ export function generateDashboardHtml({
     } catch(err) {
       console.warn('⚠️ [4910] 대시보드에서 4910 항목 제외: '+err.message);
       payload = buildClotDataPayload(activeDb, {targetGoodsNo:gNo});
+      if(wide)payload.items=payload.items.filter(x=>x.src!=='musinsa'||!wide.goodsIds.has(x.n));
       packaged = buildDashboardCatalog({baseItems:payload.items,dir4910,revision,scanState:'unavailable',notice:'4910 데이터 미포함: '+err.message});
     } finally { if(db4910)db4910.close(); }
   } finally { if(shouldCloseDb)activeDb.close(); }
   total4910All = packaged.catalog.scanCount;
+  if(wide) {
+    payload.musinsa=wide.metadata;
+    payload.lastRun=wide.metadata.completedAt;
+    packaged.catalog.parts.push(...wide.parts);
+    packaged.catalog.scanCount+=wide.metadata.active;
+    packaged.catalog.musinsaCount=wide.metadata.active;
+  }
   Object.assign(payload,packaged,{has4910All:packaged.catalog.scanState==='complete',total4910All});
   const total4910 = payload.items.filter(x=>x.src==='4910').length + total4910All;
   const templateContent = fs.readFileSync(templatePath, 'utf-8');
@@ -508,7 +533,7 @@ export function generateDashboardHtml({
   return {
     outputPath,
     targetGoodsNo: gNo !== undefined ? gNo : undefined,
-    totalItems: payload.items.length + total4910All,
+    totalItems: payload.items.length + packaged.catalog.scanCount,
     total4910,
     scanState: payload.catalog.scanState,
     total4910All: payload.total4910All,

@@ -356,3 +356,12 @@ Release DB에 이미 저장된 같은 날·같은 쿠폰·같은 목록가의 �
 
 수동 재실행: `gh workflow run 4910-full.yml --ref main`. 성공 후 Pages가 자동 재배포된다.
 쿠폰을 자동 발급하거나 구매·장바구니 상태를 변경하지 않는다.
+
+
+### 무신사 30만 상품 웹 가격
+
+Pages는 `data-musinsa` Release의 `musinsa-wide.db.gz`를 읽어 무신사 대량 수집 가격도 표시한다. 하루 고유 조사 대상 300,000개와 사이트에서 제공하는 ACTIVE 상품 수는 다르다. 이전 회차 잔류 상품과 기존 찜 목록의 추가 상품이 포함될 수 있다.
+
+카드와 상세에 직접 확인 가격 / 확인된 혜택 기준 추정가 및 기준일을 표시한다. 추정가에는 확인하지 못한 쿠폰 혜택이 빠질 수 있으며 쿠폰 목록 API 예외 번호를 화면에 경고한다. 추정가를 확정된 가격 하락이나 역대 최저가로 표시하지 않는다. 상품 요약과 가격 이력은 `musinsa/`에 분할하며 이력은 상세를 열 때 읽는다. 원시 회원 응답이나 쿠키를 정적 파일에 넣지 않는다.
+
+로컬에서도 `node src/cli.js musinsa-db pull` 뒤 `node src/cli.js visualize --no-open`으로 연결할 수 있다. 입력 경로는 `CLOT_MUSINSA_WIDE_DB_PATH`로 지정한다. Pages는 `CLOT_REQUIRE_MUSINSA_WIDE=1`로 필수 DB 및 일일 가격 출처 검증 실패 시 배포를 중단한다. `Musinsa wide scan` 성공 후 자동 재배포한다.
