@@ -27,6 +27,8 @@ Interfaces: prepare snapshot metadata and priority IDs; verify partition using p
 
 ### Task 3: delivery
 Files: .github/workflows/4910-full.yml, .github/workflows/pages.yml, README.md, verification report.
-- [ ] Add snapshot job, 32 workers (max 8 simultaneous, 4 client workers each), guarded merge/Release publish; Pages follow success. Permit reruns to resume pending work.
+- [ ] Add snapshot job, 32 workers (max 8 simultaneous, 2 client workers each), guarded merge/Release publish; Pages follow success. Permit reruns to resume pending work.
 - [ ] Run unit and browser suites; independent final review and fixes.
 - [ ] Commit/merge/push only scoped files; run full verification until pending=0 or actionable external blocker; confirm Release/live prices and record limitations.
+
+Operational ruling: first production shard returned 510 HTTP 429 failures; halve per-shard clients from four to two for subsequent resumed runs. Keep completed proofs and bounded retry handling.
