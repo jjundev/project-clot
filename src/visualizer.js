@@ -1,3 +1,4 @@
+import { effective4910Price, readPriceValidations } from './site4910/price-validation.js';
 /**
  * @fileoverview Visualizer core module for Project-Clot.
  * Extracts price time-series data from SQLite and compiles standalone dashboard HTML.
@@ -45,18 +46,25 @@ function buildLikedItems(db4910) {
     `)
     .all();
 
+  const validations = readPriceValidations(db4910, 'liked');
   const logsBySno = new Map();
   for (const log of logs) {
-    const my = log.member_price ?? log.coupon_price ?? log.list_price ?? null;
+    const validation = validations.get(`${log.sno}:${log.date}`);
+    const my = effective4910Price({ raw: log, validation });
+    const evidence = validation?.evidence_json ? JSON.parse(validation.evidence_json) : null;
+    const corrected = validation?.corrected_json ? JSON.parse(validation.corrected_json) : null;
+    const baseProven = evidence?.priceBasis === 'AGLO' && evidence.observedDate === log.date;
+    const base = baseProven ? evidence.basePrice : validation?.status === 'verified' ? log.list_price : corrected?.list_price;
+    const original = baseProven ? evidence.originalPrice : validation?.status === 'verified' ? log.original_price : corrected?.original_price;
     const tuple = [
       log.date,
-      log.original_price ?? null,
-      log.list_price ?? null,
+      original ?? null,
+      base ?? null,
       my,
       log.is_soldout ? 1 : 0,
-      log.member_price != null ? '내 회원가' : '쿠폰적용가(신규회원 기준)',
-      log.list_price != null && my != null ? Math.max(log.list_price - my, 0) : 0,
-      log.coupon_price ?? null,
+      my == null ? '가격 재검증 필요' : '4910 검증가',
+      base != null && my != null ? Math.max(base - my, 0) : 0,
+      null,
     ];
     const arr = logsBySno.get(log.sno);
     if (arr) arr.push(tuple);
@@ -67,6 +75,8 @@ function buildLikedItems(db4910) {
     n: Number(g.sno),
     k: `4910:${g.sno}`,
     src: '4910',
+    vd: validations.get(`${g.sno}:${logsBySno.get(g.sno)?.at(-1)?.[0]}`)?.checked_at ?? null,
+    vs: validations.get(`${g.sno}:${logsBySno.get(g.sno)?.at(-1)?.[0]}`)?.status ?? 'unverified',
     b: g.brand || g.market_name || '4910',
     m: g.market_name,
     g: g.name || '상품',
@@ -182,6 +192,7 @@ export function buildScan4910Payload(db4910, { brandSno = null } = {}) {
 
   // A 4910.db from before the coupon history has neither the table nor scan_runs.coupons_ok: no coupon prices then.
   const hasCouponHistory = !!db4910.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'coupon_price_changes'").get();
+  const validations = readPriceValidations(db4910, 'scan', { brandSno });
   const couponsBySno = hasCouponHistory
     ? group(
         db4910
@@ -191,9 +202,24 @@ export function buildScan4910Payload(db4910, { brandSno = null } = {}) {
             ORDER BY date ASC
           `)
           .all(params),
-        (c) => [c.date, c.sale_price, c.coupon_price ?? null]
+        (c) => {
+          const v = validations.get(`${c.sno}:${c.date}`);
+          const corrected = v?.corrected_json ? JSON.parse(v.corrected_json) : null;
+          return [c.date, corrected?.sale_price ?? c.sale_price, effective4910Price({ raw: c, validation: v })];
+        }
       )
     : new Map();
+  for (const v of validations.values()) {
+    if (!v.corrected_json) continue;
+    const c = JSON.parse(v.corrected_json);
+    if (!Object.hasOwn(c, 'sale_price')) continue;
+    const rows = couponsBySno.get(v.sno) ?? [];
+    const row = [v.date, c.sale_price, effective4910Price({ raw: c, validation: v })];
+    const i = rows.findIndex(r => r[0] === v.date);
+    if (i < 0) rows.push(row); else rows[i] = row;
+    rows.sort((a,b) => a[0].localeCompare(b[0]));
+    couponsBySno.set(v.sno, rows);
+  }
   // A coupon row on any listing proves an ok run that day, even if a later non-ok rerun overwrote scan_runs.
   const runCols = new Set(db4910.prepare('PRAGMA table_info(scan_runs)').all().map((c) => c.name));
   const okSql = [
@@ -215,8 +241,19 @@ export function buildScan4910Payload(db4910, { brandSno = null } = {}) {
     return idx.get(v);
   };
 
-  const historyOf = (sno) =>
-    mergeCouponHistory4910({ changes: histBySno.get(sno) || [], coupons: couponsBySno.get(sno) || [], okDates, lastScan });
+  const historyOf = (sno) => {
+    const hist = mergeCouponHistory4910({ changes: histBySno.get(sno) || [], coupons: couponsBySno.get(sno) || [], okDates, lastScan });
+    return hist.map(row => {
+      const v = validations.get(`${sno}:${row[0]}`);
+      // No validation for this date: no refreshed coupon estimate on a later day.
+      if (!v || !['verified', 'corrected'].includes(v.status)) return [row[0], row[1], row[2], null];
+      if (v.corrected_json) {
+        const c = JSON.parse(v.corrected_json);
+        if (Number.isFinite(c.sale_price)) return [row[0], row[1], c.sale_price, effective4910Price({ raw: c, validation: v })];
+      }
+      return row;
+    });
+  };
 
   const r = goods.map((g) => {
     const img = g.image_url || '';

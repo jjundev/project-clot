@@ -1,5 +1,6 @@
 // 4910.kr (Ably's men's mall) brand listing client. Anonymous-token auth only — no login, no cookies.
 // The listings are reseller posts (Japanese buying agents), so the tracking unit is the listing sno.
+import { parseCouponConditions } from './coupon-eligibility.js';
 import { USER_AGENT } from '../myprice.js';
 
 export const BRANDS_4910 = [
@@ -110,7 +111,7 @@ export function createClient({ fetchFn = fetch, delayMs = 300, retryBaseMs = 100
   // One GET with the shared spacing, timeout and retry (network errors, 429, 5xx). Anonymous calls send the
   // anonymous token and refresh it once on 401; member calls send only `Authorization: JWT` (never the token
   // value in a message) and fail at once with code MEMBER_AUTH on 401/403. `aglo` adds the web app identity headers.
-  async function getJson(url, { memberToken = null, label, aglo = false }) {
+  async function getJson(url, { memberToken = null, label, aglo = true }) {
     let refreshed = false;
     let lastStatus;
     let lastMessage = 'unknown error';
@@ -178,6 +179,7 @@ export function createClient({ fetchFn = fetch, delayMs = 300, retryBaseMs = 100
     const price = parsePrice(g.price);
     return {
       sno: Number(sno),
+      priceBasis: 'AGLO',
       price,
       couponPrice: g.price_description?.text === COUPON_LABEL ? price : null,
       listPrice: parsePrice(g.first_page_rendering?.price),
@@ -235,9 +237,12 @@ export function createClient({ fetchFn = fetch, delayMs = 300, retryBaseMs = 100
       percent: c.discount_percent ?? null,
       price: c.discount_price ?? null,
       max: c.max_discount_price ?? Infinity,
-      min: parsePrice(String(c.conditions?.[1] ?? '').match(/([\d,]+)원 이상/)?.[1]) ?? 0,
+      min: parseCouponConditions(c.conditions).minAmount ?? 0,
       finishedAt: c.finished_at ?? null,
       usable: Boolean(c.is_usable && c.is_in_available_period),
+      conditions: Array.isArray(c.conditions) ? c.conditions.map(String) : null,
+      hasTargets: typeof c.has_targets === 'boolean' ? c.has_targets : null,
+      appOnly: Boolean(c.is_app_only),
     }));
   }
 
@@ -253,11 +258,16 @@ export function createClient({ fetchFn = fetch, delayMs = 300, retryBaseMs = 100
     const options = encodeURIComponent(JSON.stringify([{ sno: Number(optionSno), ea: 1 }]));
     const body = await getJson(`${BEST_COUPON_URL}?options=${options}`, { memberToken, aglo: true, label: `best coupon ${optionSno}` });
     const c = body?.best_coupon;
-    if (!c) return null;
+    if (c == null) {
+      if (body && Object.hasOwn(body, 'best_coupon') && body.best_coupon === null && body.is_applied === false) return null;
+      throw httpError(`4910 best coupon ${optionSno} failed: malformed coupon response`, undefined);
+    }
     const discount = c.coupon_discount == null ? NaN : Number(c.coupon_discount);
     if (!Number.isFinite(discount)) throw httpError(`4910 best coupon ${optionSno} failed: no numeric coupon_discount`, undefined);
     return {
       couponSno: Number(c.sno),
+      optionSno: Number(optionSno),
+      isApplied: typeof body.is_applied === 'boolean' ? body.is_applied : null,
       name: c.name ?? null,
       discount,
       percent: c.discount_percent ?? null,

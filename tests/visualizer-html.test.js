@@ -220,6 +220,7 @@ describe('Visualizer HTML Generation', () => {
       scanListing(71863924, 2421, '유니클로'), scanListing(71863925, 2421, '유니클로'), scanListing(80000001, 13647, 'GU'),
     ]);
     store.logCouponPriceChanges('2026-10-10', [{ sno: 71863924, sale_price: 21600, coupon_price: 18000 }]);
+    store.putPriceValidation({kind:'scan',sno:71863924,date:'2026-10-10',status:'verified',reason:'fixture'});
     store.close();
 
     const tempOutput = path.join(dir, 'index.html');

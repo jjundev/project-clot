@@ -49,7 +49,7 @@ function fakeClient({ pages = [], anon = {}, best = {} } = {}) {
       const d = anon[sno];
       if (d instanceof Error) throw d;
       if (!d) throw httpErr(404);
-      return { sno, price: null, couponPrice: null, listPrice: null, originalPrice: null, isSoldout: false, isOpen: true, optionSno: optionOf(sno), ...d };
+      return { sno, priceBasis: 'AGLO', price: null, couponPrice: null, listPrice: null, originalPrice: null, isSoldout: false, isOpen: true, optionSno: optionOf(sno), ...d };
     },
     async getBestCoupon(optionSno, { memberToken } = {}) {
       assert.equal(memberToken, SECRET);
@@ -57,7 +57,7 @@ function fakeClient({ pages = [], anon = {}, best = {} } = {}) {
       calls.best.push(optionSno);
       const b = bestByOption[optionSno];
       if (b instanceof Error) throw b;
-      return b ?? null;
+      return b ? { optionSno, isApplied: true, ...b } : null;
     },
   };
 }
@@ -105,7 +105,7 @@ test('tokenExpiry reads exp and returns null without it', () => {
 test('no token makes no calls and returns none', async () => {
   const client = fakeClient({ pages: onePage(1) });
   const res = await syncLiked4910({ client, store, date: DATE, memberToken: null });
-  assert.deepEqual(res, { memberStatus: 'none', liked: 0, logged: 0, drops: [] });
+  assert.deepEqual(res, { memberStatus: 'none', liked: 0, logged: 0, drops: [], validation: { verified: 0, unverified: 0, reasons: {} } });
   assert.equal(client.calls.list + client.calls.anon.length + client.calls.best.length, 0);
 });
 
@@ -172,7 +172,7 @@ test('pages the liked list until the cursor ends', async () => {
 test('MEMBER_AUTH on the liked list returns expired and touches nothing', async () => {
   const client = fakeClient({ pages: [authErr()] });
   const res = await run(client);
-  assert.deepEqual(res, { memberStatus: 'expired', liked: 0, logged: 0, drops: [] });
+  assert.deepEqual(res, { memberStatus: 'expired', liked: 0, logged: 0, drops: [], validation: { verified: 0, unverified: 0, reasons: {} } });
   assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM liked_goods').get().n, 0);
   assert.equal(client.calls.anon.length + client.calls.best.length, 0);
 });
@@ -246,10 +246,12 @@ test('a best-coupon failure logs the item with a null member price and no token'
   assert.equal(store.db.prepare('SELECT member_price FROM liked_price_logs WHERE sno = 1').get().member_price, null);
 });
 
-const prevRow = (sno, member_price, coupon_price, list_price = 21600) =>
+const prevRow = (sno, member_price, coupon_price, list_price = 21600) => {
   store.logLikedPrice({ sno, date: '2026-10-09', list_price, original_price: 51300, coupon_price, member_price, is_soldout: 0 });
+  if (member_price != null) store.putPriceValidation({ kind:'liked',sno,date:'2026-10-09',status:'verified',reason:'test-evidence' });
+};
 
-test('a member price below the last day is a drop; member null falls back to coupon price', async () => {
+test('a member price drop is reported; failed member lookup cannot fall back to public price', async () => {
   prevRow(1, 20000, 18000);
   prevRow(2, null, 18000);
   const client = fakeClient({
@@ -258,11 +260,10 @@ test('a member price below the last day is a drop; member null falls back to cou
     best: { 1: { discount: 2160 }, 2: httpErr(500) },
   });
   const res = await run(client);
-  assert.equal(res.drops.length, 2);
+  assert.equal(res.drops.length, 1);
   const byPrev = Object.fromEntries(res.drops.map((d) => [d.sno, d]));
   assert.deepEqual(byPrev[1], { sno: 1, name: 'liked 1', market_name: 'seller', url: 'https://4910.kr/goods/1', prevPrice: 20000, currentPrice: 19440 });
-  assert.equal(byPrev[2].prevPrice, 18000);
-  assert.equal(byPrev[2].currentPrice, 17000);
+  assert.equal(byPrev[2], undefined);
 });
 
 test('a member-price day followed by a coupon-only day is not a drop', async () => {

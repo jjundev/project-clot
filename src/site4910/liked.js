@@ -4,6 +4,7 @@
 // after this change (2026-10). Earlier rows hold the Ably app's /api/v2 member price instead.
 import fs from 'node:fs';
 import path from 'node:path';
+import { resolveMemberPrice } from './member-price.js';
 import { toRow } from './client.js';
 
 export const LIKED_BUDGET_MS_4910 = 4 * 60_000;
@@ -85,7 +86,7 @@ function comparablePrices(prev, row) {
 export async function syncLiked4910({
   client, store, date, memberToken, budgetMs = LIKED_BUDGET_MS_4910, maxPages = MAX_LIKED_PAGES_4910, log = console.log,
 }) {
-  const result = { memberStatus: 'none', liked: 0, logged: 0, drops: [] };
+  const result = { memberStatus: 'none', liked: 0, logged: 0, drops: [], validation: { verified: 0, unverified: 0, reasons: {} } };
   if (!memberToken) return result;
   const deadline = Date.now() + budgetMs;
 
@@ -117,15 +118,18 @@ export async function syncLiked4910({
 
     // Without a linked option or a list price there is nothing to price, so no coupon is asked for.
     let memberPrice = null;
+    let reason = 'option-or-base';
+    let best = null;
     if (anon.optionSno != null && anon.listPrice != null) {
       try {
-        const best = await client.getBestCoupon(anon.optionSno, { memberToken });
-        memberPrice = best ? Math.ceil((anon.listPrice - best.discount) / 10) * 10 : anon.listPrice;
+        best = await client.getBestCoupon(anon.optionSno, { memberToken });
+        ({ price: memberPrice, reason } = resolveMemberPrice(anon, best));
       } catch (err) {
         if (err.code === 'MEMBER_AUTH') {
           result.memberStatus = 'expired';
           break;
         }
+        reason = 'request-failed';
         log(`⚠️ [4910] 찜 ${item.sno} 회원가 조회 실패 (HTTP ${err.status ?? '?'})`);
       }
     }
@@ -141,9 +145,14 @@ export async function syncLiked4910({
     };
     const prev = store.getPrevLikedPrice(item.sno, date);
     store.logLikedPrice(logRow);
+    store.putPriceValidation({ kind: 'liked', sno: item.sno, date, status: memberPrice == null ? 'unverified' : 'verified', reason,
+      evidence: { observedDate: date, bestOptionSno: best?.optionSno ?? null, priceBasis: anon.priceBasis ?? null, optionSno: anon.optionSno, basePrice: anon.listPrice, originalPrice: anon.originalPrice,
+        couponSno: best?.couponSno ?? null, discount: best?.discount ?? null, isApplied: best?.isApplied ?? null } });
+    result.validation[memberPrice == null ? 'unverified' : 'verified']++;
+    result.validation.reasons[reason] = (result.validation.reasons[reason] ?? 0) + 1;
     result.logged++;
 
-    const cmp = prev && comparablePrices(prev, logRow);
+    const cmp = memberPrice != null && prev && comparablePrices(prev, logRow);
     if (cmp && cmp.prevPrice != null && cmp.currentPrice != null && cmp.currentPrice < cmp.prevPrice) {
       result.drops.push({ sno: item.sno, name: item.name, market_name: item.market_name, url: item.url, ...cmp });
     }

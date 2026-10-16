@@ -88,3 +88,11 @@ Authorization: JWT <ably-jwt-token 쿠키>   # 비로그인이면 X-Anonymous-To
 - 쿠폰함이 바뀌면 판매처별 적용 여부도 다시 확인해야 한다(매일 다시 확인).
 - `discounts` 응답에 `has_purchased_at_4910: true`가 있는데도 첫구매 쿠폰은 쓸 수 있는 상태였다.
 - 조사 스크립트는 세션 scratchpad에만 있고 커밋하지 않았다. 모든 호출은 읽기 전용이었다.
+
+## 2026-10-16 계약 재확인
+공식 goods 페이지의 Next.js goods 번들에서 `readBestCoupon`은 `options:[{sno,ea}]`를 요청한다.
+금액 표시는 `a-(c.best_coupon&&c.is_applied?c.best_coupon.coupon_discount:0)`이며
+쿠폰의 `is_applied=false`인 경우 `받기` 버튼을 표시한다. 따라서 할인 후보를 소유·적용된 쿠폰으로 오인하지 않는다.
+상품 상세와 목록을 포함한 모든 API GET은 AGLO/0.1.0/PCWeb 식별을 사용한다.
+서버 할인액을 우선하고 최종 추적가는 기존 정책인 10원 단위 올림을 유지한다.
+`is_applied` 누락은 미검증이다. 쿠폰 자동 발급은 수행하지 않는다.

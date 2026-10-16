@@ -4,7 +4,7 @@ import {createDashboardModel} from './dashboard-model.js';
 const json=x=>JSON.stringify(x).replace(/<\/script/gi,'<\\/script');
 /** Compact scan history → common price basis. Also serialized into the browser runtime. */
 export function expandScanHistory(rows) {
- return rows.map(h=>[h[0],h[1],h[2],h[3]??h[2],0,h[3]!=null?'쿠폰가':'표시가',h[3]!=null?h[2]-h[3]:0]);
+ return rows.map(h=>[h[0],h[1],h[2],h[3]??null,0,h[3]!=null?'4910 검증가':'가격 재검증 필요',h[3]!=null?h[2]-h[3]:0]);
 }
 export function buildDashboardCatalog({baseItems,scanIndex={brands:[]},readBrand,dir4910,revision,scanState='complete',notice=null}) {
  const model=createDashboardModel(),items=model.mergeSummaries([],baseItems.map(x=>model.summarize(x))),inlineHistories={};

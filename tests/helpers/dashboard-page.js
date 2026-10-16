@@ -19,7 +19,10 @@ export function writeFixture(dir,{scale=false,scanScenario=null}={}) {
    }
    const db4910Path=path.join(dir,'fixture.db'),store=new Store4910(db4910Path);
    store.syncLiked(raw.filter(x=>x.src==='4910').map(x=>({sno:x.n,brand:x.b,name:x.g,market_name:'',url:x.u,image_url:null})),'2026-10-15');
-   for(const x of raw.filter(x=>x.src==='4910'))for(const r of x.L)store.logLikedPrice({sno:x.n,date:r[0],list_price:r[2],original_price:r[1],member_price:r[3],coupon_price:null,is_soldout:r[4]});
+   for(const x of raw.filter(x=>x.src==='4910'))for(const r of x.L){
+     store.logLikedPrice({sno:x.n,date:r[0],list_price:r[2],original_price:r[1],member_price:r[3],coupon_price:null,is_soldout:r[4]});
+     store.putPriceValidation({kind:'liked',sno:x.n,date:r[0],status:'verified',reason:'browser-fixture',evidence:{observedDate:r[0],priceBasis:'AGLO',basePrice:r[2],originalPrice:r[1]}});
+   }
    const listing={sno:3,brand_sno:9,brand:'나이키',name:'나이키 상품 3',market_sno:1,market_name:'',category:null,sale_price:120,original_price:200,discount_rate:40,image_url:null,url:'',closed:false};
    if(scanScenario){
      store.applyScan('2026-10-13',[{...listing,sale_price:100}],{completeBrands:[9]});
@@ -27,9 +30,11 @@ export function writeFixture(dir,{scale=false,scanScenario=null}={}) {
      if(scanScenario==='changed'){
        store.applyScan('2026-10-14',[listing],{completeBrands:[9]});
        store.applyScan('2026-10-15',[{...listing,sale_price:110}],{completeBrands:[9]});
+       for(const [date,price] of [['2026-10-14',120],['2026-10-15',110]])store.putPriceValidation({kind:'scan',sno:3,date,status:'verified',reason:'browser-fixture',corrected:{sale_price:price,coupon_price:price}});
      }
    }
    store.applyScan('2026-10-16',[listing],{completeBrands:[9]});
+   store.putPriceValidation({kind:'scan',sno:3,date:'2026-10-16',status:'verified',reason:'browser-fixture',corrected:{sale_price:120,coupon_price:120}});
    store.recordScanRun({date:'2026-10-16',brandCounts:{},complete:true,changed:0,added:1,dropped:0,durationMs:1});
    store.close();
    const result=generateDashboardHtml({db,db4910Path,outputPath:path.join(dir,'index.html'),openBrowser:false});db.close();return result;

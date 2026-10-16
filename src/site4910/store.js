@@ -2,6 +2,7 @@
 // ~16k listings a day, so history is change-only: price_changes gets a row only for NEW, PRICE, DROPPED, REVIVED,
 // and a goods row is rewritten only when something in it changed — an unchanged listing keeps its bytes, so the
 // daily git commit of this file stays a small delta. (No last_seen_date for that reason: misses track absence.)
+import { effective4910Price } from './price-validation.js';
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,6 +32,11 @@ export class Store4910 {
       PRAGMA busy_timeout = 5000;
       PRAGMA journal_mode = WAL;
 
+      CREATE TABLE IF NOT EXISTS price_validations (
+        kind TEXT NOT NULL, sno INTEGER NOT NULL, date TEXT NOT NULL, status TEXT NOT NULL,
+        corrected_json TEXT, reason TEXT NOT NULL, evidence_json TEXT, checked_at TEXT NOT NULL,
+        PRIMARY KEY (kind, sno, date)
+      );
       CREATE TABLE IF NOT EXISTS goods (
         sno INTEGER PRIMARY KEY, brand_sno INTEGER NOT NULL, brand TEXT, name TEXT NOT NULL,
         market_sno INTEGER, market_name TEXT, category TEXT, url TEXT NOT NULL, image_url TEXT,
@@ -96,6 +102,9 @@ export class Store4910 {
     if (!marketCouponCols.has('coupon_snos')) this.db.exec('ALTER TABLE market_coupons ADD COLUMN coupon_snos TEXT');
     const walletCols = new Set(this.db.prepare('PRAGMA table_info(wallet_coupons)').all().map((c) => c.name));
     if (!walletCols.has('scope')) this.db.exec('ALTER TABLE wallet_coupons ADD COLUMN scope TEXT');
+    for (const [col, type] of [['conditions_json', 'TEXT'], ['has_targets', 'INTEGER'], ['app_only', 'INTEGER']]) {
+      if (!walletCols.has(col)) this.db.exec(`ALTER TABLE wallet_coupons ADD COLUMN ${col} ${type}`);
+    }
     const scanRunCols = new Set(this.db.prepare('PRAGMA table_info(scan_runs)').all().map((c) => c.name));
     if (!scanRunCols.has('coupons_ok')) this.db.exec('ALTER TABLE scan_runs ADD COLUMN coupons_ok INTEGER');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_goods_market ON goods (market_sno)');
@@ -330,11 +339,12 @@ export class Store4910 {
   #putCoupon(c, marketSno, date) {
     this.db
       .prepare(`
-        INSERT OR REPLACE INTO wallet_coupons (coupon_sno, name, type, percent, price, max, min, finished_at, market_sno, seen_date, scope)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO wallet_coupons (coupon_sno, name, type, percent, price, max, min, finished_at, market_sno, seen_date, scope, conditions_json, has_targets, app_only)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(c.couponSno, c.name ?? null, c.type ?? null, c.percent ?? null, c.price ?? null,
-        Number.isFinite(c.max) ? c.max : null, c.min ?? null, c.finishedAt ?? null, marketSno, date, c.scope ?? null);
+        Number.isFinite(c.max) ? c.max : null, c.min ?? null, c.finishedAt ?? null, marketSno, date, c.scope ?? null, c.conditions == null ? null : JSON.stringify(c.conditions),
+        c.hasTargets == null ? null : Number(c.hasTargets), c.appOnly == null ? null : Number(c.appOnly));
   }
 
   // Replaces a coupon's goods list in one transaction (a list runs to a few thousand rows).
@@ -360,7 +370,10 @@ export class Store4910 {
 
   // Rows as stored, except max: null means uncapped.
   getWallet() {
-    return this.db.prepare('SELECT * FROM wallet_coupons ORDER BY coupon_sno').all();
+    return this.db.prepare('SELECT * FROM wallet_coupons ORDER BY coupon_sno').all().map((r) => ({ ...r,
+      conditions: r.conditions_json == null ? null : JSON.parse(r.conditions_json),
+      hasTargets: r.has_targets == null ? null : Boolean(r.has_targets), appOnly: r.app_only == null ? null : Boolean(r.app_only),
+    }));
   }
 
   // coupon_snos is an array of coupon snos; left out, it is stored NULL (a row from before the column existed).
@@ -504,14 +517,23 @@ export class Store4910 {
       .run(sno, date, list_price ?? null, original_price ?? null, coupon_price ?? null, member_price ?? null, is_soldout ? 1 : 0);
   }
 
+  putPriceValidation({ kind, sno, date, status, corrected = null, reason, evidence = null, checkedAt = new Date().toISOString() }) {
+    this.db.prepare(`INSERT OR REPLACE INTO price_validations
+      (kind,sno,date,status,corrected_json,reason,evidence_json,checked_at) VALUES (?,?,?,?,?,?,?,?)`)
+      .run(kind, Number(sno), date, status, corrected == null ? null : JSON.stringify(corrected), reason,
+        evidence == null ? null : JSON.stringify(evidence), checkedAt);
+  }
+
   getActiveLiked() {
     return this.db.prepare(`SELECT * FROM liked_goods WHERE status = 'ACTIVE' ORDER BY sno`).all();
   }
 
   getPrevLikedPrice(sno, date) {
-    return this.db
-      .prepare('SELECT * FROM liked_price_logs WHERE sno = ? AND date < ? ORDER BY date DESC LIMIT 1')
-      .get(Number(sno), date);
+    const raw = this.db.prepare('SELECT * FROM liked_price_logs WHERE sno = ? AND date < ? ORDER BY date DESC LIMIT 1').get(Number(sno), date);
+    if (!raw) return null;
+    const validation = this.db.prepare("SELECT * FROM price_validations WHERE kind='liked' AND sno=? AND date=?").get(Number(sno), raw.date);
+    const price = effective4910Price({ raw, validation });
+    return price == null ? null : { ...raw, member_price: price, coupon_price: null };
   }
 
   getGoods(sno) {

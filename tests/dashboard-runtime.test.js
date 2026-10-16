@@ -29,7 +29,7 @@ test('inline and brand histories cache independently without changing summaries'
  const before=JSON.stringify(r.getCatalog().items);
  assert.deepEqual(await r.getHistory('musinsa:1'),[[1,2]]);
  const [a,b]=await Promise.all([r.getHistory(x.k),r.getHistory(x.k)]);
- assert.equal(a[0][3],120);assert.deepEqual(a,b);assert.equal(calls,1);
+ assert.equal(a[0][3],null);assert.deepEqual(a,b);assert.equal(calls,1);
  assert.equal(JSON.stringify(r.getCatalog().items),before);
  await assert.rejects(r.getHistory('4910:missing'));
 });
@@ -63,7 +63,7 @@ test('wrong revision and missing IDs reject histories; failed brand request retr
  const x={...summaries[3],detail:{type:'brand',brandSno:9,path:'4910/b9.js'}};
  const r=createDashboardRuntime({model,baseItems:[x],inlineHistories:{},manifest:{revision:'r',parts:[],scanCount:0},loadScript:async()=>{if(fail)throw Error('offline');return {revision:'r',brandSno:9,r:[[3,0,0,'','','','',[['day',200,120,null]]]]};}});
  await assert.rejects(r.getHistory(x.k));fail=false;
- assert.equal((await r.getHistory(x.k))[0][3],120);
+ assert.equal((await r.getHistory(x.k))[0][3],null);
 });
 test('a failed attempt settles its in-flight workers before retry starts a new batch',async()=>{
  let release;const gate=new Promise(r=>release=r);let failed=false,active=0,max=0;
@@ -81,4 +81,11 @@ test('a failed attempt settles its in-flight workers before retry starts a new b
  const retry=r.retryCatalog();release();await Promise.all([first,retry]);
  assert.ok(max<=4,'overlapping failed and retry requests: '+max);
  assert.equal((await r.retryCatalog()).status,'ready');
+});
+
+test('lazy scan history never revives an unverified display price',async()=>{
+ const x={...summaries[3],detail:{type:'brand',brandSno:9,path:'4910/b9.js'}};
+ const r=createDashboardRuntime({model,baseItems:[x],inlineHistories:{},manifest:{revision:'r',parts:[],scanCount:0},
+ loadScript:async()=>({revision:'r',brandSno:9,r:[[3,0,0,'','','','',[['day',90000,85200,null]]]]})});
+ const history=await r.getHistory(x.k);assert.equal(history[0][3],null);assert.equal(history[0][5],'가격 재검증 필요');
 });

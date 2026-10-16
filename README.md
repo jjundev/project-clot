@@ -321,3 +321,21 @@ node scripts/verify-dashboard-build.js /absolute/path/to/index.html
 ```
 
 브라우저 검증에 설치된 Chrome을 쓰려면 `CLOT_BROWSER_EXECUTABLE`에 실행 파일 경로를 지정합니다. 산출물 검증기는 요약·상세의 revision, 식별자, 건수와 가격 지표를 교차 확인하며 실패 시 0이 아닌 종료 코드를 반환합니다.
+
+### 4910 가격 재검증
+4910 가격은 AGLO 웹, 옵션 수량 1, 쿠폰 1장, 포인트 차감 전 기준이다. 쿠폰 후보가 있어도
+`is_applied`가 참이 아니면 적용가로 기록하지 않는다. 전체 스캔의 판매처 표본을 다른 상품의
+적용 증거로 쓰지 않으며, 완전한 상품 대상 목록과 보존된 단품 조건이 있는 경우에만 확장한다.
+미검증 가격은 차트·최저가·하락 비교에서 제외한다.
+
+Release DB를 별도 경로에 내려받아 아래 명령으로 조사한다. 기본 실행은 읽기 전용이다.
+
+```sh
+node scripts/4910-price-revalidate.js --db /tmp/4910-copy.db --from 2026-10-11 --to 2026-10-16 --out /tmp/4910-report.json
+```
+
+`--live`는 현재 찜 전건과 판매처 30곳의 표본을 읽기 전용으로 대조한다(회원 토큰 필요).
+현재 응답은 과거 정답으로 사용하지 않는다. `--apply`는 SHA256이 같은 백업을 만든 후
+`price_validations`만 추가·갱신한다. 실행 대상은 쓰기 중이 아닌 독립 DB 복사본이어야 한다.
+비어 있는 입력·날짜 오류·인증 실패는 CLI 실패로 보고한다. 원격 Release와 Pages는 자동 갱신하지 않는다.
+상세 결과는 [2026-10-16 재검증 보고서](docs/verify/2026-10-16-4910-price-revalidation.md)를 참고한다.

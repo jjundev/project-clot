@@ -50,7 +50,7 @@ export function createDashboardRuntime({model,baseItems,inlineHistories,manifest
  }
  const result=p.then(P=>{
  const r=P.r.find(r=>model.itemKey('4910',r[0])===key);if(!r)throw Error('상품 이력 없음');
- return r[7].map(h=>[h[0],h[1],h[2],h[3]??h[2],0,h[3]!=null?'쿠폰가':'표시가',h[3]!=null?h[2]-h[3]:0]);
+ return r[7].map(h=>[h[0],h[1],h[2],h[3]??null,0,h[3]!=null?'4910 검증가':'가격 재검증 필요',h[3]!=null?h[2]-h[3]:0]);
  }).catch(err=>{histories.delete(key);throw err;});
  histories.set(key,result);return result;
  }

@@ -155,7 +155,7 @@ test('getGoodsDetail maps the anonymous detail', async () => {
   const { fn, calls } = fakeFetch({ lists: [json(200, detailBody())] });
   const client = createClient({ fetchFn: fn, delayMs: 0, retryBaseMs: 0 });
   assert.deepEqual(await client.getGoodsDetail(71863924), {
-    sno: 71863924, price: 18360, couponPrice: 18360, listPrice: 21600, originalPrice: 51300, optionSno: 430713077, isSoldout: false, isOpen: true,
+    sno: 71863924, priceBasis: 'AGLO', price: 18360, couponPrice: 18360, listPrice: 21600, originalPrice: 51300, optionSno: 430713077, isSoldout: false, isOpen: true,
   });
   assert.equal(calls.at(-1).url, 'https://api.a-bly.com/api/v2/goods/71863924/');
   assert.equal(calls.at(-1).headers['X-Anonymous-Token'], 'tok-1');
@@ -294,7 +294,7 @@ test('getMyCoupons sends AGLO headers and parses min/max', async () => {
   assert.equal(calls[0].headers['X-Anonymous-Token'], undefined);
   assert.deepEqual(coupons, [{
     couponSno: 51346850, name: '[4910] 첫구매 20% 쿠폰', type: 'PERCENT', percent: 20, price: null, max: 30000, min: 10000,
-    finishedAt: '2026-10-31T23:59:59', usable: true,
+    finishedAt: '2026-10-31T23:59:59', usable: true, conditions: ['…', '10,000원 이상 구매 시 최대 30,000원 할인'], hasTargets: null, appOnly: false,
   }]);
 });
 
@@ -355,7 +355,7 @@ test('getBestCoupon encodes options and returns null without a coupon', async ()
   assert.equal(calls[0].headers['X-App-Type'], 'AGLO');
   assert.equal(calls[0].headers.Authorization, 'JWT SECRET');
   assert.deepEqual(result, {
-    couponSno: 51346850, name: '[4910] 첫구매 20% 쿠폰', discount: 17080, percent: 20, price: null, max: 30000, min: 10000,
+    couponSno: 51346850, optionSno: 430713077, isApplied: false, name: '[4910] 첫구매 20% 쿠폰', discount: 17080, percent: 20, price: null, max: 30000, min: 10000,
   });
   assert.equal(await client.getBestCoupon(430713077, { memberToken: 'SECRET' }), null);
 });
@@ -364,7 +364,7 @@ test('getBestCoupon defaults an uncapped coupon to max Infinity and a missing mi
   const { fn } = fakeFetch({ lists: [json(200, { best_coupon: { sno: '7', name: 'n', discount_price: 2000, coupon_discount: 2000 } })] });
   const client = createClient({ fetchFn: fn, delayMs: 0, retryBaseMs: 0 });
   assert.deepEqual(await client.getBestCoupon(1, { memberToken: 't' }), {
-    couponSno: 7, name: 'n', discount: 2000, percent: null, price: 2000, max: Infinity, min: null,
+    couponSno: 7, optionSno: 1, isApplied: null, name: 'n', discount: 2000, percent: null, price: 2000, max: Infinity, min: null,
   });
 });
 
@@ -426,4 +426,42 @@ test('coupon scope calls throw on a malformed body and reject a 401 with MEMBER_
     });
     assert.equal(calls.length, 1);
   }
+});
+
+test('detail uses AGLO identity and preserves its price basis', async () => {
+  const { fn, calls } = fakeFetch({ lists: [json(200, { goods: { price: 75900, first_page_rendering: { price: 75900 }, linked_option: { sno: 430713077 } } })] });
+  const d = await createClient({ fetchFn: fn, delayMs: 0 }).getGoodsDetail(57821918);
+  assert.equal(calls[1].headers['X-App-Type'], 'AGLO');
+  assert.equal(calls[1].headers['X-App-Version'], '0.1.0');
+  assert.equal(calls[1].headers['X-Device-Type'], 'PCWeb');
+  assert.equal(d.priceBasis, 'AGLO');
+  assert.equal(d.listPrice, 75900);
+  assert.equal(d.optionSno, 430713077);
+});
+
+test('best coupon preserves true false and missing application state', async () => {
+  for (const [raw, want] of [[true, true], [false, false], [undefined, null]]) {
+    const { fn } = fakeFetch({ lists: [json(200, { is_applied: raw, best_coupon: { sno: 1, coupon_discount: 3790 } })] });
+    const b = await createClient({ fetchFn: fn, delayMs: 0 }).getBestCoupon(430713077, { memberToken: 'test' });
+    assert.equal(b.isApplied, want);
+    assert.equal(b.optionSno, 430713077);
+  }
+});
+
+test('wallet preserves all conditions and target restrictions', async () => {
+  const conditions = ['상품 3개 이상 구매시 사용 가능', '1원 이상 구매 시 최대 100,000원 할인'];
+  const { fn } = fakeFetch({ lists: [json(200, { coupon_apply_list: [{ coupon_sno: 1, conditions, has_targets: true, is_app_only: true }] })] });
+  const [c] = await createClient({ fetchFn: fn, delayMs: 0 }).getMyCoupons({ memberToken: 'test' });
+  assert.deepEqual(c.conditions, conditions);
+  assert.equal(c.hasTargets, true);
+  assert.equal(c.appOnly, true);
+});
+
+test('malformed successful best coupon responses cannot verify no-coupon prices',async()=>{
+  for(const body of [{},null,{best_coupon:null},{best_coupon:null,is_applied:true}]) {
+    const {fn}=fakeFetch({lists:[json(200,body)]});
+    await assert.rejects(createClient({fetchFn:fn,delayMs:0}).getBestCoupon(1,{memberToken:'test'}));
+  }
+  const {fn}=fakeFetch({lists:[json(200,{best_coupon:null,is_applied:false})]});
+  assert.equal(await createClient({fetchFn:fn,delayMs:0}).getBestCoupon(1,{memberToken:'test'}),null);
 });

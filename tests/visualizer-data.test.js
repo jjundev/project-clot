@@ -183,6 +183,7 @@ describe('Visualizer Data Extraction', () => {
       store.syncLiked([likedRow(71863924)], '2026-10-11');
       store.logLikedPrice({ sno: 71863924, date: '2026-10-11', list_price: 21600, original_price: 51300, coupon_price: 18360, member_price: 19440, is_soldout: 0 });
       store.logLikedPrice({ sno: 71863924, date: '2026-10-12', list_price: 21600, original_price: 51300, coupon_price: 18360, member_price: null, is_soldout: 0 });
+      store.putPriceValidation({kind:'liked',sno:71863924,date:'2026-10-11',status:'verified',reason:'fixture'});
 
       const payload = buildClotDataPayload(setupTestDb(), { db4910: store.db });
       const item = payload.items.find((it) => it.src === '4910');
@@ -197,10 +198,24 @@ describe('Visualizer Data Extraction', () => {
       assert.equal(item.s, 'ACTIVE');
       assert.equal(item.fs, '2026-10-11');
       assert.equal(typeof item.c, 'string');
-      assert.deepEqual(item.L[0], ['2026-10-11', 51300, 21600, 19440, 0, '내 회원가', 2160, 18360]);
-      assert.deepEqual(item.L[1], ['2026-10-12', 51300, 21600, 18360, 0, '쿠폰적용가(신규회원 기준)', 3240, 18360]);
+      assert.deepEqual(item.L[0], ['2026-10-11', 51300, 21600, 19440, 0, '4910 검증가', 2160, null]);
+      assert.deepEqual(item.L[1], ['2026-10-12', null, null, null, 0, '가격 재검증 필요', 0, null]);
       assert.deepEqual(payload.dates, ['2026-08-01', '2026-08-02', '2026-10-11', '2026-10-12']);
       store.close();
+    });
+
+    test('legacy ABLY bases are masked while independently verified AGLO bases remain visible', () => {
+      const store=new Store4910(':memory:');
+      store.syncLiked([likedRow(1)],'2026-10-15');
+      store.logLikedPrice({sno:1,date:'2026-10-15',list_price:85200,original_price:99000,member_price:81410,coupon_price:72420});
+      const item=()=>buildClotDataPayload(setupTestDb(),{db4910:store.db}).items.find(it=>it.src==='4910');
+      assert.deepEqual(item().L[0].slice(1,4),[null,null,null]);
+      store.putPriceValidation({kind:'liked',sno:1,date:'2026-10-15',status:'unverified',reason:'coupon-not-applied',
+        evidence:{observedDate:'2026-10-15',priceBasis:'AGLO',basePrice:75900,originalPrice:90000}});
+      assert.deepEqual(item().L[0].slice(1,4),[90000,75900,null]);
+      store.putPriceValidation({kind:'liked',sno:1,date:'2026-10-15',status:'corrected',reason:'evidence',corrected:{member_price:72110},
+        evidence:{observedDate:'2026-10-15',priceBasis:'AGLO',basePrice:75900}});
+      assert.deepEqual(item().L[0].slice(1,4),[null,75900,72110]);store.close();
     });
 
     test('brand falls back to market_name then 4910', () => {
@@ -347,13 +362,14 @@ describe('Visualizer Data Extraction', () => {
       const store = fixture();
       // An ok run logged the coupon price, then an expired rerun the same day overwrote scan_runs with coupons_ok 0.
       store.logCouponPriceChanges('2026-10-11', [{ sno: 1, sale_price: 45000, coupon_price: 40000 }]);
+      store.putPriceValidation({kind:'scan',sno:1,date:'2026-10-11',status:'verified',reason:'fixture'});
       assert.equal(store.db.prepare("SELECT coupons_ok FROM scan_runs WHERE date = '2026-10-11'").get().coupons_ok, 0);
       const p = buildScan4910Payload(store.db);
       assert.deepEqual(p.r[0][7].at(-1), ['2026-10-11', 90000, 45000, 40000]);
       store.close();
     });
 
-    test("any listing's coupon row marks its date as priced for every listing", () => {
+    test("another listing's coupon row cannot refresh stale unverified prices", () => {
       const store = new Store4910(':memory:');
       const both = (d) => store.applyScan(d, [scanRow(1, 50000), scanRow(2, 30000)], { completeBrands: [2421] });
       both('2026-10-10');
@@ -366,7 +382,7 @@ describe('Visualizer Data Extraction', () => {
       both('2026-10-17');
       store.recordScanRun(run('2026-10-17', true));
       const p = buildScan4910Payload(store.db);
-      assert.deepEqual(p.r.map((r) => [r[0], r[7].at(-1)]), [[1, ['2026-10-17', 100000, 50000, 40000]], [2, ['2026-10-17', 60000, 30000, 26000]]]);
+      assert.deepEqual(p.r.map((r) => [r[0], r[7].at(-1)]), [[1, ['2026-10-17', 100000, 50000, null]], [2, ['2026-10-17', 60000, 30000, null]]]);
       store.close();
     });
 

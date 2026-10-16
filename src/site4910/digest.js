@@ -36,6 +36,7 @@ function couponLines(coupons) {
     const { scope, naver, mismatch } = coupons.hidden ?? { scope: 0, naver: 0, mismatch: coupons.mismatched };
     out.push(`⚠️ 쿠폰가 숨김 셀러 ${fmt(coupons.mismatched)}곳 (범위 한정 ${fmt(scope)} · 네이버 ${fmt(naver)} · 불일치 ${fmt(mismatch)})`);
   }
+  if (coupons.validation?.unverified) out.push(`⚠️ 가격 재검증 필요 ${fmt(coupons.validation.unverified)}개`);
   return out;
 }
 
@@ -79,6 +80,7 @@ export function format4910Digest(result, { limit = 10, liked = null } = {}) {
     head.push('⚠️ 4910 찜 가격 기록 실패 — Actions 로그 확인');
   } else if (liked?.memberStatus === 'ok') {
     head.push(`찜 ${fmt(liked.liked)}개 · 가격 기록 ${fmt(liked.logged)}개`);
+    if (liked.validation?.unverified) head.push(`⚠️ 찜 가격 재검증 필요 ${fmt(liked.validation.unverified)}개`);
     likedDrops = likedDropLines(liked.drops.slice(0, limit));
   }
 

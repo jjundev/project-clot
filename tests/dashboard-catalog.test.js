@@ -37,3 +37,11 @@ test('a short or wrong-brand extraction is partial, never a plausible complete s
  assert.equal(result.catalog.scanCount,0);
  }
 });
+
+test('catalog never promotes an unverified scan base to a confirmed price',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'clot-cat-proof-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const result=buildDashboardCatalog({baseItems:[],scanIndex:{brands:[[9,'나이키',1]]},readBrand:()=>compact(1),dir4910:path.join(dir,'4910'),revision:'r'});
+ const w={};vm.runInNewContext(fs.readFileSync(path.join(dir,result.catalog.parts[0].path),'utf8'),{window:w});
+ const item=w.__CLOT_CATALOG_PARTS__[result.catalog.parts[0].id].items[0];
+ assert.equal(item.my,null);assert.equal(item.isLow,false);assert.equal(item.couponName,'가격 재검증 필요');
+});
