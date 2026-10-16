@@ -791,3 +791,14 @@ test('incomplete coupon coverage defers prices, preserving cached prices and unk
   assert.equal(r.coupons.refreshDeferred,true);
   assert.deepEqual(r.coupons.drops,[]);
 });
+
+test('daily explicit API exceptions allow estimates but never confirmed estimate-drop alerts',async()=>{
+ makeReady();addUsable(DAY0,[950,10]);
+ const catalog={'001':Array.from({length:250},(_,i)=>item(i+1,10000))};
+ store.applyScan(DAY0,[{goods_no:1,cat:'001',name:'old',url:'https://www.musinsa.com/products/1',sale_price:10000}],{cat:'001',complete:false});
+ store.putGoodsCoupons(1,DAY0,[parseCoupon(rawCoupon(950,10))],{sale_price:10000,extra_discount:0});
+ const r=await run({categories:['001'],makeClient:fakeMakeClient(catalog,{lists:{950:[]},members:{1:[rawCoupon(950,10)]}}),sessionProvider:session()});
+ assert.equal(r.registry.walk.failed,0);assert.deepEqual(r.registry.walk.exceptions,[950]);assert.equal(r.registry.walk.complete,false);
+ assert.equal(r.coupons.refreshDeferred,false);assert.equal(r.coupons.priced,250);assert.ok(r.coupons.estimated>0);
+ assert.equal(r.coupons.direct+r.coupons.estimated,250);assert.deepEqual(r.coupons.drops,[]);
+});
