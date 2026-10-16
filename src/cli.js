@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { DAILY_GOODS_TARGET } from './musinsaWide/partitions.js';
+import { resumeMusinsaPricing } from './musinsaWide/recover.js';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -658,6 +659,7 @@ export async function runMusinsaWideStep({
   makeProvider = () => makeSessionProvider({ allowBridge: false }),
   trackFn = trackMusinsa,
   backfillFn = backfillMusinsaCoupons,
+  resumeFn = resumeMusinsaPricing,
   notify = sendTelegramMessage,
   log = console.log,
 } = {}) {
@@ -669,6 +671,10 @@ export async function runMusinsaWideStep({
   const concurrency = Math.min(parseConcurrency(flags.concurrency, 3), 4);
   const dryRun = Boolean(flags['dry-run']);
   const backfill = Boolean(flags.backfill);
+  const resume = Boolean(flags['resume-pricing']);
+  if (resume && (partial || dryRun || backfill || flags.init || flags.from!==undefined)) {
+    return { ran:false,ok:false,error:'--resume-pricing requires an existing full daily snapshot, without other scope/mode flags' };
+  }
 
   // The one-time registry fill writes the DB and needs the member session: not a dry run, not a fresh DB.
   let from = null;
@@ -698,6 +704,11 @@ export async function runMusinsaWideStep({
   let store = null;
   try {
     if (!dryRun) store = openStore();
+    if (resume) {
+      const result = await resumeFn({ makeClient,store,date:today,log });
+      await notify(formatMusinsaWideDigest(result,{lookup:no=>store.getGoods(no)}));
+      return { ran:true,ok:true,result };
+    }
     const sessionProvider = dryRun ? null : makeProvider();
     if (backfill) {
       // Not done (deadline, throttle, expired session) is not a failure: the saved cursor still has to be pushed, and the
@@ -1358,7 +1369,7 @@ Commands:
                          Scan the top 4910.kr brands into data/4910.db (--dry-run writes nothing)
   4910-db pull|push [--allow-fresh]
                          Download / upload data/4910.db as the data-4910 GitHub Release asset (gh CLI)
-  track-musinsa [--category <codes>] [--depth <pages>] [--concurrency=1-4] [--dry-run] [--init] [--backfill [--from <n>]]
+  track-musinsa [--category <codes>] [--depth <pages>] [--concurrency=1-4] [--dry-run] [--init] [--backfill [--from <n>]] [--resume-pricing]
                          Scan the Musinsa top-level categories into data/musinsa-wide.db (--dry-run writes nothing);
                          --backfill fills the coupon registry once (resumable, needs the DB and a member session)
   musinsa-db pull|push [--allow-fresh]

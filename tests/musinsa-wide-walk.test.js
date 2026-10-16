@@ -132,9 +132,10 @@ test('an empty list for a coupon that a stored member check holds counts as susp
   const f = fakeClient(() => ({ items: [], totalCount: 0, hasNext: false }));
   const r = await walkCouponLists({ withClient: f.withClient, store, date: DATE, couponNos: [10, 11] });
   assert.equal(r.suspectEmpty, 1);
-  assert.equal(r.failed, 1);
+  assert.equal(r.failed, 0);
   assert.equal(r.walked, 1, 'an empty list nothing contradicts is a real empty list');
-  assert.deepEqual(r.failedCoupons, [10]);
+  assert.deepEqual(r.failedCoupons, []);
+  assert.deepEqual(r.exceptions, [10]);
   const rows = (no) => store.db.prepare('SELECT goods_no FROM coupon_goods WHERE coupon_no = ?').all(no).map((x) => x.goods_no);
   assert.deepEqual(rows(10).sort(), [1, 2]);
   assert.deepEqual(rows(11), []);
@@ -247,4 +248,13 @@ test('a terminal page at the safety boundary is complete', async () => {
   const r = await walkCoupon(f.client, 7, {});
   assert.equal(r.pages, 10000);
   assert.equal(r.goodsNos.length, 10000);
+});
+
+test('a terminal empty member conflict is an explicit exception, not a transport failure', async()=>{
+  addGoods([1]);store.putGoodsCoupons(1,'2026-10-14',[{id:'10'}],{sale_price:50000,extra_discount:0});
+  store.replaceCouponGoods(10,'2026-10-14',[1]);
+  const f=fakeClient(()=>({items:[],totalCount:0,hasNext:false}));
+  const r=await walkCouponLists({withClient:f.withClient,store,date:DATE,couponNos:[10]});
+  assert.equal(r.failed,0);assert.deepEqual(r.exceptions,[10]);assert.equal(r.complete,false);assert.equal(r.remaining,1);
+  assert.deepEqual(r.failedCoupons,[]);assert.deepEqual(store.couponsByGoods().get(1),[10]);
 });

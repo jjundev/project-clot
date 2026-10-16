@@ -114,6 +114,8 @@ export class MusinsaWideStore {
       CREATE INDEX IF NOT EXISTS idx_coupons_state ON coupons (state);
     `);
     this.#addMissingColumns('goods', [['review_count', 'INTEGER']]);
+    this.#addMissingColumns('goods', [['coupon_price_source', 'TEXT']]);
+    this.#addMissingColumns('coupon_price_changes', [['source', 'TEXT']]);
     this.#addMissingColumns('scan_runs', [['coupon_metrics_json', 'TEXT']]);
     this.#addMissingColumns('coupon_goods', [['date', 'TEXT']]);
   }
@@ -222,7 +224,7 @@ export class MusinsaWideStore {
           .run(date, cat, JSON.stringify(rows.map((r) => r.goods_no)), date);
         diff.outOfScope = Number(
           this.db
-            .prepare(`UPDATE goods SET status = '${STATUS_OUT_OF_SCOPE}', coupon_price = NULL WHERE status = 'ACTIVE' AND cat = ? AND misses >= ?`)
+            .prepare(`UPDATE goods SET status = '${STATUS_OUT_OF_SCOPE}', coupon_price = NULL, coupon_price_source = NULL WHERE status = 'ACTIVE' AND cat = ? AND misses >= ?`)
             .run(cat, OUT_AFTER_MISSES).changes
         );
       }
@@ -248,17 +250,17 @@ export class MusinsaWideStore {
   // Only the columns the coupon price needs. coupons is null for a goods never checked.
   getActivePriceRows() {
     return this.db
-      .prepare(`SELECT goods_no, sale_price, extra_discount, coupon_checked_date, coupons_json FROM goods WHERE status = 'ACTIVE' ORDER BY goods_no`)
+      .prepare(`SELECT goods_no, sale_price, extra_discount, coupon_checked_date, coupon_checked_sale_price, coupon_checked_extra, coupons_json FROM goods WHERE status = 'ACTIVE' ORDER BY goods_no`)
       .all()
       .map(({ coupons_json, ...r }) => ({ ...r, coupons: coupons_json == null ? null : JSON.parse(coupons_json) }));
   }
 
   // One transaction: ~30k writes would otherwise each be their own commit.
-  setCouponPrices(prices) {
+  setCouponPrices(prices, sources = new Map()) {
     this.db.exec('BEGIN');
     try {
-      const set = this.db.prepare('UPDATE goods SET coupon_price = ? WHERE goods_no = ?');
-      for (const [goodsNo, price] of prices) set.run(price ?? null, Number(goodsNo));
+      const set = this.db.prepare('UPDATE goods SET coupon_price = ?, coupon_price_source = ? WHERE goods_no = ?');
+      for (const [goodsNo, price] of prices) set.run(Number.isFinite(price) && price >= 0 ? price : null, Number.isFinite(price) && price >= 0 ? sources.get(goodsNo) ?? null : null, Number(goodsNo));
       this.db.exec('COMMIT');
     } catch (e) {
       this.db.exec('ROLLBACK');
@@ -267,29 +269,30 @@ export class MusinsaWideStore {
   }
 
   /**
-   * Logs each goods' (sale_price, coupon_price) pair on date only when it differs from the last row before date;
+   * Logs each goods' (sale_price, coupon_price, source) tuple on date only when it differs from the last row before date;
    * a same-day rerun replaces date's row, or removes it when the pair is back to the earlier one. Rows without a sale
-   * price are skipped. A drop is coupon-to-coupon only (both prices non-null) and at least DROP_ALERT_RATE.
+   * price are skipped. A drop requires both sources DIRECT (both prices non-null) and at least DROP_ALERT_RATE.
    */
   logCouponPriceChanges(date, rows) {
     this.db.exec('BEGIN');
     try {
-      const prev = this.db.prepare('SELECT sale_price, coupon_price FROM coupon_price_changes WHERE goods_no = ? AND date < ? ORDER BY date DESC LIMIT 1');
+      const prev = this.db.prepare('SELECT sale_price, coupon_price, source FROM coupon_price_changes WHERE goods_no = ? AND date < ? ORDER BY date DESC LIMIT 1');
       const del = this.db.prepare('DELETE FROM coupon_price_changes WHERE goods_no = ? AND date = ?');
-      const put = this.db.prepare('INSERT OR REPLACE INTO coupon_price_changes (goods_no, date, sale_price, coupon_price) VALUES (?, ?, ?, ?)');
+      const put = this.db.prepare('INSERT OR REPLACE INTO coupon_price_changes (goods_no, date, sale_price, coupon_price, source) VALUES (?, ?, ?, ?, ?)');
       let written = 0;
       const drops = [];
-      for (const { goods_no, sale_price, coupon_price } of rows) {
+      for (const { goods_no, sale_price, coupon_price, source } of rows) {
         if (sale_price == null) continue;
-        const cp = coupon_price ?? null;
+        const cp = Number.isFinite(coupon_price) && coupon_price >= 0 ? coupon_price : null;
+        const src = cp == null ? null : source ?? null;
         const p = prev.get(Number(goods_no), date);
-        if (p && p.sale_price === sale_price && p.coupon_price === cp) {
+        if (p && p.sale_price === sale_price && p.coupon_price === cp && p.source === src) {
           del.run(Number(goods_no), date);
           continue;
         }
-        put.run(Number(goods_no), date, sale_price, cp);
+        put.run(Number(goods_no), date, sale_price, cp, src);
         written++;
-        if (p && p.coupon_price != null && cp != null && p.coupon_price > 0) {
+        if (p && p.source === 'DIRECT' && src === 'DIRECT' && p.coupon_price != null && cp != null && p.coupon_price > 0) {
           const rate = (p.coupon_price - cp) / p.coupon_price;
           if (rate >= DROP_ALERT_RATE) {
             drops.push({ goods_no: Number(goods_no), prevPrice: p.coupon_price, currentPrice: cp, dropRate: Math.round(rate * 100) });

@@ -211,7 +211,7 @@ test('not ready: no coupon API calls at all, prices null, ready false in the res
   assert.equal(sessionReads, 0);
   assert.equal(res.registry, null);
   assert.deepEqual(res.coupons, {
-    memberStatus: 'skipped', refreshDeferred: false, checked: 0, failed: 0, priced: 0, withCoupon: 0, stale: 3, drops: [], lateDrops: 0, dropsSuppressed: false, ready: false,
+    memberStatus: 'skipped', refreshDeferred: false, direct:0,estimated:0,pricingPolicy:null,exceptionCoupons:[], checked: 0, failed: 0, priced: 0, withCoupon: 0, stale: 3, drops: [], lateDrops: 0, dropsSuppressed: false, ready: false,
   });
   assert.deepEqual([1, 2, 3].map((n) => store.getGoods(n).coupon_price), [null, null, null]);
   assert.ok(lines.includes('⚠️ [무신사] 쿠폰 등록부 미완성 — backfill 필요'));
@@ -239,12 +239,13 @@ test('ready: phases run in order and the registry metrics land in scan_runs.coup
     recheck: { probed: 0, newPositive: 0, stop: null },
     classify: { calls: 1, usable: 1, other: 0, outOfScope: 0, pending: 0 },
     neighbors: { probed: 100, hits: 0, stop: null },
-    walk: { walked: 2, failed: 0, suspectEmpty: 0, calls: 2, requested: 2, remaining: 0, complete: true, stop: null },
+    walk: { walked: 2, failed: 0, suspectEmpty: 0, calls: 2, requested: 2, remaining: 0, complete: true, exceptions: [], failedCoupons: [], stop: null },
     sample: { checked: 2, exact: 2, under: 0, over: 0, reasons: NO_REASONS },
     counts: { usable: 2, pending: 0, expiredYesterday: 0, added: 1, retired: 0 },
+    pricing: {policy:'confirmed-benefits-estimate-v1',priced:3,direct:3,estimated:0,active:3,unpriced:0,exceptionCoupons:[]},
   });
   assert.deepEqual(res.coupons, {
-    memberStatus: 'ok', refreshDeferred: false, checked: 3, failed: 0, priced: 3, withCoupon: 2, stale: 0, drops: [], lateDrops: 0, dropsSuppressed: true, ready: true,
+    memberStatus: 'ok', refreshDeferred: false, direct:3,estimated:0,pricingPolicy:'confirmed-benefits-estimate-v1',exceptionCoupons:[], checked: 3, failed: 0, priced: 3, withCoupon: 2, stale: 0, drops: [], lateDrops: 0, dropsSuppressed: true, ready: true,
   });
   // The coupon found by the enumeration was classified USABLE, walked and now prices its goods.
   assert.equal(store.getCoupon(1001).state, 'USABLE');
@@ -283,12 +284,12 @@ test('a coupon first found by the sample is walked the same day', async () => {
   };
   const res = await run({ makeClient: fakeMakeClient(catalog3(), api), sessionProvider: session() });
 
-  assert.deepEqual(res.registry.walk, { walked: 3, failed: 0, suspectEmpty: 0, calls: 3, stop: null, requested: 3, remaining: 0, complete: true });
+  assert.deepEqual(res.registry.walk, { walked: 3, failed: 0, suspectEmpty: 0, calls: 3, stop: null, requested: 3, remaining: 0, complete: true, exceptions: [], failedCoupons: [] });
   assert.deepEqual(res.registry.neighbors, { probed: 100, hits: 0, stop: null });
   assert.equal(res.registry.counts.added, 2);
   assert.deepEqual(listOf(5000).map((r) => r.goods_no), [2, 3]);
   assert.deepEqual(listOf(500).map((r) => r.goods_no), [3]);
-  assert.deepEqual([1, 2, 3].map((n) => store.getGoods(n).coupon_price), [9000, 16000, 24000]);
+  assert.deepEqual([1, 2, 3].map((n) => store.getGoods(n).coupon_price), [9000, 16000, 28500]);
   // The sample-found coupons were walked after the sample: no member call comes after their pages.
   const calls = api.calls;
   const firstLate = calls.findIndex((c) => c.kind === 'page' && (c.no === 5000 || c.no === 500));
@@ -312,7 +313,7 @@ test('anonymous 429 during the walk: unwalked coupons keep yesterday\'s lists, p
   assert.ok(res.registry.walk.failed >= 1);
   assert.deepEqual(listOf(950), [{ goods_no: 1, date: DAY1 }]);
   assert.deepEqual(listOf(960), [{ goods_no: 2, date: DAY1 }]);
-  assert.deepEqual([1, 2, 3].map((n) => store.getGoods(n).coupon_price), [9000, 16000, 30000]);
+  assert.deepEqual([1, 2, 3].map((n) => store.getGoods(n).coupon_price), [10000, 20000, 30000]);
   assert.equal(res.coupons.priced, 0);
   assert.equal(res.coupons.refreshDeferred, true);
   const row = scanRun(DAY2);
@@ -368,7 +369,7 @@ test('the first ready run suppresses coupon drops once and records registry_firs
 
   // The first day priced from the registry: 10,000 → 8,000 is the switch, not news.
   addUsable(DAY0, [950, 20]);
-  const api = { lists: { 950: [1] } };
+  const api = { lists: { 950: [1] }, members:{1:[rawCoupon(950,20)]} };
   const day1 = await run({ makeClient: fakeMakeClient(catalog3(), api), sessionProvider: session() });
   assert.equal(store.getGoods(1).coupon_price, 8000);
   assert.deepEqual(day1.coupons.drops, []);
