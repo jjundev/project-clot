@@ -76,7 +76,12 @@ export async function fetchLikeCountsBatch(goodsNos, fetchFn = fetch) {
   }
 }
 
-export async function fetchCategoryGoodsPage(categoryCode, pageUrl = null, fetchFn = fetch) {
+export async function fetchCategoryGoodsPage(categoryCode, pageUrl = null, fetchFn = fetch, { strictPagination = false } = {}) {
+  const validate = (data) => {
+    if (strictPagination && (!Array.isArray(data?.list) || typeof data?.pagination?.hasNext !== 'boolean')) {
+      throw new Error('Malformed category page pagination');
+    }
+  };
   let targetUrl = pageUrl || `https://www.musinsa.com/categories/item/${categoryCode}?gf=A&sortCode=POPULAR`;
   if (targetUrl.startsWith('/')) {
     targetUrl = `https://api.musinsa.com${targetUrl}`;
@@ -96,6 +101,7 @@ export async function fetchCategoryGoodsPage(categoryCode, pageUrl = null, fetch
   // If pageUrl was the PLP v2 JSON API
   if (targetUrl.includes('/api2/dp/v2/plp/goods')) {
     const json = await response.json();
+    validate(json?.data);
     return {
       items: json?.data?.list || [],
       pagination: json?.data?.pagination || { hasNext: false },
@@ -119,6 +125,7 @@ export async function fetchCategoryGoodsPage(categoryCode, pageUrl = null, fetch
   );
 
   const pageData = itemsQ?.state?.data?.pages?.[0]?.data;
+  validate(pageData);
   return {
     items: pageData?.list || [],
     pagination: pageData?.pagination || { hasNext: false },

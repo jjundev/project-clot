@@ -350,3 +350,39 @@ test('toListingRow keeps reviewCount as review_count', () => {
   assert.equal(toListingRow(item(1, { reviewCount: 1234 }), '001').review_count, 1234);
   assert.equal(toListingRow(item(2, { reviewCount: undefined }), '001').review_count, null);
 });
+
+const taxonomyPage = (roots) => ({ ok: true, status: 200, text: async () => `<script id="__NEXT_DATA__">${JSON.stringify({ props: { pageProps: { dehydratedState: { queries: [{ queryKey: ['category/Category'], state: { data: { data: { list: roots } } } }] } } } })}</script>` });
+test('getCategoryPartitions reads immediate children of matching taxonomy root', async () => {
+  const client = createMusinsaClient({ fetchFn: async () => taxonomyPage([{ categoryCode: '001', categoryList: [
+    { categoryCode: '001001', parentCategoryCode: '001', categoryList: [{ categoryCode: '001001001' }] },
+    { categoryCode: '001002', parentCategoryCode: '001' },
+  ] }]), sleep: noSleep });
+  assert.deepEqual(await client.getCategoryPartitions('001'), [{ code: '001001', root: '001' }, { code: '001002', root: '001' }]);
+});
+test('getCategoryPartitions rejects missing, empty, mismatched and malformed taxonomy', async () => {
+  for (const roots of [[], [{ categoryCode: '002', categoryList: [] }], [{ categoryCode: '001', categoryList: [] }], [{ categoryCode: '001', categoryList: [{ categoryCode: '002001', parentCategoryCode: '002' }] }]]) {
+    await assert.rejects(createMusinsaClient({ fetchFn: async () => taxonomyPage(roots) }).getCategoryPartitions('001'), /taxonomy/i);
+  }
+  await assert.rejects(createMusinsaClient({ fetchFn: async () => htmlPage([], {}) }).getCategoryPartitions('001'), /taxonomy/i);
+});
+test('category page preserves throttling status and rejects missing JSON list or cursor', async () => {
+  await assert.rejects(createMusinsaClient({ fetchFn: async () => failRes(429), sleep: noSleep }).getCategoryPage('001'), err => err.status === 429);
+  await assert.rejects(createMusinsaClient({ fetchFn: async () => ({ ok: true, json: async () => ({ data: { pagination: { hasNext: false } } }) }), sleep: noSleep }).getCategoryPage('001', NEXT(2)), /malformed/);
+  await assert.rejects(createMusinsaClient({ fetchFn: async () => jsonPage([item(1)], { hasNext: true }), sleep: noSleep }).getCategoryPage('001', NEXT(2)), /cursor/);
+});
+
+test('missing or nonboolean pagination cannot turn category HTML into a completed chain', async () => {
+  for (const pagination of [undefined, {}, { hasNext: 'false' }]) {
+    const client = createMusinsaClient({ fetchFn: async () => htmlPage([item(1)], pagination), sleep: noSleep });
+    await assert.rejects(client.getCategoryPage('001'), /pagination|malformed/i);
+  }
+});
+
+test('coupon pagination and IDs must be valid before a list can replace stored mappings', async () => {
+  for (const pagination of [undefined, {}, { hasNext: 'false' }]) {
+    const client = createMusinsaClient({ fetchFn: async () => ({ok:true,json:async()=>({meta:{result:'SUCCESS'},data:{list:[{goodsNo:1}],pagination}})}), sleep: noSleep });
+    await assert.rejects(client.getCouponGoodsPage(7), /Unexpected coupon goods list/);
+  }
+  const client = createMusinsaClient({ fetchFn: async () => ({ok:true,json:async()=>({meta:{result:'SUCCESS'},data:{list:[{goodsNo:'oops'}],pagination:{hasNext:false}}})}), sleep: noSleep });
+  await assert.rejects(client.getCouponGoodsPage(7), /Unexpected coupon goods list/);
+});

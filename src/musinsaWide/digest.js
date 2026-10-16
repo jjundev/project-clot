@@ -32,9 +32,10 @@ function couponWarning(memberStatus, checked) {
   }
 }
 
-// An anonymous-API phase that stopped on a 429 or an error; any other stop (deadline, null) adds no warning.
+// Report anonymous phase stops including exhausted time budgets.
 function phaseWarning(name, stop) {
   if (stop === 'throttled') return `⚠️ 무신사 비로그인 쿠폰 API 제한(429) — ${name} 중단`;
+  if (stop === 'deadline') return `⚠️ 무신사 시간 예산 소진 — ${name} 중단`;
   if (stop === 'error') return `⚠️ 무신사 ${name} 실패 — Actions 로그 확인`;
   return null;
 }
@@ -50,7 +51,7 @@ function registryLines(reg) {
     `🔢 번호 순회 ${fmt(en.probed)}개 · 최대 ${en.highest == null ? '-' : fmt(en.highest)} · 새 쿠폰 ${fmt(en.newCoupons)} · 0→양수 ${fmt(recheck.newPositive)}`,
     classifyLine(classify),
     `📒 쓸 수 있는 쿠폰 ${fmt(counts.usable)}종 (새로 ${fmt(counts.added)} · 만료 ${fmt(counts.expiredYesterday)} · 퇴출 ${fmt(counts.retired)})`,
-    `🚶 목록 순회 ${fmt(walk.walked)}종 · 호출 ${fmt(walk.calls)} · 실패 ${fmt(walk.failed)}`,
+    `🚶 목록 순회 ${fmt(walk.walked)}종 · 호출 ${fmt(walk.calls)} · 실패 ${fmt(walk.failed)}${walk.complete === false ? ` · 미완료 ${fmt(walk.remaining ?? walk.failed)}` : ''}`,
     `🎯 표본 ${fmt(sample.checked)}개 · 정확 ${fmt(sample.exact)} (${pct}) · 낮게 ${fmt(sample.under)} · 높게 ${fmt(sample.over)}`,
     phaseWarning('번호 순회', en.stop ?? recheck.stop),
     phaseWarning('목록 순회', walk.stop),
@@ -94,6 +95,7 @@ export function formatMusinsaWideDigest(result, { limit = 10, lookup = () => und
     const warning = couponWarning(coupons.memberStatus, coupons.checked);
     if (warning) head.push(warning);
     if (!coupons.ready) head.push('⚠️ 쿠폰 등록부 미완성 — backfill 필요');
+    if (coupons.refreshDeferred) head.push('⚠️ 목록 불완전 — 쿠폰가 갱신 보류, 기존 값 유지');
   }
   if (registry) head.push(...registryLines(registry));
   // A suppressed first day shows no drops at all: the sale-price list would stand in for coupon prices that moved at once.

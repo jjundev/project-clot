@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { MusinsaWideStore } from '../src/musinsaWide/store.js';
 import { ALL_CATEGORIES_PARAM } from '../src/musinsaWide/client.js';
-import { SMALL_COUPON_MAX, MAX_PAGES_PER_CAT, WALK_EXTRA_PAGES, walkCoupon, walkCouponLists } from '../src/musinsaWide/walk.js';
+import { walkCoupon, walkCouponLists } from '../src/musinsaWide/walk.js';
 
 const DATE = '2026-10-15';
 const goodsRow = (goods_no, cat = '001') => ({
@@ -43,59 +43,48 @@ function fakeClient(pageFn) {
 
 const item = (goodsNo, reviewCount = 1) => ({ goodsNo, reviewCount, isSoldOut: false });
 
-test('constants match the spec', () => {
-  assert.equal(SMALL_COUPON_MAX, 3000);
-  assert.equal(MAX_PAGES_PER_CAT, 60);
-  assert.equal(WALK_EXTRA_PAGES, 1);
-});
-
-test('a coupon with ≤3000 goods in the five categories is read whole with the combined filter', async () => {
-  const f = fakeClient((_, { page }) => ({ items: [item(page * 10), item(page * 10 + 1)], totalCount: 2500, hasNext: page < 3 }));
-  const r = await walkCoupon(f.client, 7, {});
-  assert.equal(r.mode, 'combined');
-  assert.equal(r.pages, 3);
-  assert.deepEqual(r.goodsNos, [10, 11, 20, 21, 30, 31]);
-  assert.equal(f.calls.length, 3);
-  assert.deepEqual(f.calls.map((c) => c.page), [1, 2, 3]);
-  for (const c of f.calls) assert.equal(c.category, ALL_CATEGORIES_PARAM);
-});
-
-test('a large coupon is read per category and stops one page after the review floor', async () => {
-  const reviews = [500, 200, 90, 50, 10];
-  const f = fakeClient((_, { page, category }) => {
-    if (category === ALL_CATEGORIES_PARAM) return { items: [item(1)], totalCount: SMALL_COUPON_MAX + 1, hasNext: true };
-    return { items: [item(Number(category) * 100 + page, reviews[page - 1])], totalCount: 9999, hasNext: true };
-  });
-  const r = await walkCoupon(f.client, 7, { '001': 100, '002': 100, '003': 100, '103': 100, '004': 100 });
-  assert.equal(r.mode, 'per-category');
-  assert.equal(f.calls.filter((c) => c.category === '001').length, 4);
-  assert.deepEqual(f.calls.filter((c) => c.category === '001').map((c) => c.page), [1, 2, 3, 4]);
-  assert.equal(r.pages, 1 + 4 * 5);
-  assert.ok(r.goodsNos.includes(104) && !r.goodsNos.includes(105));
-});
-
-test('a category without a stored review floor is read for one page only', async () => {
-  const f = fakeClient((_, { page, category }) => {
-    if (category === ALL_CATEGORIES_PARAM) return { items: [], totalCount: 5000, hasNext: true };
-    return { items: [item(Number(category) * 100 + page, 5)], totalCount: 9999, hasNext: true };
-  });
+test('combined traversal reads beyond 60 pages and ignores changing totals and review floors', async () => {
+  const f = fakeClient((_, { page }) => ({ items: [item(page, page === 70 ? 9999 : 0)], totalCount: page === 1 ? 1 : 90000, hasNext: page < 75 }));
   const r = await walkCoupon(f.client, 7, { '001': 100 });
-  assert.equal(f.calls.filter((c) => c.category === '002').length, 1);
-  assert.equal(f.calls.filter((c) => c.category === '001').length, 1 + WALK_EXTRA_PAGES);
-  assert.equal(r.pages, 1 + 2 + 4);
+  assert.equal(r.mode, 'combined');
+  assert.equal(r.pages, 75);
+  assert.equal(r.goodsNos.length, 75);
+  assert.ok(r.goodsNos.includes(70));
+  assert.ok(f.calls.every((c) => c.category === ALL_CATEGORIES_PARAM));
 });
 
-test('per-category reading ends at hasNext false and never exceeds 60 pages', async () => {
-  const f = fakeClient((_, { page, category }) => {
-    if (category === ALL_CATEGORIES_PARAM) return { items: [], totalCount: 9000, hasNext: true };
-    if (category === '001') return { items: [item(page)], totalCount: 9999, hasNext: page < 2 }; // ends at page 2
-    return { items: [item(Number(category) * 1000 + page, 1_000_000)], totalCount: 9999, hasNext: true }; // never below the floor
-  });
-  const floors = { '001': 1, '002': 1, '003': 1, '103': 1, '004': 1 };
-  const r = await walkCoupon(f.client, 7, floors);
-  assert.equal(f.calls.filter((c) => c.category === '001').length, 2);
-  for (const cat of ['002', '003', '103', '004']) assert.equal(f.calls.filter((c) => c.category === cat).length, MAX_PAGES_PER_CAT);
-  assert.equal(r.pages, 1 + 2 + 4 * MAX_PAGES_PER_CAT);
+test('large coupons without stored floors read to hasNext false and deduplicate goods', async () => {
+  const f = fakeClient((_, { page }) => ({ items: [item(page), item(999)], totalCount: 100000, hasNext: page < 3 }));
+  const r = await walkCoupon(f.client, 7, {});
+  assert.equal(r.pages, 3);
+  assert.deepEqual(r.goodsNos, [1, 999, 2, 3]);
+});
+
+test('empty continuing pages and repeated complete page sequences fail as incomplete', async () => {
+  const empty = fakeClient(() => ({ items: [], totalCount: 100, hasNext: true }));
+  await assert.rejects(walkCoupon(empty.client, 7, {}), /incomplete/i);
+  const repeated = fakeClient((_, { page }) => ({ items: [item(page % 2), item(99)], totalCount: 100, hasNext: true }));
+  await assert.rejects(walkCoupon(repeated.client, 7, {}), /incomplete/i);
+  assert.equal(repeated.calls.length, 3);
+});
+
+test('a finite generous safety bound fails instead of publishing a partial list', async () => {
+  const f = fakeClient((_, { page }) => ({ items: [item(page)], totalCount: 1, hasNext: true }));
+  await assert.rejects(walkCoupon(f.client, 7, {}), /incomplete/i);
+  assert.equal(f.calls.length, 10000);
+});
+
+test('incomplete pages preserve yesterday mapping and expose remaining work', async () => {
+  addGoods([1, 2]);
+  store.replaceCouponGoods(10, '2026-10-14', [2]);
+  const f = fakeClient(() => ({ items: [], totalCount: 100, hasNext: true }));
+  const r = await walkCouponLists({ withClient: f.withClient, store, date: DATE, couponNos: [10] });
+  assert.equal(r.requested, 1);
+  assert.equal(r.remaining, 1);
+  assert.equal(r.complete, false);
+  assert.equal(r.walked, 0);
+  assert.deepEqual(r.failedCoupons, [10]);
+  assert.deepEqual(store.couponsByGoods().get(2), [10]);
 });
 
 test('a non-429 page error is retried; a 429 is thrown at once', async () => {
@@ -122,6 +111,9 @@ test('a successful walk replaces that coupon\'s goods; a failed one keeps yester
   });
   const r = await walkCouponLists({ withClient: f.withClient, store, date: DATE, couponNos: [10, 11] });
   assert.equal(r.walked, 1);
+  assert.equal(r.requested, 2);
+  assert.equal(r.remaining, 1);
+  assert.equal(r.complete, false);
   assert.equal(r.failed, 1);
   assert.equal(r.suspectEmpty, 0);
   assert.equal(r.stop, null);
@@ -172,6 +164,9 @@ test('a coupon is not started once the deadline has passed', async () => {
   const r = await walkCouponLists({ withClient: f.withClient, store, date: DATE, couponNos: [1, 2, 3], concurrency: 1, deadline: 2, now: () => t });
   assert.equal(r.stop, 'deadline');
   assert.equal(r.walked, 2);
+  assert.equal(r.requested, 3);
+  assert.equal(r.remaining, 1);
+  assert.equal(r.complete, false);
   assert.deepEqual(r.failedCoupons, []);
   assert.deepEqual(f.calls.map((c) => c.couponNo), [1, 2]);
 });
@@ -207,4 +202,49 @@ test('a 429 in another worker stops an in-flight coupon before its next page', a
   assert.equal(r.walked, 0);
   assert.equal(f.calls.length, 2);
   assert.deepEqual(store.couponsByGoods().get(2), [10]);
+});
+
+test('all successful coupons report complete including an empty requested batch', async () => {
+  const f = fakeClient(() => ({ items: [], totalCount: 0, hasNext: false }));
+  for (const couponNos of [[], [10, 11]]) {
+    const r = await walkCouponLists({ withClient: f.withClient, store, date: DATE, couponNos });
+    assert.equal(r.requested, couponNos.length);
+    assert.equal(r.remaining, 0);
+    assert.equal(r.complete, true);
+  }
+});
+
+test('repeated pages and safety exhaustion preserve prior mapping', async () => {
+  addGoods([1, 2]);
+  for (const repeating of [true, false]) {
+    store.replaceCouponGoods(10, '2026-10-14', [2]);
+    const f = fakeClient((_, { page }) => ({ items: [item(repeating ? 1 : page)], totalCount: 1, hasNext: true }));
+    const r = await walkCouponLists({ withClient: f.withClient, store, date: DATE, couponNos: [10] });
+    assert.equal(r.walked, 0);
+    assert.equal(r.remaining, 1);
+    assert.equal(r.complete, false);
+    assert.deepEqual(store.couponsByGoods().get(2), [10]);
+    assert.equal(f.calls.length, repeating ? 2 : 10000);
+  }
+});
+
+test('deadline reached during retry backoff prevents the retry request', async () => {
+  addGoods([1]);
+  store.replaceCouponGoods(10, '2026-10-14', [1]);
+  let t = 0;
+  const f = fakeClient(() => { throw new Error('temporary'); });
+  f.client.sleep = async () => { t = 10; };
+  const r = await walkCouponLists({ withClient: f.withClient, store, date: DATE, couponNos: [10], deadline: 10, now: () => t });
+  assert.equal(r.stop, 'deadline');
+  assert.equal(r.calls, 1);
+  assert.equal(r.remaining, 1);
+  assert.equal(r.complete, false);
+  assert.deepEqual(store.couponsByGoods().get(1), [10]);
+});
+
+test('a terminal page at the safety boundary is complete', async () => {
+  const f = fakeClient((_, { page }) => ({ items: [item(page)], totalCount: 1, hasNext: page < 10000 }));
+  const r = await walkCoupon(f.client, 7, {});
+  assert.equal(r.pages, 10000);
+  assert.equal(r.goodsNos.length, 10000);
 });

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { DAILY_GOODS_TARGET } from './musinsaWide/partitions.js';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -705,7 +706,7 @@ export async function runMusinsaWideStep({
       await notify(formatBackfillDigest(result));
       return { ran: true, ok: true, result };
     }
-    const result = await trackFn({ makeClient, store, date: today, categories, depthPages, partial, concurrency, dryRun, sessionProvider, log });
+    const result = await trackFn({ makeClient, store, date: today, categories, depthPages, targetGoods: partial ? null : DAILY_GOODS_TARGET, partial, concurrency, dryRun, sessionProvider, log });
     if (dryRun) {
       log(formatMusinsaWideDigest(result));
       return { ran: true, ok: true, result };

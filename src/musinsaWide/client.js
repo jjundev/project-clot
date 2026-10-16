@@ -35,9 +35,43 @@ export function createMusinsaClient({ fetchFn: baseFetch = fetch, pageDelayMs = 
   // pageUrl null = first page (built here); later pages must be the nextPageUrl the API returned (never built: 403).
   async function getCategoryPage(cat, pageUrl = null) {
     if (pageUrl) await sleep(pageDelayMs);
-    const { items, pagination } = await fetchCategoryGoodsPage(cat, pageUrl || firstPageUrl(cat), fetchFn);
+    const { items, pagination } = await fetchCategoryGoodsPage(cat, pageUrl || firstPageUrl(cat), async (...args) => {
+      const res = await fetchFn(...args);
+      if (!res.ok) throw Object.assign(new Error(`Category page HTTP ${res.status}`), { status: res.status });
+      if (String(args[0]).includes('/api2/dp/v2/plp/goods')) {
+        const body = await res.json();
+        if (!Array.isArray(body?.data?.list) || typeof body?.data?.pagination?.hasNext !== 'boolean') {
+          throw new Error('malformed category JSON page');
+        }
+        return { ok: true, json: async () => body };
+      }
+      return res;
+    }, { strictPagination: true });
+    if (pagination?.hasNext && !pagination?.nextPageUrl) throw new Error('Category page promises next page without cursor');
     const nextPageUrl = pagination?.hasNext && pagination?.nextPageUrl ? pagination.nextPageUrl : null;
     return { items: Array.isArray(items) ? items : [], nextPageUrl };
+  }
+
+  async function getCategoryPartitions(root) {
+    const res = await fetchFn(firstPageUrl(root), {
+      headers: { 'User-Agent': USER_AGENT, Referer: 'https://www.musinsa.com/' },
+    });
+    if (!res.ok) throw Object.assign(new Error(`Category taxonomy HTTP ${res.status}`), { status: res.status });
+    const html = await res.text();
+    const match = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+    let roots;
+    try {
+      const queries = JSON.parse(match?.[1]).props?.pageProps?.dehydratedState?.queries;
+      roots = queries?.find(q => q.queryKey?.[0] === 'category/Category')?.state?.data?.data?.list;
+    } catch { /* Report all invalid shapes consistently below. */ }
+    const children = Array.isArray(roots) ? roots.find(r => r.categoryCode === root)?.categoryList : null;
+    if (!Array.isArray(children) || !children.length || children.some(c =>
+      typeof c.categoryCode !== 'string' || !c.categoryCode.startsWith(root) ||
+      c.categoryCode.length !== root.length + 3 || c.parentCategoryCode !== root) ||
+      new Set(children.map(c => c.categoryCode)).size !== children.length) {
+      throw new Error(`Invalid or missing category taxonomy for ${root}`);
+    }
+    return children.map(c => ({ code: c.categoryCode, root }));
   }
 
   // The caller (one worker per client) owns 429 handling; no retry here.
@@ -101,7 +135,10 @@ export function createMusinsaClient({ fetchFn: baseFetch = fetch, pageDelayMs = 
     params.set('size', String(PLP_PAGE_SIZE));
     const json = await anonGetJson(`${PLP_API}?${params}`, 'list');
     const list = json?.data?.list;
-    if (json?.meta?.result !== 'SUCCESS' || !Array.isArray(list)) throw new Error(`Unexpected coupon goods list response for coupon ${couponNo}`);
+    if (json?.meta?.result !== 'SUCCESS' || !Array.isArray(list) || typeof json.data?.pagination?.hasNext !== 'boolean' ||
+        list.some(it => !Number.isSafeInteger(Number(it?.goodsNo)) || Number(it.goodsNo) <= 0)) {
+      throw new Error(`Unexpected coupon goods list response for coupon ${couponNo}`);
+    }
     return {
       items: list.map((it) => ({ goodsNo: Number(it.goodsNo), reviewCount: it.reviewCount ?? null, isSoldOut: Boolean(it.isSoldOut) })),
       totalCount: json.data.pagination?.totalCount ?? list.length,
@@ -109,7 +146,7 @@ export function createMusinsaClient({ fetchFn: baseFetch = fetch, pageDelayMs = 
     };
   }
 
-  return { getCategoryPage, getUsableCoupons, getCouponGoodsCount, getCouponGoodsPage, sleep };
+  return { getCategoryPartitions, getCategoryPage, getUsableCoupons, getCouponGoodsCount, getCouponGoodsPage, sleep };
 }
 
 // Retry wrapper for the anonymous calls: a 429 is rethrown at once (the caller stops the phase), anything else waits
