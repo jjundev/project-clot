@@ -350,3 +350,10 @@ test('a backfill run notifies once with the backfill digest and closes the store
   assert.deepEqual(s3.calls, ['checkpoint', 'close']);
   assert.match(l3.lines.join('\n'), /⚠️ \[무신사\] 전환 실패 \(boom\)/);
 });
+
+test('resume-pricing reuses the store without scanning or member session calls',async()=>{
+ let scanned=0,resumed=0,providers=0;const store=fakeStore();
+ const r=await runMusinsaWideStep(common({flags:{'resume-pricing':true},openStore:()=>store,trackFn:async()=>{scanned++;},makeProvider:()=>{providers++;},resumeFn:async args=>{resumed++;assert.equal(args.store,store);assert.equal(args.date,TODAY);return RESULT;}}));
+ assert.equal(r.ok,true);assert.equal(scanned,0);assert.equal(resumed,1);assert.equal(providers,0);
+ for(const extra of [{'dry-run':true},{backfill:true},{init:true},{category:'001'},{depth:'1'}])assert.equal((await runMusinsaWideStep(common({flags:{'resume-pricing':true,...extra}}))).ran,false);
+});

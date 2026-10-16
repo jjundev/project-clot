@@ -249,3 +249,30 @@ test('incomplete coupon walks and deadlines are visible in the daily report', ()
   assert.match(text, /목록.*미완료 2/);
   assert.match(text, /시간 예산.*목록 순회/);
 });
+
+test('estimate policy separates estimates from direct confirmations and warns about API exceptions', () => {
+  const text = formatMusinsaWideDigest(result({
+    coupons: coupons({ pricingPolicy: 'confirmed-benefits-estimate-v1', direct: 12, estimated: 138, exceptionCoupons: [111, 222] }),
+    registry: registry({ walk: { walked: 1206, requested: 1208, failed: 0, calls: 2400, exceptions: [111, 222], complete: false, remaining: 2 } }),
+  }));
+  assert.match(text, /확인된 혜택 기준 추정 쿠폰가 138개/);
+  assert.match(text, /직접 확인 쿠폰가 12개/);
+  assert.match(text, /API 예외 쿠폰 2종: 111, 222/);
+  assert.match(text, /추가 쿠폰.*실제.*더 낮/);
+  assert.match(text, /목록 순회 1,206종.*실패 0.*예외 2/);
+  assert.match(text, /판매가 10% 이상 하락/);
+  assert.doesNotMatch(text, /쿠폰가 10% 이상 하락/);
+});
+
+test('estimate policy labels supplied confirmed coupon drops and bounds exception IDs without losing warnings', () => {
+  const text = formatMusinsaWideDigest(result({
+    coupons: coupons({ pricingPolicy: 'confirmed-benefits-estimate-v1', direct: 12, estimated: 138,
+      exceptionCoupons: Array.from({ length: 1000 }, (_, i) => 100000 + i), drops: [couponDrop(20, 100000, 80000)] }),
+  }), { lookup });
+  assert.ok(text.length <= 4096);
+  assert.match(text, /API 예외 쿠폰 1,000종: 100000/);
+  assert.match(text, /외 980종/);
+  assert.match(text, /추가 쿠폰.*실제.*더 낮/);
+  assert.match(text, /직접 확인 쿠폰가 10% 이상 하락/);
+  assert.doesNotMatch(text, /판매가 10% 이상 하락/);
+});

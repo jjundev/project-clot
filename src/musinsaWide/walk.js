@@ -32,13 +32,14 @@ export async function walkCoupon(client, couponNo, floors, { checkStop } = {}) {
 
 /**
  * Walks the given coupons' lists (ANON_CONCURRENCY at a time) and replaces each one's coupon_goods. A coupon whose walk
- * fails, or comes back empty although a stored member check holds it (suspectEmpty), keeps yesterday's rows. The first
+ * fails or returns a conflicting terminal empty list, keeps yesterday's rows. Conflicting empties are explicit
+// API exceptions; transport/schema/deadline failures remain failures. The first
  * 429 ('throttled') or the deadline stops new page requests, including retries; incomplete coupons keep yesterday's rows.
  * `calls` counts page requests, retries included.
  */
 export async function walkCouponLists({ withClient, store, date, couponNos, deadline = Infinity, concurrency = ANON_CONCURRENCY, now = Date.now }) {
   const floors = store.categoryReviewFloors();
-  const result = { requested: couponNos.length, walked: 0, failed: 0, suspectEmpty: 0, calls: 0, stop: null, failedCoupons: [] };
+  const result = { requested: couponNos.length, walked: 0, failed: 0, suspectEmpty: 0, calls: 0, stop: null, failedCoupons: [], exceptions: [] };
   const checkStop = () => {
     if (now() >= deadline) result.stop ??= 'deadline';
     if (result.stop) throw Object.assign(new Error('Coupon walk stopped'), { code: 'WALK_STOP' });
@@ -61,8 +62,7 @@ export async function walkCouponLists({ withClient, store, date, couponNos, dead
       );
       if (goodsNos.length === 0 && store.goodsHasDirectCoupon(couponNo)) {
         result.suspectEmpty++;
-        result.failed++;
-        result.failedCoupons.push(couponNo);
+        result.exceptions.push(couponNo);
         return;
       }
       store.replaceCouponGoods(couponNo, date, goodsNos);
@@ -74,6 +74,7 @@ export async function walkCouponLists({ withClient, store, date, couponNos, dead
     }
   });
 
+  result.exceptions.sort((a,b)=>a-b);
   result.failedCoupons.sort((a, b) => a - b);
   result.remaining = result.requested - result.walked;
   result.complete = result.remaining === 0;

@@ -4,6 +4,8 @@
 // lists plus the fresh direct checks.
 import { CATEGORIES_MUSINSA, DEPTH_PAGES, scanCategory } from './client.js';
 import { scanPartitions } from './partitions.js';
+import { refreshCouponPrices } from './pricing.js';
+import { ESTIMATE_POLICY } from './coverage.js';
 import {
   createMemberChecker, applyCouponPrices, sampleAccuracy, CLASSIFY_CAP, SAMPLE_PER_DAY, BACKFILL_CLASSIFY_CAP,
 } from './coupons.js';
@@ -73,6 +75,8 @@ const sumWalks = (a, b) => ({
   requested: a.requested + b.requested,
   remaining: a.remaining + b.remaining,
   complete: a.complete && b.complete,
+  exceptions: [...(a.exceptions ?? []), ...(b.exceptions ?? [])].sort((a,b)=>a-b),
+  failedCoupons: [...(a.failedCoupons ?? []), ...(b.failedCoupons ?? [])].sort((a,b)=>a-b),
   stop: a.stop ?? b.stop,
 });
 
@@ -121,7 +125,7 @@ async function runRegistry({ withClient, store, date, checker, started, runDeadl
   const sampleChecks = [];
   const sampleAdded = [];
   const sampleFound = new Set(); // added or revived by a sample result: USABLE from today on
-  const walkFallback = { walked: 0, failed: 0, suspectEmpty: 0, calls: 0, requested: 0, remaining: 0, complete: false };
+  const walkFallback = { walked: 0, failed: 0, suspectEmpty: 0, calls: 0, requested: 0, remaining: 0, complete: false, exceptions: [], failedCoupons: [] };
   let walkedToday = new Set();
   const [sampled, walk1] = await Promise.all([
     phase('표본 조회', {}, async () => {
@@ -241,12 +245,8 @@ export async function trackMusinsa({
     log(NOT_READY_LINE);
   }
 
-  // A failed full-list refresh cannot prove absence, especially for newly selected goods.
-  // Preserve cached prices and leave new goods null until every list is verified.
-  const refreshDeferred = ready && !registry?.walk.complete;
-  const prices = refreshDeferred
-    ? { priced: 0, withCoupon: 0, best: new Map(store.getActivePriceRows().map(r => [r.goods_no, null])), drops: [], lateDrops: [] }
-    : applyCouponPrices({ store, date, ready });
+  const { prices, refreshDeferred, pricing } = refreshCouponPrices({ store,date,ready,registry });
+  if (registry) registry.pricing = pricing;
   let { drops } = prices;
   let lateDrops = prices.lateDrops.length;
   // The first day priced from the registry moves many prices at once (per-goods lists → per-coupon lists): no drop
@@ -283,6 +283,7 @@ export async function trackMusinsa({
   const coupons = {
     memberStatus,
     refreshDeferred,
+    direct: prices.direct, estimated: prices.estimated, pricingPolicy: ready ? ESTIMATE_POLICY : null, exceptionCoupons: pricing?.exceptionCoupons ?? [],
     checked: checker.calls,
     failed: checker.failed,
     priced: prices.priced,

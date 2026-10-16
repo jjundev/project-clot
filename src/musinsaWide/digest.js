@@ -1,5 +1,7 @@
 // One Telegram message per daily Musinsa wide run (parse_mode=HTML, Telegram's 4096-char cap).
 const TELEGRAM_MAX = 4096;
+const ESTIMATE_POLICY = 'confirmed-benefits-estimate-v1';
+const MAX_EXCEPTION_IDS = 20;
 
 const escapeHtml = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const fmt = (n) => Number(n).toLocaleString('en-US');
@@ -51,7 +53,7 @@ function registryLines(reg) {
     `🔢 번호 순회 ${fmt(en.probed)}개 · 최대 ${en.highest == null ? '-' : fmt(en.highest)} · 새 쿠폰 ${fmt(en.newCoupons)} · 0→양수 ${fmt(recheck.newPositive)}`,
     classifyLine(classify),
     `📒 쓸 수 있는 쿠폰 ${fmt(counts.usable)}종 (새로 ${fmt(counts.added)} · 만료 ${fmt(counts.expiredYesterday)} · 퇴출 ${fmt(counts.retired)})`,
-    `🚶 목록 순회 ${fmt(walk.walked)}종 · 호출 ${fmt(walk.calls)} · 실패 ${fmt(walk.failed)}${walk.complete === false ? ` · 미완료 ${fmt(walk.remaining ?? walk.failed)}` : ''}`,
+    `🚶 목록 순회 ${fmt(walk.walked)}종 · 호출 ${fmt(walk.calls)} · 실패 ${fmt(walk.failed)}${walk.exceptions?.length ? ` · 예외 ${fmt(walk.exceptions.length)}` : ''}${walk.complete === false ? ` · 미완료 ${fmt(walk.remaining ?? walk.failed)}` : ''}`,
     `🎯 표본 ${fmt(sample.checked)}개 · 정확 ${fmt(sample.exact)} (${pct}) · 낮게 ${fmt(sample.under)} · 높게 ${fmt(sample.over)}`,
     phaseWarning('번호 순회', en.stop ?? recheck.stop),
     phaseWarning('목록 순회', walk.stop),
@@ -81,6 +83,7 @@ const saleDropLines = (drops, limit) => drops.slice(0, limit).map((d) => dropLin
 
 export function formatMusinsaWideDigest(result, { limit = 10, lookup = () => undefined } = {}) {
   const head = [`<b>🛍 [Project-Clot] 무신사 와이드 리포트 (${result.date})</b>\n`, scanLine(result.categoryCounts)];
+  if (result.recovery) head.push('기존 30만 상품 스냅샷 가격 재계산 — 새 상품 수집 아님');
   const { diff, coupons, registry } = result;
   if (!diff) return head.join('\n');
 
@@ -92,6 +95,16 @@ export function formatMusinsaWideDigest(result, { limit = 10, lookup = () => und
 
   if (coupons) {
     head.push(`🎟 회원 조회 ${fmt(coupons.checked)}개 (실패 ${fmt(coupons.failed)}) · 쿠폰가 ${fmt(coupons.priced)}개 · 쿠폰 적용 ${fmt(coupons.withCoupon)}개`);
+    if (coupons.pricingPolicy === ESTIMATE_POLICY) {
+      head.push(`확인된 혜택 기준 추정 쿠폰가 ${fmt(coupons.estimated ?? 0)}개 · 직접 확인 쿠폰가 ${fmt(coupons.direct ?? 0)}개`);
+      const exceptions = [...new Set(coupons.exceptionCoupons ?? [])];
+      if (exceptions.length) {
+        const ids = exceptions.slice(0, MAX_EXCEPTION_IDS).map(escapeHtml).join(', ');
+        const remaining = exceptions.length - MAX_EXCEPTION_IDS;
+        head.push(`⚠️ API 예외 쿠폰 ${fmt(exceptions.length)}종: ${ids}${remaining > 0 ? ` 외 ${fmt(remaining)}종` : ''}`);
+      }
+      head.push('⚠️ 확인되지 않은 추가 쿠폰으로 실제 쿠폰가가 더 낮을 수 있음');
+    }
     const warning = couponWarning(coupons.memberStatus, coupons.checked);
     if (warning) head.push(warning);
     if (!coupons.ready) head.push('⚠️ 쿠폰 등록부 미완성 — backfill 필요');
@@ -102,7 +115,7 @@ export function formatMusinsaWideDigest(result, { limit = 10, lookup = () => und
   if (coupons?.dropsSuppressed) head.push('등록부 전환 첫날 — 쿠폰가 하락 알림 생략');
 
   const couponMode = coupons?.drops?.length > 0;
-  const title = couponMode ? '쿠폰가' : '판매가';
+  const title = couponMode ? (coupons.pricingPolicy === ESTIMATE_POLICY ? '직접 확인 쿠폰가' : '쿠폰가') : '판매가';
   let lines = [];
   if (coupons?.dropsSuppressed) lines = [];
   else if (couponMode) lines = couponDropLines(coupons.drops, lookup, limit);

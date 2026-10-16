@@ -71,9 +71,10 @@ export function couponDiscountMusinsa(P, c) {
 
 // The sale price less the extra discount and the single largest coupon; null when the sale price is unknown.
 export function couponPriceMusinsa({ sale_price, extra_discount }, coupons) {
-  if (sale_price == null) return null;
+  if (!Number.isFinite(sale_price) || (extra_discount != null && !Number.isFinite(extra_discount))) return null;
   const best = Math.max(0, ...coupons.map((c) => couponDiscountMusinsa(sale_price, c)));
-  return sale_price - (extra_discount ?? 0) - best;
+  const price = sale_price - (extra_discount ?? 0) - best;
+  return Number.isFinite(price) && price >= 0 ? price : null;
 }
 
 // Per-run caps on member coupon calls: the daily classify of PENDING coupons, the daily liveness sample, and the
@@ -230,30 +231,23 @@ export function bestCoupon(salePrice, coupons) {
 }
 
 /**
- * Prices every ACTIVE goods from the coupon registry: sale price − extra discount − the single best coupon, from
- *  1. the usable, unexpired registry coupons whose goods list holds the goods and that have started (start_date NULL or
- *     ≤ date), and
- *  2. the goods' own direct member check, when made within COUPON_TTL_DAYS and for each coupon in it only while it is
- *     started and unexpired (start NULL or ≤ date, until NULL or ≥ date), and the registry has not RETIRED it. A coupon the registry never saw still counts.
- * A coupon that fails any of these is skipped on its own; the goods' other coupons still apply. A goods in no list and
- * with no direct coupon is priced sale − extra.
- * Not `ready` (the registry is still being built) or no coupon list stored yet: every price is null, nothing is
- * logged (an unknown price is not "no coupon") and there are no drops.
- * Returns the changes logged by logCouponPriceChanges, biggest drop first, with the drops whose best coupon was first
- * seen today yet started earlier moved to `lateDrops` (we found it late: it is not news of today). `best` maps every
- * ACTIVE goods to the id of its best coupon, null when none applies.
+ * Prices ACTIVE goods after registry readiness. A same-day direct check at the current sale/extra is authoritative:
+ * only its started, unexpired coupons apply. Otherwise mapped usable coupons plus the ten-day direct cache produce
+ * an ESTIMATED price. Unknown/invalid prices have no source. DIRECT-to-DIRECT drops alone may alert; coupons first
+ * seen today but started earlier move to lateDrops. `best` identifies the winning coupon for every ACTIVE goods.
  */
-export function applyCouponPrices({ store, date, ready = false }) {
+export function applyCouponPrices({ store, date, ready = false, allowEmptyLists = false }) {
   const rows = store.getActivePriceRows();
   const best = new Map();
   const prices = new Map();
-  if (!ready || store.couponGoodsCount() === 0) {
+  const sources = new Map();
+  if (!ready || (!allowEmptyLists && store.couponGoodsCount() === 0)) {
     for (const row of rows) {
       best.set(row.goods_no, null);
       prices.set(row.goods_no, null);
     }
-    store.setCouponPrices(prices);
-    return { priced: 0, withCoupon: 0, drops: [], lateDrops: [], best };
+    store.setCouponPrices(prices, sources);
+    return { priced: 0, direct: 0, estimated: 0, withCoupon: 0, drops: [], lateDrops: [], best };
   }
 
   const today = dayNumber(date);
@@ -265,16 +259,21 @@ export function applyCouponPrices({ store, date, ready = false }) {
     return retired.get(id);
   };
   let priced = 0;
+  let direct = 0;
+  let estimated = 0;
   let withCoupon = 0;
   for (const row of rows) {
+    const authoritative = row.coupons != null && row.coupon_checked_date === date
+      && row.coupon_checked_sale_price === row.sale_price
+      && row.coupon_checked_extra === (row.extra_discount ?? 0);
     const byId = new Map();
-    for (const no of listed.get(row.goods_no) ?? []) {
+    for (const no of (authoritative ? [] : listed.get(row.goods_no)) ?? []) {
       const c = calcById.get(no);
       if (c) byId.set(c.id, c);
     }
-    if (row.coupons != null && row.coupon_checked_date != null && today - dayNumber(row.coupon_checked_date) <= COUPON_TTL_DAYS) {
+    if (row.coupons != null && row.coupon_checked_date != null && today - dayNumber(row.coupon_checked_date) >= 0 && today - dayNumber(row.coupon_checked_date) <= COUPON_TTL_DAYS) {
       for (const c of row.coupons) {
-        if (byId.has(c.id) || (c.until && c.until < date) || (c.start && c.start > date) || isRetired(c.id)) continue;
+        if (byId.has(c.id) || (c.until && c.until < date) || (c.start && c.start > date) || (!authoritative && isRetired(c.id))) continue;
         byId.set(c.id, c);
       }
     }
@@ -282,14 +281,19 @@ export function applyCouponPrices({ store, date, ready = false }) {
     const coupons = [...byId.values()].filter((c) => row.sale_price == null || Number.isFinite(couponDiscountMusinsa(row.sale_price, c)));
     const price = couponPriceMusinsa(row, coupons);
     const top = bestCoupon(row.sale_price, coupons);
-    if (price != null) priced++;
+    const source = price == null ? null : authoritative ? 'DIRECT' : 'ESTIMATED';
+    sources.set(row.goods_no, source);
+    if (price != null) {
+      priced++;
+      if (authoritative) direct++; else estimated++;
+    }
     if (top) withCoupon++;
     prices.set(row.goods_no, price);
     best.set(row.goods_no, top?.id ?? null);
   }
-  store.setCouponPrices(prices);
+  store.setCouponPrices(prices, sources);
   const logged = store.logCouponPriceChanges(
-    date, rows.map((r) => ({ goods_no: r.goods_no, sale_price: r.sale_price, coupon_price: prices.get(r.goods_no) })),
+    date, rows.map((r) => ({ goods_no: r.goods_no, sale_price: r.sale_price, coupon_price: prices.get(r.goods_no), source: sources.get(r.goods_no) })),
   );
   const drops = [];
   const lateDrops = [];
@@ -298,7 +302,7 @@ export function applyCouponPrices({ store, date, ready = false }) {
     const c = id == null ? null : store.getCoupon(Number(id));
     (c && c.first_seen_date === date && c.start_date != null && c.start_date < date ? lateDrops : drops).push(drop);
   }
-  return { priced, withCoupon, drops, lateDrops, best };
+  return { priced, direct, estimated, withCoupon, drops, lateDrops, best };
 }
 
 /**

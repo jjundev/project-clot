@@ -418,10 +418,10 @@ test('an expired, not-yet-started or RETIRED coupon is skipped; the others still
   addCoupon(16, { rate: '8', start: `${DAY}T00:00:00+09:00` }); // first day
   putList(11, [1]); putList(12, [1]); putList(13, [1]); putList(14, [1]);
   putList(15, [2]); putList(16, [2]);
-  // Direct checks: a RETIRED and an expired coupon are skipped, one the registry never saw still applies.
+  // Cached direct checks: a RETIRED and an expired coupon are skipped; an unknown coupon still applies.
   addCoupon(24, { rate: '35' });
   retire(24);
-  putDirect(3, DAY, { id: 24, rate: '35' }, { id: 25, rate: '30', until: '2026-10-13T23:59:59+09:00' }, { id: 26, rate: '6' });
+  putDirect(3, '2026-10-13', { id: 24, rate: '35' }, { id: 25, rate: '30', until: '2026-10-13T23:59:59+09:00' }, { id: 26, rate: '6' });
   const out = applyCouponPrices({ store, date: DAY, ready: true });
   assert.deepEqual(prices(1, 2, 3), [95000, 92000, 94000]);
   assert.deepEqual([...out.best], [[1, '14'], [2, '16'], [3, '26']]);
@@ -442,22 +442,23 @@ test('a fresh direct check fills a list gap; one older than 10 days does not', (
   assert.equal(out.priced, 4);
 });
 
-test('the best of list and direct coupons wins, floored to 10 won', () => {
+test('today direct coupons override list coupons, floored to 10 won', () => {
   store.applyScan('2026-10-01', [goodsRow(1, 47390), goodsRow(2, 47390), goodsRow(3, 47390)], { cat: '001', complete: true });
   addCoupon(11, { rate: '5' }); // 2369.5 → 2360
   putList(11, [1, 2, 3]);
-  putDirect(1, DAY, { id: 21, rate: '4' }); // 1895.6 → 1890: the list coupon wins
+  putDirect(1, DAY, { id: 21, rate: '4' }); // 1895.6 → 1890: today direct response is authoritative
   putDirect(2, DAY, { id: 22, rate: '8' }); // 3791.2 → 3790: the direct coupon wins
   putDirect(3, DAY, { id: 11, rate: '5' }); // the same coupon on both sides is counted once
   const out = applyCouponPrices({ store, date: DAY, ready: true });
-  assert.deepEqual(prices(1, 2, 3), [47390 - 2360, 47390 - 3790, 47390 - 2360]);
-  assert.deepEqual([...out.best], [[1, '11'], [2, '22'], [3, '11']]);
+  assert.deepEqual(prices(1, 2, 3), [47390 - 1890, 47390 - 3790, 47390 - 2360]);
+  assert.deepEqual([...out.best], [[1, '21'], [2, '22'], [3, '11']]);
 });
 
 test('a drop caused by a coupon first seen today that started earlier goes to lateDrops', () => {
   store.applyScan('2026-10-01', [1, 2, 3, 4, 5].map((n) => goodsRow(n, 100000)), { cat: '001', complete: true });
   addCoupon(10, { rate: '5', start: '2026-10-01T00:00:00+09:00' }, '2026-10-01');
   putList(10, [1, 2, 3, 4, 5]);
+  for (const n of [1,2,3,4,5]) putDirect(n, '2026-10-13', { id: 10, rate: '5' });
   const first = applyCouponPrices({ store, date: '2026-10-13', ready: true });
   assert.deepEqual(prices(1, 2, 3, 4, 5), [95000, 95000, 95000, 95000, 95000]);
   assert.deepEqual([first.drops, first.lateDrops], [[], []]);
@@ -467,6 +468,7 @@ test('a drop caused by a coupon first seen today that started earlier goes to la
   addCoupon(13, { rate: '30', start: '2026-10-10T00:00:00+09:00' }, '2026-10-12'); // seen yesterday: its list is just new
   addCoupon(14, { rate: '30', start: undefined }); // no start date: never late
   putList(11, [1]); putList(12, [2]); putList(13, [3]); putList(14, [4]);
+  for (const [n,id] of [[1,11],[2,12],[3,13],[4,14]]) putDirect(n, DAY, { id, rate: '30' });
   putDirect(5, DAY, { id: 99, rate: '30', start: '2026-10-01T00:00:00+09:00' }); // not in the registry: never late
   const out = applyCouponPrices({ store, date: DAY, ready: true });
   assert.deepEqual(prices(1, 2, 3, 4, 5), [70000, 70000, 70000, 70000, 70000]);
@@ -541,4 +543,32 @@ test('member quota reserves HTTP attempts, including authentication retries', as
   await checker.check([goodsRow(1, 10000), goodsRow(2, 10000)], { reserve: () => remaining-- > 0 });
   assert.equal(calls, 1);
   assert.equal(checker.calls, 0);
+});
+
+test('estimate policy: only unchanged today checks are authoritative DIRECT', () => {
+  store.applyScan(DAY, [1,2,3,4,5].map(n => goodsRow(n, 100000)), { cat: '001', complete: true });
+  addCoupon(11, { rate: '30' }); putList(11, [1,2,3,4,5]);
+  putDirect(1, DAY, { id: 21, rate: '10' });
+  putDirect(2, '2026-10-13', { id: 21, rate: '10' });
+  putDirect(3, DAY, { id: 21, rate: '10' });
+  putDirect(4, DAY);
+  putDirect(5, DAY, { id: 21, rate: '10' });
+  store.db.prepare('UPDATE goods SET sale_price = 90000 WHERE goods_no = 3').run();
+  store.db.prepare('UPDATE goods SET extra_discount = 1000 WHERE goods_no = 5').run();
+  const out = applyCouponPrices({ store, date: DAY, ready: true });
+  assert.deepEqual(prices(1,2,3,4,5), [90000,70000,63000,100000,69000]);
+  assert.deepEqual([out.priced, out.direct, out.estimated], [5,2,3]);
+  assert.deepEqual([1,2,3,4,5].map(n => store.getGoods(n).coupon_price_source), ['DIRECT','ESTIMATED','ESTIMATED','DIRECT','ESTIMATED']);
+});
+
+test('today direct return overrides stale retirement; invalid price has null source', () => {
+  store.applyScan(DAY, [goodsRow(1, 100000), goodsRow(2, null)], { cat: '001', complete: true });
+  addCoupon(11); putList(11, [1]); retire(11);
+  putDirect(1, DAY, { id: 11 }); putDirect(2, DAY, { id: 11 });
+  const out = applyCouponPrices({ store, date: DAY, ready: true });
+  assert.deepEqual(prices(1,2), [90000,null]);
+  assert.deepEqual([out.priced,out.direct,out.estimated], [1,1,0]);
+  assert.equal(store.getGoods(2).coupon_price_source, null);
+  assert.equal(couponPriceMusinsa({ sale_price: NaN }, []), null);
+  assert.equal(couponPriceMusinsa({ sale_price: 100, extra_discount: Infinity }, []), null);
 });

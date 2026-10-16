@@ -199,19 +199,19 @@ test('applyScan leaves coupon data alone', () => {
 
 test('logCouponPriceChanges writes only changes and reports coupon-to-coupon drops', () => {
   // day 1: first sighting writes a row, no earlier row means no drop
-  let r = s.logCouponPriceChanges(D1, [{ goods_no: 1, sale_price: 50000, coupon_price: 45000 }]);
+  let r = s.logCouponPriceChanges(D1, [{ goods_no: 1, sale_price: 50000, source: 'DIRECT', coupon_price: 45000 }]);
   assert.equal(r.written, 1);
   assert.deepEqual(r.drops, []);
   // same pair as the day before: nothing written
-  r = s.logCouponPriceChanges(D2, [{ goods_no: 1, sale_price: 50000, coupon_price: 45000 }]);
+  r = s.logCouponPriceChanges(D2, [{ goods_no: 1, sale_price: 50000, source: 'DIRECT', coupon_price: 45000 }]);
   assert.equal(r.written, 0);
   // coupon price dropped 45000 -> 40000 = 11%
-  r = s.logCouponPriceChanges(D3, [{ goods_no: 1, sale_price: 50000, coupon_price: 40000 }]);
+  r = s.logCouponPriceChanges(D3, [{ goods_no: 1, sale_price: 50000, source: 'DIRECT', coupon_price: 40000 }]);
   assert.equal(r.written, 1);
   assert.equal(r.drops.length, 1);
   assert.deepEqual(r.drops[0], { goods_no: 1, prevPrice: 45000, currentPrice: 40000, dropRate: 11 });
   // same-day rerun replaces that day's row and reports the same drop
-  r = s.logCouponPriceChanges(D3, [{ goods_no: 1, sale_price: 50000, coupon_price: 38000 }]);
+  r = s.logCouponPriceChanges(D3, [{ goods_no: 1, sale_price: 50000, source: 'DIRECT', coupon_price: 38000 }]);
   assert.equal(r.written, 1);
   assert.equal(r.drops[0].prevPrice, 45000);
   assert.equal(r.drops[0].currentPrice, 38000);
@@ -262,7 +262,7 @@ test('putGoodsCoupons round-trips the coupon list through getActivePriceRows', (
   s.putGoodsCoupons(1, D2, coupons, { sale_price: 50000, extra_discount: 0 });
   const rows = s.getActivePriceRows();
   assert.deepEqual(rows.map((r) => r.goods_no), [1, 2]);
-  assert.deepEqual(rows[0], { goods_no: 1, sale_price: 50000, extra_discount: 0, coupon_checked_date: D2, coupons });
+  assert.deepEqual(rows[0], { goods_no: 1, sale_price: 50000, extra_discount: 0, coupon_checked_date: D2, coupon_checked_sale_price: 50000, coupon_checked_extra: 0, coupons });
   assert.equal(rows[1].coupons, null);
   assert.equal(rows[1].coupon_checked_date, null);
   s.putGoodsCoupons(2, D2, [], { sale_price: 30000, extra_discount: 0 });
@@ -333,6 +333,8 @@ test('opening a DB with the 2026-10-14 schema adds the new columns and tables an
       lowest_price INTEGER, lowest_price_date TEXT, first_seen_date TEXT NOT NULL,
       misses INTEGER NOT NULL DEFAULT 0, last_miss_date TEXT
     );
+    CREATE TABLE coupon_price_changes (goods_no INTEGER NOT NULL, date TEXT NOT NULL, sale_price INTEGER NOT NULL, coupon_price INTEGER, PRIMARY KEY (goods_no,date));
+    INSERT INTO coupon_price_changes VALUES (1, '2026-10-14', 1000, 800);
     CREATE TABLE scan_runs (
       date TEXT PRIMARY KEY, category_counts_json TEXT, complete INTEGER, changed INTEGER, added INTEGER, out_of_scope INTEGER,
       duration_ms INTEGER, completed_at TEXT NOT NULL, coupons_ok INTEGER, coupon_checks INTEGER
@@ -345,6 +347,8 @@ test('opening a DB with the 2026-10-14 schema adds the new columns and tables an
   try {
     assert.equal(migrated.getGoods(1).review_count, null);
     assert.equal(migrated.getGoods(1).name, 'old goods');
+    assert.equal(migrated.getGoods(1).coupon_price_source, null);
+    assert.deepEqual({ ...migrated.db.prepare('SELECT * FROM coupon_price_changes').get() }, { goods_no: 1, date: '2026-10-14', sale_price: 1000, coupon_price: 800, source: null });
     migrated.recordScanRun({ date: D1, categoryCounts: {}, complete: true, changed: 0, added: 0, outOfScope: 0, durationMs: 1, couponMetrics: { a: 1 } });
     assert.deepEqual(JSON.parse(migrated.db.prepare('SELECT coupon_metrics_json AS m FROM scan_runs').get().m), { a: 1 });
     const tables = migrated.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name);
@@ -693,4 +697,27 @@ test('goodsInfo returns review_count, is_sold_out and status for the goods it kn
   assert.equal(info.get(2).is_sold_out, 1);
   assert.equal(info.has(3), false);
   assert.equal(s.goodsInfo([]).size, 0);
+});
+
+test('source transitions are history changes; only DIRECT to DIRECT emits drops', () => {
+  for (const [i, source] of [null, 'ESTIMATED', 'DIRECT'].entries()) {
+    s.logCouponPriceChanges(D1, [{ goods_no: i+1, sale_price: 100, coupon_price: 90, source }]);
+  }
+  const out = s.logCouponPriceChanges(D2, [1,2,3].map(goods_no => ({ goods_no, sale_price: 100, coupon_price: 70, source: 'DIRECT' })));
+  assert.deepEqual(out.drops.map(d => d.goods_no), [3]);
+  assert.equal(s.logCouponPriceChanges(D3, [{ goods_no: 3, sale_price: 100, coupon_price: 70, source: 'ESTIMATED' }]).written, 1);
+  assert.equal(s.db.prepare('SELECT source FROM coupon_price_changes WHERE goods_no=1 AND date=?').get(D1).source, null);
+});
+
+test('setCouponPrices defaults old callers to unknown source and clears null or invalid prices', () => {
+  s.applyScan(D1, [row(1, 100)], scan('001'));
+  s.setCouponPrices(new Map([[1,90]]), new Map([[1,'DIRECT']]));
+  assert.equal(s.getGoods(1).coupon_price_source, 'DIRECT');
+  s.setCouponPrices(new Map([[1,90]]));
+  assert.equal(s.getGoods(1).coupon_price_source, null);
+  for (const price of [null, NaN, Infinity, -1]) {
+    s.setCouponPrices(new Map([[1,price]]), new Map([[1,'DIRECT']]));
+    assert.equal(s.getGoods(1).coupon_price, null);
+    assert.equal(s.getGoods(1).coupon_price_source, null);
+  }
 });
