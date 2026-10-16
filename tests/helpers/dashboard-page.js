@@ -6,8 +6,9 @@ import path from 'node:path';
 import {createDashboardModel} from '../../src/dashboard-model.js';
 import {createDashboardRuntime} from '../../src/dashboard-runtime.js';
 import {buildDashboardCatalog} from '../../src/dashboard-catalog.js';
+import {MusinsaWideStore} from '../../src/musinsaWide/store.js';
 import {fixtureRaw} from './dashboard-fixture.js';
-export function writeFixture(dir,{scale=false,scanScenario=null}={}) {
+export function writeFixture(dir,{scale=false,scanScenario=null,wide=false}={}) {
  const model=createDashboardModel(),raw=fixtureRaw(),scan=raw.find(x=>x.src==='4910all');
  if(!scale) {
    for(const file of ['musinsa.db','fixture.db'])fs.rmSync(path.join(dir,file),{force:true});
@@ -37,7 +38,16 @@ export function writeFixture(dir,{scale=false,scanScenario=null}={}) {
    store.putPriceValidation({kind:'scan',sno:3,date:'2026-10-16',status:'verified',reason:'browser-fixture',corrected:{sale_price:120,coupon_price:120}});
    store.recordScanRun({date:'2026-10-16',brandCounts:{},complete:true,changed:0,added:1,dropped:0,durationMs:1});
    store.close();
-   const result=generateDashboardHtml({db,db4910Path,outputPath:path.join(dir,'index.html'),openBrowser:false});db.close();return result;
+   let dbMusinsaPath=null;
+   if(wide){
+     dbMusinsaPath=path.join(dir,'wide.db');fs.rmSync(dbMusinsaPath,{force:true});
+     const W=new MusinsaWideStore(dbMusinsaPath);
+     for(const [id,source,price] of [[1,'DIRECT',80],[77,'ESTIMATED',70]]){
+       W.db.prepare("INSERT INTO goods(goods_no,cat,name,url,brand_name,sale_price,normal_price,coupon_price,coupon_price_source,first_seen_date) VALUES(?,?,?,?,?,?,?,?,?,?)").run(id,'001','무신사 '+id,'https://www.musinsa.com/products/'+id,'새 브랜드',100,200,price,source,'2026-10-16');
+     }
+     W.db.prepare('INSERT INTO scan_runs(date,complete,completed_at,category_counts_json,coupon_metrics_json) VALUES(?,?,?,?,?)').run('2026-10-16',1,'2026-10-16T04:50:00Z','[]',JSON.stringify({pricing:{exceptionCoupons:[354317]}}));W.close();
+   }
+   const result=generateDashboardHtml({db,dbMusinsaPath,db4910Path,outputPath:path.join(dir,'index.html'),openBrowser:false});db.close();return result;
  }
  const n=139501;
  const compact={v:1,brandSno:9,b:['나이키'],m:[''],imgBase:'',r:Array.from({length:n},(_,i)=>[i+3,0,0,i===n-1&&scale?'LAST_SENTINEL':'나이키 상품 '+(i+3),'','','top',[['2026-10-16',200,120,null]]])};

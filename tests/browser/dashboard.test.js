@@ -180,3 +180,21 @@ test('a delayed deep link closes the brand dialog and transfers focus to the pro
  assert.equal(await page.getByRole('dialog',{name:'브랜드 선택',exact:true}).count(),0);
  assert.equal(await page.locator('#closeBtn').evaluate(e=>e===document.activeElement),true);
 });
+
+test('wide product prices show direct/estimated labels, API warning and lazy histories on HTTP and file',async t=>{
+ const {page,dir,url}=await fixture(t,{wide:true});
+ for(const location of [url,pathToFileURL(path.join(dir,'index.html')).href]){
+ await page.goto(location);await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='6');
+ assert.match(await page.locator('#musinsaNotice').textContent(),/354317/);
+ assert.match(await page.locator('.card[data-k="musinsa:1"]').textContent(),/직접 확인 가격/);
+ assert.match(await page.locator('.card[data-k="musinsa:77"]').textContent(),/추정가/);
+ assert.equal(await page.locator('.card[data-k="musinsa:77"] .price-source').evaluate(e=>getComputedStyle(e).textDecorationLine),'none');
+ await page.locator('.card[data-k="musinsa:77"]').click();
+ await page.waitForFunction(()=>document.querySelector('#mRows').textContent.includes('2026-10-16'));
+ assert.match(await page.locator('#mFacts').textContent(),/추정가/);
+ assert.doesNotMatch(await page.locator('#mFacts').textContent(),/역대 최저가/);
+ assert.match(await page.locator('#mRows').textContent(),/추정가/);
+ assert.equal(await page.locator('#mPrice').textContent().then(s=>s.includes('70원')),true);
+ await page.locator('#closeBtn').click();
+ }
+});

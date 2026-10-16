@@ -9,10 +9,10 @@ export function verifyDashboardBuild(outputPath) {
  if(!match)throw Error('missing inline data');
  const D=JSON.parse(match[1]),manifest=D.catalog,model=createDashboardModel();
  if(manifest?.v!==1||!manifest.revision||!['complete','partial','unavailable'].includes(manifest.scanState))throw Error('invalid manifest');
- if(manifest.scanState!=='complete'&&(!manifest.notice||manifest.parts.length||manifest.scanCount))throw Error('partial build requires notice and no scan files');
+ if(manifest.scanState!=='complete'&&(!manifest.notice||manifest.parts.some(p=>p.source!=='musinsa')||manifest.scanCount!==(manifest.musinsaCount||0)))throw Error('partial build requires notice and no scan files');
  const directory=path.dirname(outputPath),window={},all=[...D.items],keys=new Set(),parts=new Set();
  function read(file,label) {
- if(!/^4910\/(?:catalog-\d+|b\d+|index)\.js$/.test(file))throw Error('invalid data path');
+ if(!/^(?:4910\/(?:catalog-\d+|b\d+|index)|musinsa\/(?:catalog-\d+|h\d+))\.js$/.test(file))throw Error('invalid data path');
  const absolute=path.join(directory,file);if(!fs.existsSync(absolute))throw Error('missing '+label+': '+file);
  vm.runInNewContext(fs.readFileSync(absolute,'utf8'),{window},{timeout:1000});
  }
@@ -41,10 +41,19 @@ export function verifyDashboardBuild(outputPath) {
  delete window.__CLOT_4910_B__[ref.brandSno];
  }
  L=details.get(ref.path).get(x.k);
+ }else if(x.detail?.type==='musinsa') {
+ const ref=x.detail;
+ if(!details.has(ref.path)) {
+ read(ref.path,'detail');const P=window.__CLOT_MUSINSA_H__?.[ref.id];
+ if(P?.v!==1||P.revision!==manifest.revision||P.id!==ref.id)throw Error('detail revision mismatch');
+ details.set(ref.path,new Map(Object.entries(P.histories)));
+ delete window.__CLOT_MUSINSA_H__[ref.id];
+ }
+ L=details.get(ref.path).get(x.k);
  }else throw Error('invalid detail reference');
  if(!Array.isArray(L))throw Error('missing detail history');
  const derived=model.summarize({...x,L},{kind:x.kind,detail:x.detail});
- for(const f of ['my','sale','normal','newbie','isOut','isLow','lowEligible','dropAmt','rate','coupon','couponName','lowMy','lowDate','tracked']){
+ for(const f of ['my','sale','normal','newbie','isOut','isLow','lowEligible','dropAmt','rate','coupon','couponName','lowMy','lowDate','tracked','priceSource','observedDate']){
  if(derived[f]!==x[f])throw Error('summary history mismatch: '+f);
  }
  }
