@@ -645,7 +645,8 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
 
     <div class="sheet-bar">
       <div class="seg" role="group" aria-label="기간 선택" data-od-id="period-tabs">
-        <button type="button" data-range="0" aria-pressed="true">전체</button>
+        <button type="button" data-range="90" aria-pressed="true">90일</button>
+        <button type="button" data-range="0" aria-pressed="false">전체</button>
         <button type="button" data-range="30" aria-pressed="false">30일</button>
         <button type="button" data-range="14" aria-pressed="false">14일</button>
         <button type="button" data-range="7" aria-pressed="false">7일</button>
@@ -760,7 +761,14 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       tag.src=src+'?v='+encodeURIComponent(D.catalog.revision);document.head.appendChild(tag);
     });
   }
-  var runtime = window.__CLOT_RUNTIME_FACTORY__({model:model,baseItems:D.items,inlineHistories:D.inlineHistories,manifest:D.catalog,loadScript:loadDataScript,onChange:function(){render();}});
+  function loadAsset(ref) {
+    if(!/^assets\/[a-z-]+-\d+\.js$/.test(ref.path))return Promise.reject(Error('알 수 없는 데이터 경로'));
+    if(location.protocol!=='file:')return fetch(ref.path+'?v='+encodeURIComponent(D.catalog.revision)).then(function(r){if(!r.ok)throw Error('파일 요청 실패');return r.text();}).then(function(text){(0,eval)(text);var payload=(globalThis.__CLOT_ASSETS__||{})[ref.id];delete globalThis.__CLOT_ASSETS__[ref.id];return {payload:payload,bytes:new TextEncoder().encode(text).length};});
+    return new Promise(function(resolve,reject){var tag=document.createElement('script'),timer=setTimeout(function(){finish(Error('파일 요청 시간 초과'));},15000),done=false;function finish(error){if(done)return;done=true;clearTimeout(timer);tag.remove();var p=(globalThis.__CLOT_ASSETS__||{})[ref.id];if(globalThis.__CLOT_ASSETS__)delete globalThis.__CLOT_ASSETS__[ref.id];if(error||!p)reject(error||Error('파일 내용 없음'));else resolve({payload:p,bytes:ref.bytes});}tag.onload=function(){finish();};tag.onerror=function(){finish(Error('파일 요청 실패'));};tag.src=ref.path+'?v='+encodeURIComponent(D.catalog.revision);document.head.appendChild(tag);});
+  }
+  var isV2=D.catalog.v===2,queryToken=0,pageBusy=false,firstOffset=0,topHeight=0;
+  var runtime = window.__CLOT_RUNTIME_FACTORY__({model:model,baseItems:D.items,inlineHistories:D.inlineHistories,manifest:D.catalog,loadScript:loadDataScript,loadAsset:loadAsset,createWorker:isV2&&location.protocol!=='file:'?function(file){return new Worker(file+'?v='+encodeURIComponent(D.catalog.revision));}:null,onChange:function(){if(isV2&&runtime.getState().status==='loading')return;render();}});
+  var topSpacer=document.createElement('div');topSpacer.id='gridTopSpacer';grid.before(topSpacer);
 
   var brandDialog=document.getElementById('brandDialog'),brandTrigger=document.getElementById('brandTrigger');
   var brandSearch=document.getElementById('brandSearch'),brandOptions=document.getElementById('brandOptions'),brandOptionKeys='';
@@ -787,7 +795,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   });
   function renderBrandBar(){
     if(!lastQuery)return;
-    var known=new Map(runtime.getCatalog().items.map(function(x){return [x.brandKey,x.b];}));
+    var known=new Map(lastQuery.brands.map(function(x){return [x.key,x.label];}));
     var selected=state.brandKeys;
     document.getElementById('brandSummary').innerHTML=selected.slice(0,2).map(function(k){
       var label=known.get(k)||k;
@@ -872,8 +880,20 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
 
   function fmt(n) { return Number(n||0).toLocaleString('ko-KR'); }
   function render() {
+    if(isV2){
+      var token=++queryToken,data=runtime.getState(),defaults=JSON.stringify(model.restoreState(state))===JSON.stringify(model.restoreState({}));
+      if(data.status!=='ready'){
+        paint(D.catalog.bootstrap,data,!defaults);
+        if(data.status==='idle')setTimeout(function(){runtime.start();},0);
+        return;
+      }
+      runtime.query(state).then(function(q){if(token!==queryToken)return;paint(q,runtime.getState(),false);}).catch(function(error){if(token!==queryToken||error.code==='STALE_RESULT')return;paint(D.catalog.bootstrap,{...runtime.getState(),status:'error',error:error.message},true);});return;
+    }
     var data=runtime.getCatalog(), waiting=(state.src!=='musinsa'||D.catalog.musinsaCount>0)&&data.status!=='ready';
-    var query=model.queryCatalog(data.items,state);lastQuery=query;
+    var query=model.queryCatalog(data.items,state);paint(query,data,waiting);
+  }
+  function paint(query,data,waiting){
+    lastQuery=query;firstOffset=0;topHeight=0;topSpacer.style.height="0px";pageBusy=false;
     view=waiting?[]:query.items;
     document.getElementById('shownN').textContent=waiting?'집계 중':fmt(query.total);
     document.getElementById('resetBtn').hidden=state.filter==='all'&&state.cat==='all'&&state.src==='all'&&!state.q&&!state.brandKeys.length;
@@ -889,7 +909,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       if(b.dataset.cat==='etc')b.hidden=!query.categories.etc&&state.cat!=='etc';
     });
     [['sAll','all'],['sMusinsa','musinsa'],['s4910','4910']].forEach(function(p){
-      document.getElementById(p[0]).textContent=data.status!=='ready'&&(p[1]!=='musinsa'||D.catalog.musinsaCount>0)?'집계 중':fmt(query.sources[p[1]]);
+      document.getElementById(p[0]).textContent=waiting?'집계 중':fmt(query.sources[p[1]]);
     });
     document.querySelectorAll('[data-src]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.src===state.src));});
     document.querySelectorAll('[data-filter]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.filter===state.filter));});
@@ -906,7 +926,18 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   }
 
   var moreBtn = document.getElementById('gridMore');
-  function renderMore() {
+  async function renderMore() {
+    if(isV2){
+      if(!lastQuery||pageBusy||(view.length>=360&&grid.contains(document.activeElement)))return;
+      if(shown<view.length){grid.insertAdjacentHTML('beforeend',view.slice(shown,shown+PAGE).map(cardHtml).join(''));shown=Math.min(shown+PAGE,view.length);}
+      else if(lastQuery.nextOffset!=null&&runtime.getState().status==='ready'){
+        pageBusy=true;var token=queryToken,id=lastQuery.resultId;
+        try{var p=await runtime.page(id,lastQuery.nextOffset);if(token!==queryToken)return;view=view.concat(p.items);grid.insertAdjacentHTML('beforeend',p.items.map(cardHtml).join(''));lastQuery.nextOffset=p.nextOffset;shown=view.length;
+          if(view.length>360&&!grid.contains(document.activeElement)){var oldTop=grid.getBoundingClientRect().height;Array.from(grid.querySelectorAll('.card')).slice(0,120).forEach(function(c){c.remove();});var removed=oldTop-grid.getBoundingClientRect().height;topHeight+=removed;topSpacer.style.height=topHeight+'px';view=view.slice(120);firstOffset+=120;shown=view.length;}
+        }catch(error){if(token===queryToken&&error.code!=='STALE_RESULT'){moreBtn.textContent='목록을 불러오지 못했습니다 · 다시 시도';return;}}finally{pageBusy=false;}
+      }
+      document.getElementById('renderedN').textContent=fmt(grid.querySelectorAll('.card').length);moreBtn.hidden=lastQuery.nextOffset==null||!view.length;moreBtn.textContent='더 보기 (남은 '+fmt(Math.max(0,lastQuery.total-firstOffset-view.length))+'개)';return;
+    }
     var loading = (state.src !== 'musinsa'||D.catalog.musinsaCount>0) && runtime.getCatalog().status !== 'ready';
     if (!loading && shown < view.length) {
       grid.insertAdjacentHTML('beforeend', view.slice(shown, shown + PAGE).map(cardHtml).join(''));
@@ -991,7 +1022,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
 
   /* ── 모달 ───────────────────────────────────────────────── */
   var scrim = document.getElementById('scrim');
-  var modalItem = null, chart = null, range = 0, lastFocus = null;
+  var modalItem = null, chart = null, range = 90, lastFocus = null;
 
   grid.addEventListener('click', function (e) {
     if(e.target.closest('[data-retry-catalog]')){runtime.retryCatalog();return;}
@@ -1000,6 +1031,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   });
 
   function updateStepper(i) {
+    if(isV2){if(!modalItem||!lastQuery?.resultId){document.getElementById('prevBtn').disabled=true;document.getElementById('nextBtn').disabled=true;return;}var key=modalItem.k,token=detailToken;runtime.neighbor(lastQuery.resultId,key,0).then(function(x){if(token!==detailToken||!x)return;document.getElementById('prevBtn').disabled=x._position<=0;document.getElementById('nextBtn').disabled=x._position>=lastQuery.total-1;document.getElementById('mPos').textContent=(x._position+1)+' / '+lastQuery.total;}).catch(function(){});return;}
     var p = document.getElementById('prevBtn'), n = document.getElementById('nextBtn');
     p.disabled = i <= 0; n.disabled = i < 0 || i >= view.length - 1;
     document.getElementById('mPos').textContent = i >= 0 ? (i + 1) + ' / ' + view.length : '—';
@@ -1010,7 +1042,8 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     closeBrand();
     key=model.resolveKey(key);
     var token=++detailToken;
-    var it=runtime.getCatalog().items.find(function(x){return x.k===key;});
+    var it=isV2?D.items.find(function(x){return x.k===key;})||await runtime.lookup(key):runtime.getCatalog().items.find(function(x){return x.k===key;});
+    if(token!==detailToken)return;
     if(!it){
       await runtime.ensureCatalog();if(token!==detailToken)return;
       it=runtime.getCatalog().items.find(function(x){return x.k===key;});
@@ -1023,14 +1056,14 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       render();
     }
     if(!scrim.classList.contains('open'))lastFocus=document.activeElement;
-    modalItem=Object.assign({},it,{L:[]});range=0;
+    modalItem=Object.assign({},it,{L:[],historyLoaded:false});range=90;
     fillModal(modalItem);
     scrim.classList.add('open');document.body.style.overflow='hidden';
     document.querySelector('.sheet-body').scrollTop=0;document.getElementById('closeBtn').focus();setUrl(goodsQs(it));
     document.getElementById('mRows').innerHTML='<tr><td colspan="7">가격 이력 불러오는 중…</td></tr>';
     try {
-      var rows=await runtime.getHistory(key);if(token!==detailToken||!modalItem)return;
-      modalItem=Object.assign({},it,{L:rows});fillModal(modalItem);
+      var rows=await runtime.getHistory(key,isV2?{days:range}:undefined);if(token!==detailToken||!modalItem)return;
+      modalItem=Object.assign({},it,{L:isV2?rows.rows:rows,anchor:isV2?rows.anchor:null,historyLoaded:true});fillModal(modalItem);
     }catch(error){
       if(token!==detailToken||!modalItem)return;
       document.getElementById('mRows').innerHTML='<tr><td colspan="7">가격 이력을 불러오지 못했습니다 <button type="button" id="retryHistory">이력 다시 시도</button></td></tr>';
@@ -1053,7 +1086,8 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       (card||qEl).focus();
     }
   }
-  function stepTo(delta) {
+  async function stepTo(delta) {
+    if(isV2){if(!modalItem||!lastQuery?.resultId)return;try{var token=detailToken,next=await runtime.neighbor(lastQuery.resultId,modalItem.k,delta);if(token===detailToken&&next)openModal(next.k);}catch(error){}return;}
     var i = view.findIndex(function(x){return x.k===modalItem.k;});
     if (i < 0) return;
     var j = i + delta;
@@ -1072,10 +1106,21 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       document.querySelectorAll('.seg button').forEach(function (x) {
         x.setAttribute('aria-pressed', String(Number(x.dataset.range) === range));
       });
-      drawChart(modalItem);
+      if(isV2){loadRange();return;}
+      drawChart(modalItem);fillTable(modalItem);
     });
   });
 
+  async function loadRange(){
+    if(!modalItem)return;var token=++detailToken,key=modalItem.k,wanted=range;
+    document.getElementById('mRows').innerHTML='<tr><td colspan="7">価格 이력 불러오는 중…</td></tr>'.replace('価格','가격');
+    try{var history=await runtime.getHistory(key,{days:wanted});if(token!==detailToken||!modalItem||modalItem.k!==key)return;modalItem={...modalItem,L:history.rows,anchor:history.anchor,historyLoaded:true};fillModal(modalItem);}
+    catch(error){if(token!==detailToken)return;document.getElementById('mRows').innerHTML='<tr><td colspan="7">가격 이력을 불러오지 못했습니다 <button type="button" id="retryHistory">이력 다시 시도</button></td></tr>';document.getElementById('retryHistory').onclick=loadRange;}
+  }
+  window.addEventListener('scroll',async function(){
+    if(!isV2||!firstOffset||pageBusy||grid.contains(document.activeElement)||!lastQuery?.resultId||window.scrollY>topSpacer.offsetTop+topHeight+100)return;
+    pageBusy=true;var token=queryToken;try{var p=await runtime.page(lastQuery.resultId,firstOffset-120);if(token!==queryToken)return;firstOffset-=120;view=p.items.concat(view);if(view.length>360)view=view.slice(0,360);grid.innerHTML=view.map(cardHtml).join('');shown=view.length;topHeight=Math.max(0,topHeight-grid.getBoundingClientRect().height/3);topSpacer.style.height=topHeight+'px';lastQuery.nextOffset=firstOffset+view.length<lastQuery.total?firstOffset+view.length:null;}finally{pageBusy=false;}
+  },{passive:true});
   document.addEventListener('keydown', function (e) {
     if(brandDialog.open&&e.key==='Escape'){e.preventDefault();closeBrand();return;}
     if (e.key === 'Escape' && scrim.classList.contains('open')) { e.preventDefault(); closeModal(); return; }
@@ -1132,25 +1177,26 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       if (it.newbie != null) f.push('<span class="fact">쿠폰적용가(신규회원 기준) <b class="num">' + won(it.newbie) + '</b></span>');
       if (it.coupon > 0) f.push('<span class="fact">' + esc(it.couponName || '쿠폰') + ' <b class="num">−' + won(it.coupon) + '</b></span>');
       if (it.isOut) f.push('<span class="fact out">품절</span>');
+      if(it.anchor)f.push('<span class="fact">기간 이전 이월 기준 '+esc(it.anchor[0])+' · '+won(it.anchor[3])+'</span>');
       fx.innerHTML = f.join('');
     }
     updateStepper(view.findIndex(function(x){return x.k===it.k;}));
-    if(it.L.length || !it.tracked){ setupRanges(it);drawChart(it);fillTable(it); }
+    if(it.L.length || !it.tracked || it.historyLoaded){ setupRanges(it);drawChart(it);fillTable(it); }
     else { if(chart){chart.destroy();chart=null;} document.querySelectorAll(".seg button").forEach(function(b){b.disabled=true;}); }
   }
 
   function setupRanges(it) {
-    var span = it.tracked ? daysBetween(it.L[0][0], it.L[it.L.length - 1][0]) + 1 : 0;
+    var span = it.L.length ? daysBetween(it.L[0][0], it.L[it.L.length - 1][0]) + 1 : 0;
     document.querySelectorAll('.seg button').forEach(function (b) {
       var r = Number(b.dataset.range);
-      var off = r !== 0 && r >= span;
+      var off = isV2?false:r !== 0 && r >= span;
       b.disabled = off || !it.tracked;
       b.setAttribute('aria-pressed', String(r === range));
     });
   }
 
   function slice(it) {
-    if (!it.tracked) return [];
+    if (!it.tracked || !it.L.length) return [];
     if (!range) return it.L;
     var end = it.L[it.L.length - 1][0];
     return it.L.filter(function (r) { return daysBetween(r[0], end) < range; });

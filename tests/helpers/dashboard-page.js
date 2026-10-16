@@ -1,3 +1,4 @@
+import {createDashboardBuilder} from '../../src/dashboard-builder.js';import {createDashboardIndex} from '../../src/dashboard-index.js';import {createHistoryLoader} from '../../src/dashboard-history.js';import {createDashboardTransport,runDashboardWorker} from '../../src/dashboard-worker.js';
 import fs from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 import {Store4910} from '../../src/site4910/store.js';
@@ -8,7 +9,7 @@ import {createDashboardRuntime} from '../../src/dashboard-runtime.js';
 import {buildDashboardCatalog} from '../../src/dashboard-catalog.js';
 import {MusinsaWideStore} from '../../src/musinsaWide/store.js';
 import {fixtureRaw} from './dashboard-fixture.js';
-export function writeFixture(dir,{scale=false,scanScenario=null,wide=false}={}) {
+export function writeFixture(dir,{scale=false,scanScenario=null,wide=false,historyDays=0}={}) {
  const model=createDashboardModel(),raw=fixtureRaw(),scan=raw.find(x=>x.src==='4910all');
  if(!scale) {
    for(const file of ['musinsa.db','fixture.db'])fs.rmSync(path.join(dir,file),{force:true});
@@ -18,6 +19,7 @@ export function writeFixture(dir,{scale=false,scanScenario=null,wide=false}={}) 
      db.prepare('INSERT INTO items VALUES (?,?,?,?,?,?,?,?,?)').run(x.n,x.g,x.b,x.u,x.i,x.s,x.fs,x.fs,x.c);
      for(const r of x.L)db.prepare('INSERT INTO price_logs(goods_no,date,normal_price,sale_price,my_price,is_sold_out,coupon_name,coupon_discount) VALUES(?,?,?,?,?,?,?,?)').run(x.n,r[0],r[1],r[2],r[3],r[4],r[5],r[6]);
    }
+   if(historyDays){db.prepare('DELETE FROM price_logs WHERE goods_no=1').run();for(let i=0;i<historyDays;i++){const date=new Date(Date.UTC(2026,9,16)-(historyDays-1-i)*86400000).toISOString().slice(0,10);db.prepare('INSERT INTO price_logs(goods_no,date,normal_price,sale_price,my_price,is_sold_out,coupon_name,coupon_discount) VALUES(?,?,?,?,?,?,?,?)').run(1,date,200,100,90,0,i===historyDays-1?'쿠폰':'이력'.repeat(500),10);}}
    const db4910Path=path.join(dir,'fixture.db'),store=new Store4910(db4910Path);
    store.syncLiked(raw.filter(x=>x.src==='4910').map(x=>({sno:x.n,brand:x.b,name:x.g,market_name:'',url:x.u,image_url:null})),'2026-10-15');
    for(const x of raw.filter(x=>x.src==='4910'))for(const r of x.L){
@@ -55,12 +57,15 @@ export function writeFixture(dir,{scale=false,scanScenario=null,wide=false}={}) 
  if(scale)for(let i=0;i<n;i++)compact.r[i][0]=i+10;
  const base=raw.filter(x=>x!==scan);
  if(scale)for(let i=3;i<=626;i++)base.push({...raw[0],n:i,k:String(i),g:'무신사 상품 '+i});
- const packaged=buildDashboardCatalog({baseItems:base,scanIndex:{brands:[[9,'나이키',n]]},readBrand:()=>compact,dir4910:path.join(dir,'4910'),revision:'fixture',scanState:'complete'});
+ const sink=createDashboardBuilder({outDir:dir,revision:'fixture'});
+ const legacy=buildDashboardCatalog({sink,baseItems:base,scanIndex:{brands:[[9,'나이키',n]]},readBrand:()=>compact,dir4910:path.join(dir,'4910'),revision:'fixture',scanState:'complete'});
+ const packaged=sink.finish({scanState:'complete',notice:null,scanCount:n});
  const payload={generatedAt:'2026-10-16',lastRun:null,...packaged};
  let html=fs.readFileSync(new URL('../../src/dashboard.template.html',import.meta.url),'utf8');
  html=html.replace(/\/\*\s*__CLOT_DATA_PLACEHOLDER__\s*\*\/[\s\S]*?;\s*[\r\n]*/,()=> 'window.__CLOT_DATA__ = '+JSON.stringify(payload).replace(/<\/script/gi,'<\\/script')+';\n');
  html=html.replace('/* __CLOT_MODEL__ */',()=> 'window.__CLOT_MODEL__ = ('+createDashboardModel.toString()+')();');
- html=html.replace('/* __CLOT_RUNTIME__ */',()=> 'window.__CLOT_RUNTIME_FACTORY__ = ('+createDashboardRuntime.toString()+');');
+ html=html.replace('/* __CLOT_RUNTIME__ */',()=> 'window.__CLOT_TRANSPORT_FACTORY__ = ('+createDashboardTransport.toString()+');window.__CLOT_INDEX_FACTORY__ = ('+createDashboardIndex.toString()+');window.__CLOT_HISTORY_FACTORY__ = ('+createHistoryLoader.toString()+');window.__CLOT_RUNTIME_FACTORY__ = ('+createDashboardRuntime.toString()+');');
+ fs.writeFileSync(path.join(dir,'dashboard-worker.js'),'const model=('+createDashboardModel.toString()+')();const index=('+createDashboardIndex.toString()+')(model);('+runDashboardWorker.toString()+')({model,index,transport:('+createDashboardTransport.toString()+')});');
  fs.writeFileSync(path.join(dir,'index.html'),html);
  return {payload,model};
 }

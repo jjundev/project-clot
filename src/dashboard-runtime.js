@@ -1,5 +1,18 @@
 /** Async catalog transaction and separate history cache; serialized into static HTML. */
-export function createDashboardRuntime({model,baseItems,inlineHistories,manifest,loadScript,onChange=()=>{}}) {
+export function createDashboardRuntime(options) {
+ const {model,baseItems,inlineHistories,manifest,loadScript,onChange=()=>{}}=options;
+ if(manifest.v===2)return v2(options);
+ function v2({manifest,model,indexFactory,historyFactory,transportFactory,loadAsset,createWorker,onChange=()=>{}}){
+ indexFactory=indexFactory||globalThis.__CLOT_INDEX_FACTORY__;historyFactory=historyFactory||globalThis.__CLOT_HISTORY_FACTORY__;transportFactory=transportFactory||globalThis.__CLOT_TRANSPORT_FACTORY__;
+ let state={status:"idle",bootstrap:manifest.bootstrap,error:null,notice:manifest.notice},pending=null,engine=null,worker=null,disposed=false,seq=0;const calls=new Map();
+ const emit=()=>{if(!disposed)onChange(state);};
+ function rpc(method,args){const requestId=++seq;return new Promise((resolve,reject)=>{calls.set(requestId,{resolve,reject});worker.postMessage({requestId,method,args});});}
+ function stop(){if(worker)worker.terminate();worker=null;for(const c of calls.values())c.reject(Error("Worker stopped"));calls.clear();}
+ function start(){if(pending)return pending;if(state.status==="ready")return Promise.resolve(state);state={...state,status:"loading",error:null};pending=(async()=>{try{if(createWorker){worker=createWorker(manifest.workerPath);worker.onmessage=({data})=>{const c=calls.get(data.requestId);if(!c)return;calls.delete(data.requestId);data.ok?c.resolve(data.result):c.reject(Object.assign(Error(data.error.message),{code:data.error.code}));};worker.onerror=()=>{state={...state,status:"error",error:"검색 Worker를 시작하지 못했습니다"};stop();emit();};await rpc("init",[manifest]);}else{const index=indexFactory(model);if(!transportFactory)throw Error("Transport factory required");engine=await transportFactory({manifest,index,loadAsset,yieldTask:()=>new Promise(r=>setTimeout(r,0))});}if(disposed)return state;state={...state,status:"ready",error:null};}catch(error){if(!disposed)state={...state,status:"error",error:error.message};}finally{pending=null;emit();}return state;})();emit();return pending;}
+ async function invoke(method,args){await start();if(disposed)throw Error("Runtime disposed");if(state.status!=="ready")throw Error(state.error||"검색 준비 중");return worker?rpc(method,args):engine[method](...args);}
+ const history=historyFactory({revision:manifest.revision,loadAsset});
+ const api={getState:()=>state,getCatalog:()=>state,start,ensureCatalog:start,retry(){stop();engine=null;state={...state,status:"idle",error:null};return start();},query:s=>invoke("query",[s,++seq]),page:(...a)=>invoke("page",a),lookup:key=>invoke("lookup",[model.resolveKey(key)]),neighbor:(...a)=>invoke("neighbor",a),async getHistory(key,options){const item=manifest.bootstrap.items.find(x=>x.k===model.resolveKey(key))||await api.lookup(key);if(!item)throw Error("상품을 찾을 수 없습니다");return history.get(item.k,item.detail,options);},dispose(){disposed=true;stop();history.clear();}};api.retryCatalog=api.retry;return api;
+ }
  let state={status:manifest.parts.length?'idle':'ready',items:baseItems,scanState:manifest.scanState,notice:manifest.notice,error:null},pending=null;
  const histories=new Map(),brands=new Map();
  const notify=()=>onChange(state);

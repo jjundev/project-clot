@@ -44,7 +44,7 @@ test('legacy source and numeric deep link restore with filters cleared',async t=
 });
 test('detail history failure retains summary and can retry without changing counts',async t=>{
  const {page,url}=await fixture(t);let fail=true;
- await page.route('**/4910/b9.js*',r=>fail?r.abort():r.continue());
+ await page.route('**/assets/history-*.js*',r=>fail?r.abort():r.continue());
  await page.goto(url);await page.locator('.card[data-k="4910:3"]').click();
  await page.getByRole('button',{name:'이력 다시 시도'}).waitFor();
  assert.match(await page.locator('#mPrice').textContent(),/120원/);
@@ -55,26 +55,26 @@ test('detail history failure retains summary and can retry without changing coun
 test('late detail completion and catalog completion never replace the current selection',async t=>{
  const {page,url}=await fixture(t);
  let release;const gate=new Promise(r=>release=r);
- await page.route('**/4910/b9.js*',async r=>{await gate;await r.continue();});
+ await page.route('**/assets/history-*.js*',async r=>{await gate;await r.continue();});
  await page.goto(url);
  await page.locator('.card[data-k="4910:3"]').click();
  await page.locator('#prevBtn').click();
+ await page.waitForFunction(()=>document.querySelector('#mName').textContent!=='나이키 상품 3');
  const selected=await page.locator('#mName').textContent();
  release();await page.waitForTimeout(100);
  assert.equal(await page.locator('#mName').textContent(),selected);
  await page.locator('#closeBtn').click();
  assert.equal(await page.locator('#scrim.open').count(),0);
 });
-test('catalog failure offers retry; musinsa view works during delayed loading',async t=>{
+test('bootstrap survives index failure, nondefault waits and retry restores exact counts',async t=>{
  const {page,url}=await fixture(t);let fail=true;
- await page.route('**/4910/catalog-0000.js*',r=>fail?r.abort():r.continue());
- await page.goto(url);await page.getByRole('button',{name:'다시 시도',exact:true}).waitFor();
- assert.equal(await page.locator('.card').count(),0);
- await page.locator('[data-src=musinsa]').click();
- assert.equal(await page.locator('#shownN').textContent(),'2');
- fail=false;await page.locator('[data-src=all]').click();
- await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='5');
- assert.equal(await page.locator('[data-src=all]').getAttribute('aria-pressed'),'true');
+ await page.route('**/assets/index-*.js*',r=>fail?r.abort():r.continue());
+ await page.goto(url);assert.equal(await page.locator('.card').count(),5);
+ await page.locator('[data-src=musinsa]').click();await page.getByRole('button',{name:'다시 시도',exact:true}).waitFor();
+ assert.equal(await page.locator('.card').count(),0);assert.equal(await page.locator('#shownN').textContent(),'집계 중');
+ fail=false;await page.getByRole('button',{name:'다시 시도',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='2');
+ await page.locator('[data-src=all]').click();await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='5');
 });
 test('common brand picker preserves OR selections and zero-count removals across sources',async t=>{
  const {page,url}=await fixture(t);await page.goto(url);await page.locator('#shownN').filter({hasText:'5'}).waitFor();
@@ -84,11 +84,11 @@ test('common brand picker preserves OR selections and zero-count removals across
  assert.equal(await page.locator('#shownN').textContent(),'3');
  await trigger.click();await page.getByRole('checkbox',{name:'GU 1',exact:true}).check();
  await page.keyboard.press('Escape');
- await page.locator('[data-src="4910"]').click();assert.equal(await page.locator('#shownN').textContent(),'3');
- await page.locator('[data-src=musinsa]').click();assert.equal(await page.locator('#shownN').textContent(),'1');
+ await page.locator('[data-src="4910"]').click();await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='3');assert.equal(await page.locator('#shownN').textContent(),'3');
+ await page.locator('[data-src=musinsa]').click();await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='1');assert.equal(await page.locator('#shownN').textContent(),'1');
  await trigger.click();assert.equal(await page.getByRole('checkbox',{name:'GU 0',exact:true}).isChecked(),true);
  await page.keyboard.press('Escape');await page.getByRole('button',{name:'GU 선택 해제'}).click();
- await page.getByRole('button',{name:'나이키 선택 해제'}).click();assert.equal(await page.locator('#shownN').textContent(),'2');
+ await page.getByRole('button',{name:'나이키 선택 해제'}).click();await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='2');assert.equal(await page.locator('#shownN').textContent(),'2');
 });
 test('brand dialog fits mobile and desktop, scopes slash and restores focus',async t=>{
  const {page,url}=await fixture(t);
@@ -107,7 +107,7 @@ test('brand dialog fits mobile and desktop, scopes slash and restores focus',asy
 test('140129 summaries search the final part while rendering only 120 cards',async t=>{
  const {page,url}=await fixture(t,{scale:true});
  await page.addInitScript(()=>{window.IntersectionObserver=class {observe(){} unobserve(){}};});
- let histories=0;page.on('request',r=>{if(/\/b\d+\.js/.test(r.url()))histories++;});
+ let histories=0;page.on('request',r=>{if(/\/assets\/history-/.test(r.url()))histories++;});
  await page.goto(url);await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='140,129');
  assert.equal(await page.locator('#sMusinsa').textContent(),'626');
  assert.equal(await page.locator('#s4910').textContent(),'139,503');
@@ -145,7 +145,7 @@ test('closing after detail navigation or history retry restores the visible prod
  const {page,url}=await fixture(t);await page.goto(url);
  const card=page.locator('.card[data-k="4910:3"]');await card.click();await page.locator('#prevBtn').click();await page.locator('#closeBtn').click();
  assert.equal(await card.evaluate(e=>e===document.activeElement),true);
- let fail=true;await page.route('**/4910/b9.js*',r=>fail?r.abort():r.continue());
+ let fail=true;await page.route('**/assets/history-*.js*',r=>fail?r.abort():r.continue());
  // A fresh page ensures there is no cached successful brand history.
  await page.reload();await card.click();await page.getByRole('button',{name:'이력 다시 시도'}).waitFor();
  fail=false;await page.getByRole('button',{name:'이력 다시 시도'}).click();await page.waitForFunction(()=>document.querySelector('#mRows').textContent.includes('2026-10-16'));
@@ -166,15 +166,15 @@ test('removing a zero-count brand keeps keyboard focus inside the open dialog',a
  const {page,url}=await fixture(t);await page.goto(url);
  await page.locator('#brandTrigger').click();await page.getByRole('checkbox',{name:'GU 1',exact:true}).check();await page.keyboard.press('Escape');
  await page.locator('[data-src=musinsa]').click();await page.locator('#brandTrigger').click();
- await page.getByRole('checkbox',{name:'GU 0',exact:true}).focus();await page.keyboard.press('Space');
+ await page.getByRole('checkbox',{name:'GU 0',exact:true}).focus();await page.keyboard.press('Space');await page.getByRole('checkbox',{name:'GU 0',exact:true}).waitFor({state:'hidden'});
  assert.equal(await page.locator('#brandDialog').evaluate(e=>e.contains(document.activeElement)&&document.activeElement.offsetParent!==null),true);
  await page.keyboard.press('Tab');assert.equal(await page.locator('#brandDialog').evaluate(e=>e.contains(document.activeElement)),true);
 });
 test('a delayed deep link closes the brand dialog and transfers focus to the product',async t=>{
- const {page,url}=await fixture(t);
+ const {page,url}=await fixture(t,{scale:true});
  let release;const gate=new Promise(r=>release=r);
- await page.route('**/4910/catalog-0000.js*',async r=>{await gate;await r.continue();});
- await page.goto(url+'?goods=4910:3',{waitUntil:'domcontentloaded'});
+ await page.route('**/assets/index-*.js*',async r=>{await gate;await r.continue();});
+ await page.goto(url+'?goods=4910:139510',{waitUntil:'domcontentloaded'});
  await page.locator('#brandTrigger').click();await page.getByRole('dialog',{name:'브랜드 선택',exact:true}).waitFor();
  release();await page.locator('#scrim.open').waitFor();
  assert.equal(await page.getByRole('dialog',{name:'브랜드 선택',exact:true}).count(),0);
@@ -197,4 +197,16 @@ test('wide product prices show direct/estimated labels, API warning and lazy his
  assert.equal(await page.locator('#mPrice').textContent().then(s=>s.includes('70원')),true);
  await page.locator('#closeBtn').click();
  }
+});
+
+test('recent 90 defaults and archived all-history failure retries without changing price',async t=>{
+ const {page,url}=await fixture(t,{historyDays:365});let requested=[];page.on('request',r=>{if(r.url().includes('/assets/history-'))requested.push(r.url());});
+ await page.goto(url+'?goods=1');await page.waitForFunction(()=>document.querySelectorAll('#mRows tr').length===90);
+ assert.equal(await page.locator('[data-range="90"]').getAttribute('aria-pressed'),'true');assert.ok(!(await page.locator('#mRows').textContent()).includes('2025-10-17'));
+ const recentRequests=requested.length,seen=new Set(requested);let fail=true;await page.route('**/assets/history-*.js*',r=>fail&&!seen.has(r.request().url())?r.abort():r.continue());await page.locator('[data-range="0"]').click();await page.getByRole('button',{name:'이력 다시 시도'}).waitFor();fail=false;await page.getByRole('button',{name:'이력 다시 시도'}).click();await page.waitForFunction(()=>document.querySelectorAll('#mRows tr').length===365);assert.ok(requested.length>recentRequests);
+ await page.locator('[data-range="90"]').click();await page.waitForFunction(()=>document.querySelectorAll('#mRows tr').length===90);assert.equal(await page.locator('[data-range="90"]').getAttribute('aria-pressed'),'true');
+});
+test('default cards do not wait for index and saved filters do not show default counts',async t=>{
+ const {page,url}=await fixture(t);let release;const gate=new Promise(r=>release=r);await page.route('**/assets/index-*.js*',async r=>{await gate;await r.continue();});
+ await page.goto(url);assert.equal(await page.locator('.card').count(),5);assert.equal(await page.locator('#shownN').textContent(),'5');await page.locator('[data-src=musinsa]').click();assert.equal(await page.locator('#shownN').textContent(),'집계 중');assert.equal(await page.locator('.card').count(),0);release();await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='2');
 });
