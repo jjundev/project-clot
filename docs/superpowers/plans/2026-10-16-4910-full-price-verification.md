@@ -16,23 +16,25 @@ Full verification uses a fixed Release snapshot and partitioned Actions workers.
 
 ### Task 1: positive membership
 Files: src/site4910/coupon-eligibility.js, tests/site4910-coupon-eligibility.test.js.
-- [ ] RED: partial included => eligible; partial absent => unknown; quantity restrictions still win.
-- [ ] GREEN: implement distinction; run eligibility tests.
+- [x] RED: partial included => eligible; partial absent => unknown; quantity restrictions still win.
+- [x] GREEN: implement distinction; run eligibility tests.
 
 ### Task 2: resumable whole-catalog verifier
 Files: src/site4910/full-verification.js, scripts/4910-full-verify.js, tests/site4910-full-verification.test.js.
 Interfaces: prepare snapshot metadata and priority IDs; verify partition using per-product detail + best coupon; merge validated shard results via Store4910 price validations.
-- [ ] RED: prove disjoint exhaustive partition, option price proof, retry reuse/invalidation, deadline/error checkpoints and guarded merge/raw preservation.
-- [ ] GREEN: implement module and prepare/worker/merge CLI. Run whole suite.
+- [x] RED: prove disjoint exhaustive partition, option price proof, retry reuse/invalidation, deadline/error checkpoints and guarded merge/raw preservation.
+- [x] GREEN: implement module and prepare/worker/merge CLI. Run whole suite.
 
 ### Task 3: delivery
 Files: .github/workflows/4910-full.yml, .github/workflows/pages.yml, README.md, verification report.
-- [ ] Add snapshot job, 32 workers (max 8 simultaneous, 2 client workers each), guarded merge/Release publish; Pages follow success. Permit reruns to resume pending work.
-- [ ] Run unit and browser suites; independent final review and fixes.
-- [ ] Commit/merge/push only scoped files; run full verification until pending=0 or actionable external blocker; confirm Release/live prices and record limitations.
+- [x] Add snapshot job, 32 workers (max 8 simultaneous, 2 client workers each), guarded merge/Release publish; Pages follow success. Permit reruns to resume pending work.
+- [x] Run unit and browser suites; independent final review and fixes.
+- [x] Commit/merge/push only scoped files; run full verification until pending=0 or actionable external blocker; confirm Release/live prices and record limitations.
 
 Operational ruling: first production shard returned 510 HTTP 429 failures; halve per-shard clients from four to two for subsequent resumed runs. Keep completed proofs and bounded retry handling.
 
 Operational ruling: restore matching same-day proofs from the last three successful main workflow artifact sets before preparing the next queue; a regular collector had reset same-day validation rows. Do not modify source DB bytes during recovery. Independent follow-up review: no publication blocker; 17 focused tests pass. Deferred minor: an incompatible newer DB proof can cause extra recollection rather than accepting an older matching artifact proof; worker/merge validation still prevents publication of mismatched prices.
 
 Operational ruling: continue same-day pending work automatically, at most four continuations after the initial pass, so a future daily pass does not remain partial solely due to its budget. Dispatch errors and exhausted budget remain visible workflow failures; Pages intentionally keeps the last successful deployment in that case, even though the latest valid partial DB has already been published. Independent review found no blocking loop or permission issue; dispatch/no-op/date/budget/error tests pass.
+
+Completion: all139757 targets processed,133210 verified prices,6547 unverified (6065 unapplied coupon,482 unavailable),pending0. Release updated and Pages38911705671success. Public139757 summaries all matchfinalDB; rawhistory omissions0. Actualbrowser8seconds48520/blouson57490 andHarringtonbase75900withold81410hidden confirmed. Main1003unit, deploy80model/build and23browser tests pass. See docs/verify/2026-10-16-4910-full-coupon-verification.md.
