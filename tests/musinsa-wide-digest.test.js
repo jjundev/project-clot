@@ -156,7 +156,7 @@ test('a throttled walk and a failed enumeration each add their warning', () => {
   const neighbors = formatMusinsaWideDigest(result({ registry: registry({ neighbors: { probed: 3, hits: 0, stop: 'throttled' } }) }), { lookup });
   assert.match(neighbors, /⚠️ 무신사 비로그인 쿠폰 API 제한\(429\) — 이웃 조회 중단/);
   const deadline = formatMusinsaWideDigest(result({ registry: registry({ walk: { walked: 1, failed: 0, suspectEmpty: 0, calls: 1, stop: 'deadline' } }) }), { lookup });
-  assert.doesNotMatch(deadline, /⚠️/);
+  assert.match(deadline, /⚠️ 무신사 시간 예산 소진 — 목록 순회 중단/);
 });
 
 test('late drops are excluded with a count line; suppressed drops show the first-day line and no sale-price fallback', () => {
@@ -240,4 +240,12 @@ test('trimming drop lines keeps every head line, registry and warning lines incl
   for (const mark of ['🎟', '🔢', '🧮', '📒', '🚶', '🎯', '목록 순회 중단', '늦게 찾은 쿠폰 하락 2건 제외']) assert.ok(text.includes(mark), mark);
   const n = Number(text.match(/쿠폰가 10% 이상 하락 \(상위 (\d+)\)/)[1]);
   assert.ok(n > 0 && n < 60);
+});
+
+test('incomplete coupon walks and deadlines are visible in the daily report', () => {
+  const reg = registry();
+  reg.walk = { ...reg.walk, complete: false, remaining: 2, stop: 'deadline' };
+  const text = formatMusinsaWideDigest(result({ registry: reg, coupons: coupons() }));
+  assert.match(text, /목록.*미완료 2/);
+  assert.match(text, /시간 예산.*목록 순회/);
 });

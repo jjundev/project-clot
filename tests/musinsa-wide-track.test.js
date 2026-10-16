@@ -118,9 +118,9 @@ test('daily member budgets persist across same-day runs and reset on the next da
   assert.ok(ofKind(api.calls, 'member').length <= dailyTotal + 400);
 });
 
-test('budgets are 20 and 35 minutes; enumeration 12 and classification 15', () => {
-  assert.equal(BUDGET_MS_MUSINSA, 20 * 60_000);
-  assert.equal(RUN_BUDGET_MS_MUSINSA, 35 * 60_000);
+test('expanded budgets are 45 and 165 minutes; phase budgets stay 12 and 15', () => {
+  assert.equal(BUDGET_MS_MUSINSA, 45 * 60_000);
+  assert.equal(RUN_BUDGET_MS_MUSINSA, 165 * 60_000);
   assert.equal(ENUM_BUDGET_MS, 12 * 60_000);
   assert.equal(CLASSIFY_BUDGET_MS, 15 * 60_000);
 });
@@ -239,7 +239,7 @@ test('ready: phases run in order and the registry metrics land in scan_runs.coup
     recheck: { probed: 0, newPositive: 0, stop: null },
     classify: { calls: 1, usable: 1, other: 0, outOfScope: 0, pending: 0 },
     neighbors: { probed: 100, hits: 0, stop: null },
-    walk: { walked: 2, failed: 0, suspectEmpty: 0, calls: 2, stop: null },
+    walk: { walked: 2, failed: 0, suspectEmpty: 0, calls: 2, requested: 2, remaining: 0, complete: true, stop: null },
     sample: { checked: 2, exact: 2, under: 0, over: 0, reasons: NO_REASONS },
     counts: { usable: 2, pending: 0, expiredYesterday: 0, added: 1, retired: 0 },
   });
@@ -283,7 +283,7 @@ test('a coupon first found by the sample is walked the same day', async () => {
   };
   const res = await run({ makeClient: fakeMakeClient(catalog3(), api), sessionProvider: session() });
 
-  assert.deepEqual(res.registry.walk, { walked: 3, failed: 0, suspectEmpty: 0, calls: 3, stop: null });
+  assert.deepEqual(res.registry.walk, { walked: 3, failed: 0, suspectEmpty: 0, calls: 3, stop: null, requested: 3, remaining: 0, complete: true });
   assert.deepEqual(res.registry.neighbors, { probed: 100, hits: 0, stop: null });
   assert.equal(res.registry.counts.added, 2);
   assert.deepEqual(listOf(5000).map((r) => r.goods_no), [2, 3]);
@@ -389,7 +389,7 @@ test('the first ready run suppresses coupon drops once and records registry_firs
   assert.equal(store.getMeta('registry_first_priced'), DAY1);
 });
 
-test('phase deadlines: enumeration stops at 12 min, classification at 15 min', async () => {
+test('phase deadlines: enumeration and classification each get their own budget', async () => {
   makeReady();
   store.recordEmpty(995, DAY0); // an empty number the recheck would ask about
   const goods = [1, 2, 3, 4, 5, 6];
@@ -404,13 +404,13 @@ test('phase deadlines: enumeration stops at 12 min, classification at 15 min', a
   assert.equal(res.registry.enum.probed, counts.length);
   assert.ok(counts.length > 0 && counts.every((c) => c.t < T0 + ENUM_BUDGET_MS));
   assert.deepEqual(res.registry.recheck, { probed: 0, newPositive: 0, stop: 'deadline' });
-  // Classification starts at minute 12; no request starts at or after minute 15.
+  // Classification starts after enumeration, and has another 15 minutes.
   const members = ofKind(api.calls, 'member');
-  assert.equal(res.registry.classify.calls, 3);
-  assert.ok(members.slice(0, 3).every((c) => c.t < T0 + CLASSIFY_BUDGET_MS));
-  assert.equal(res.registry.classify.pending, 3);
-  // The sample (run deadline 35 min) still checks the three goods classification never reached.
-  assert.equal(res.registry.sample.checked, 3);
+  assert.equal(res.registry.classify.calls, 6);
+  assert.ok(members.every((c) => c.t < T0 + ENUM_BUDGET_MS + CLASSIFY_BUDGET_MS));
+  assert.equal(res.registry.classify.pending, 0);
+  // Classification already checked every goods; the sample avoids same-day repeats.
+  assert.equal(res.registry.sample.checked, 0);
   assert.equal(members.length, 6);
 });
 
@@ -745,4 +745,32 @@ test('a classification that fails after a finished enumeration leaves the cursor
   assert.equal(store.getCoupon(345010).state, 'USABLE');
   assert.equal(second.done, true);
   assert.deepEqual(backfillMeta(), { enum_floor: '345000', enum_cursor: null, backfill_done: DAY2 });
+});
+
+
+test('a scan longer than 15 minutes leaves fresh enumeration and classification phase budgets', async () => {
+  makeReady();
+  store.recordHit(900, DAY0, 1, { scopeGoods: [1] });
+  const api = { members: { 1: [rawCoupon(900, 10)] } };
+  const base = fakeMakeClient({ '001': [item(1, 10000)] }, api);
+  const makeClient = () => {
+    const c = base();
+    return { ...c, getCategoryPage: async (...args) => { clock.t += 19 * MIN; return c.getCategoryPage(...args); } };
+  };
+  const r = await run({ makeClient, categories: ['001'], sessionProvider: session() });
+  assert.ok(r.registry.enum.probed > 0, 'enumeration must get its own phase budget after listing');
+  assert.ok(r.registry.classify.calls > 0, 'classification must get its own phase budget after enumeration');
+});
+
+test('target mode aggregates partition rows under existing top-level categories', async () => {
+  const makeClient = () => ({
+    sleep: async () => {},
+    getCategoryPartitions: async root => [{ code: root + '001', root }],
+    getCategoryPage: async code => ({ items: code === '001001' ? [item(1, 10000), item(2, 20000), item(3, 30000)] : [], nextPageUrl: null }),
+  });
+  const r = await run({ makeClient, categories: ['001'], targetGoods: 2 });
+  assert.equal(r.categoryCounts[0].scanned, 2);
+  assert.equal(r.categoryCounts[0].complete, true);
+  assert.equal(store.getGoods(1).cat, '001');
+  assert.equal(store.getGoods(3), undefined);
 });

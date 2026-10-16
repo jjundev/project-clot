@@ -1,56 +1,33 @@
 // Reads every USABLE coupon's goods list anonymously (REVIEW-sorted, 300 per page) and stores it as coupon_goods; the
 // coupon prices are then worked out locally from these lists. No cookie is involved.
-import { anonCall, ALL_CATEGORIES_PARAM, CATEGORIES_MUSINSA } from './client.js';
+import { anonCall, ALL_CATEGORIES_PARAM } from './client.js';
 import { ANON_CONCURRENCY } from './registry.js';
 import { mapConcurrent } from '../pool.js';
 
-export const SMALL_COUPON_MAX = 3000; // up to this many goods in the five categories: read whole with the combined filter
-export const MAX_PAGES_PER_CAT = 60;
-export const WALK_EXTRA_PAGES = 1; // pages read after the one whose last goods fell below the category's review floor
+// A safety guard, not a successful truncation limit. The known combined scope needs far fewer pages.
+export const MAX_COUPON_PAGES = 10000;
 
 /**
- * Reads one coupon's goods list. Page 1 of the five categories combined gives the total: a small coupon is read to the
- * end, a large one category by category. A category stops at hasNext false, or WALK_EXTRA_PAGES pages after the page
- * whose last goods has fewer reviews than that category's floor (no floor: after page 1), or at MAX_PAGES_PER_CAT.
- * Each page call is retried by anonCall; a 429 or an error that outlasts the retries is thrown.
+ * Reads the five-category combined list to hasNext=false. totalCount can change during the walk and REVIEW order
+ * is not strictly monotonic, so neither totals nor review floors establish completeness. The floors argument stays
+ * for caller compatibility. Incomplete or anomalous walks throw so yesterday's mapping can be retained.
  */
 export async function walkCoupon(client, couponNo, floors, { checkStop } = {}) {
-  const page = (p, category) => anonCall(() => client.getCouponGoodsPage(couponNo, { page: p, category }), { sleep: client.sleep, beforeAttempt: checkStop });
   const goodsNos = new Set();
-  const add = (items) => {
-    for (const it of items) goodsNos.add(it.goodsNo);
-  };
-  let pages = 1;
-  const first = await page(1, ALL_CATEGORIES_PARAM);
-
-  if (first.totalCount <= SMALL_COUPON_MAX) {
-    add(first.items);
-    for (let r = first, p = 2; r.hasNext && p <= MAX_PAGES_PER_CAT; p++) {
-      r = await page(p, ALL_CATEGORIES_PARAM);
-      pages++;
-      add(r.items);
-    }
-    return { goodsNos: [...goodsNos], pages, mode: 'combined' };
+  const seenPages = new Set();
+  const incomplete = (reason) => Object.assign(new Error(`Coupon walk incomplete: ${reason}`), { code: 'WALK_INCOMPLETE' });
+  for (let p = 1; p <= MAX_COUPON_PAGES; p++) {
+    const r = await anonCall(() => client.getCouponGoodsPage(couponNo, { page: p, category: ALL_CATEGORIES_PARAM }),
+      { sleep: client.sleep, beforeAttempt: checkStop });
+    if (!r.items.length && r.hasNext) throw incomplete('empty page with hasNext');
+    // Compare complete ID sequences, not overlap: moving listings can legitimately repeat individual goods.
+    const signature = JSON.stringify(r.items.map((it) => it.goodsNo));
+    if (r.items.length && seenPages.has(signature)) throw incomplete('repeated page sequence');
+    seenPages.add(signature);
+    for (const it of r.items) goodsNos.add(it.goodsNo);
+    if (!r.hasNext) return { goodsNos: [...goodsNos], pages: p, mode: 'combined' };
   }
-
-  // Per category the list is review-sorted, so past the floor nothing more can be a goods the registry tracks.
-  for (const cat of CATEGORIES_MUSINSA) {
-    const floor = floors[cat];
-    let extra = null; // pages still to read once the floor was crossed
-    for (let p = 1; p <= MAX_PAGES_PER_CAT; p++) {
-      const r = await page(p, cat);
-      pages++;
-      add(r.items);
-      if (!r.hasNext) break;
-      if (extra === null) {
-        const last = r.items.at(-1);
-        if (floor == null) extra = 0; // no floor known: the first page is all there is
-        else if (last && last.reviewCount < floor) extra = WALK_EXTRA_PAGES;
-      } else extra--;
-      if (extra !== null && extra <= 0) break;
-    }
-  }
-  return { goodsNos: [...goodsNos], pages, mode: 'per-category' };
+  throw incomplete('page safety limit reached');
 }
 
 /**
@@ -61,7 +38,7 @@ export async function walkCoupon(client, couponNo, floors, { checkStop } = {}) {
  */
 export async function walkCouponLists({ withClient, store, date, couponNos, deadline = Infinity, concurrency = ANON_CONCURRENCY, now = Date.now }) {
   const floors = store.categoryReviewFloors();
-  const result = { walked: 0, failed: 0, suspectEmpty: 0, calls: 0, stop: null, failedCoupons: [] };
+  const result = { requested: couponNos.length, walked: 0, failed: 0, suspectEmpty: 0, calls: 0, stop: null, failedCoupons: [] };
   const checkStop = () => {
     if (now() >= deadline) result.stop ??= 'deadline';
     if (result.stop) throw Object.assign(new Error('Coupon walk stopped'), { code: 'WALK_STOP' });
@@ -98,5 +75,7 @@ export async function walkCouponLists({ withClient, store, date, couponNos, dead
   });
 
   result.failedCoupons.sort((a, b) => a - b);
+  result.remaining = result.requested - result.walked;
+  result.complete = result.remaining === 0;
   return result;
 }

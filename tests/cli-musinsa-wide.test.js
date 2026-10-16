@@ -92,6 +92,7 @@ test('--category and --depth pass through and mark the run partial', async () =>
   assert.deepEqual(full.args.categories, CATEGORIES_MUSINSA);
   assert.equal(full.args.depthPages, DEPTH_PAGES);
   assert.equal(full.args.partial, false);
+  assert.equal(full.args.targetGoods, 300000);
   assert.equal(full.args.date, TODAY);
   assert.equal(full.args.concurrency, 3);
   assert.equal(full.args.sessionProvider, 'PROVIDER');
@@ -102,12 +103,14 @@ test('--category and --depth pass through and mark the run partial', async () =>
   assert.deepEqual(cat.args.categories, ['001', '103']);
   assert.equal(cat.args.depthPages, DEPTH_PAGES);
   assert.equal(cat.args.partial, true);
+  assert.equal(cat.args.targetGoods, null);
 
   const depth = trackSpy();
   await runMusinsaWideStep(common({ trackFn: depth, flags: { depth: '3' } }));
   assert.deepEqual(depth.args.categories, CATEGORIES_MUSINSA);
   assert.equal(depth.args.depthPages, 3);
   assert.equal(depth.args.partial, true);
+  assert.equal(depth.args.targetGoods, null);
 });
 
 test('an unknown --category or a bad --depth fails without running', async () => {

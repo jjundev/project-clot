@@ -3,6 +3,7 @@
 // sample goods with member calls while walking the usable coupons' goods lists, and price every ACTIVE goods from those
 // lists plus the fresh direct checks.
 import { CATEGORIES_MUSINSA, DEPTH_PAGES, scanCategory } from './client.js';
+import { scanPartitions } from './partitions.js';
 import {
   createMemberChecker, applyCouponPrices, sampleAccuracy, CLASSIFY_CAP, SAMPLE_PER_DAY, BACKFILL_CLASSIFY_CAP,
 } from './coupons.js';
@@ -14,11 +15,11 @@ import { mapConcurrent, clientPool } from '../pool.js';
 
 // Keeps a degraded (slow, not dead) site from running the Actions job into its timeout; categories not finished by
 // then count as incomplete, so their listings take no misses.
-export const BUDGET_MS_MUSINSA = 20 * 60_000;
+export const BUDGET_MS_MUSINSA = 45 * 60_000;
 // The whole run, from its start: past it the sample and the list walks start nothing new, so the coupon prices,
 // scan_runs and the Release push still happen inside the job timeout.
-export const RUN_BUDGET_MS_MUSINSA = 35 * 60_000;
-// From the run's start: the number enumeration (and the empty-number recheck) end here, the classification here.
+export const RUN_BUDGET_MS_MUSINSA = 165 * 60_000;
+// Stage-local budgets start after listing and after enumeration respectively, bounded by the whole run deadline.
 export const ENUM_BUDGET_MS = 12 * 60_000;
 export const CLASSIFY_BUDGET_MS = 15 * 60_000;
 
@@ -69,6 +70,9 @@ const sumWalks = (a, b) => ({
   failed: a.failed + b.failed,
   suspectEmpty: a.suspectEmpty + b.suspectEmpty,
   calls: a.calls + b.calls,
+  requested: a.requested + b.requested,
+  remaining: a.remaining + b.remaining,
+  complete: a.complete && b.complete,
   stop: a.stop ?? b.stop,
 });
 
@@ -80,7 +84,7 @@ const sumWalks = (a, b) => ({
  */
 async function runRegistry({ withClient, store, date, checker, started, runDeadline, now, log }) {
   const phase = phaseRunner(log);
-  const enumDeadline = started + ENUM_BUDGET_MS;
+  const enumDeadline = Math.min(now() + ENUM_BUDGET_MS, runDeadline);
   // Persist attempts before the HTTP request, including failures and authentication retries. Reruns share the day caps.
   const savedBudget = JSON.parse(store.getMeta('member_budget') ?? 'null');
   const budget = savedBudget?.date === date ? savedBudget : { date, classify: 0, sample: 0 };
@@ -104,7 +108,7 @@ async function runRegistry({ withClient, store, date, checker, started, runDeadl
   ));
 
   const classified = await phase('판별', { calls: 0, usable: 0, other: 0, outOfScope: 0, pending: 0, neighborCenters: [], checks: [], added: [] }, () => (
-    classifyPending({ store, checker, date, cap: CLASSIFY_CAP, deadline: started + CLASSIFY_BUDGET_MS, reserve: reserve('classify', CLASSIFY_CAP) })
+    classifyPending({ store, checker, date, cap: CLASSIFY_CAP, deadline: Math.min(now() + CLASSIFY_BUDGET_MS, runDeadline), reserve: reserve('classify', CLASSIFY_CAP) })
   ));
   const { neighborCenters, checks: classifyChecks, added: classifyAdded, ...classify } = classified;
 
@@ -117,7 +121,7 @@ async function runRegistry({ withClient, store, date, checker, started, runDeadl
   const sampleChecks = [];
   const sampleAdded = [];
   const sampleFound = new Set(); // added or revived by a sample result: USABLE from today on
-  const walkFallback = { walked: 0, failed: 0, suspectEmpty: 0, calls: 0 };
+  const walkFallback = { walked: 0, failed: 0, suspectEmpty: 0, calls: 0, requested: 0, remaining: 0, complete: false };
   let walkedToday = new Set();
   const [sampled, walk1] = await Promise.all([
     phase('표본 조회', {}, async () => {
@@ -139,7 +143,7 @@ async function runRegistry({ withClient, store, date, checker, started, runDeadl
       const couponNos = store.usableCoupons(date).map((c) => c.coupon_no);
       walkedToday = new Set(couponNos);
       const r = await walkCouponLists({ withClient, store, date, couponNos, deadline: runDeadline, now });
-      return { walked: r.walked, failed: r.failed, suspectEmpty: r.suspectEmpty, calls: r.calls, stop: r.stop };
+      return { ...r };
     }),
   ]);
 
@@ -149,9 +153,9 @@ async function runRegistry({ withClient, store, date, checker, started, runDeadl
     const walk2 = await phase('목록 순회', walkFallback, async () => {
       const usable = new Set(store.usableCoupons(date).map((c) => c.coupon_no));
       const couponNos = [...sampleFound].filter((no) => !walkedToday.has(no) && usable.has(no)).sort((a, b) => a - b);
-      if (couponNos.length === 0) return { ...walkFallback, stop: null };
+      if (couponNos.length === 0) return { ...walkFallback, complete: true, stop: null };
       const r = await walkCouponLists({ withClient, store, date, couponNos, deadline: runDeadline, now });
-      return { walked: r.walked, failed: r.failed, suspectEmpty: r.suspectEmpty, calls: r.calls, stop: r.stop };
+      return { ...r };
     });
     walk = sumWalks(walk1, walk2);
   }
@@ -182,15 +186,15 @@ async function runRegistry({ withClient, store, date, checker, started, runDeadl
 
 /**
  * Order: concurrent category scan → (dry run stops here, nothing written) → per-category applyScan → when the coupon
- * registry is ready: number enumeration and the empty-number recheck (12 min) → classification of pending coupons
- * (member calls, 15 min) → the member sample alongside the walk of every usable coupon's goods list, then a walk of
+ * registry is ready: number enumeration and the empty-number recheck (12 min from stage start) → classification of pending coupons
+ * (member calls, 15 min from stage start) → the member sample alongside the walk of every usable coupon's goods list, then a walk of
  * the coupons the sample found → neighbour counts → liveness → coupon prices for every ACTIVE goods → sample accuracy →
  * registry pruning → scan_runs. A registry not yet backfilled makes no coupon call of any kind (member or anonymous)
  * and leaves every coupon price null. `partial` (--category/--depth) means no category was read in full, so none counts
  * a miss.
  */
 export async function trackMusinsa({
-  makeClient, store, date, categories = CATEGORIES_MUSINSA, depthPages = DEPTH_PAGES, partial = false, concurrency = 3,
+  makeClient, store, date, categories = CATEGORIES_MUSINSA, depthPages = DEPTH_PAGES, targetGoods = null, partial = false, concurrency = 3,
   dryRun = false, sessionProvider = null, budgetMs = BUDGET_MS_MUSINSA, runBudgetMs = RUN_BUDGET_MS_MUSINSA, log = console.log,
   now = Date.now,
 }) {
@@ -200,11 +204,13 @@ export async function trackMusinsa({
   const withClient = clientPool(makeClient);
   const initial = dryRun ? false : store.isEmpty();
 
-  const scans = await mapConcurrent(categories, concurrency, (cat) => withClient(async (client) => {
-    const scan = await scanOne(client, cat, depthPages, deadline, now);
-    log(`[무신사] ${cat}: ${scan.rows.size}개 ${scan.pages}페이지${scan.complete ? '' : ` (불완전: ${scan.problems.slice(0, 3).join('; ')})`}`);
-    return scan;
-  }));
+  const scans = targetGoods != null
+    ? (await scanPartitions({ withClient, categories, targetGoods, concurrency, deadline, now, log })).scans
+    : await mapConcurrent(categories, concurrency, (cat) => withClient(async (client) => {
+      const scan = await scanOne(client, cat, depthPages, deadline, now);
+      log(`[무신사] ${cat}: ${scan.rows.size}개 ${scan.pages}페이지${scan.complete ? '' : ` (불완전: ${scan.problems.slice(0, 3).join('; ')})`}`);
+      return scan;
+    }));
   const categoryCounts = categories.map((cat, i) => ({
     cat, scanned: scans[i].rows.size, pages: scans[i].pages, complete: scans[i].complete, problems: scans[i].problems,
   }));
