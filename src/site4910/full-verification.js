@@ -111,3 +111,16 @@ export function resumeProofs({existing,checkpoint,meta,partition,targets}){
  for(const r of checkpoint.results){const t=allowed.get(r.sno);if(!t||seen.has(r.sno))throw Error('invalid checkpoint product');checkProof(r,t,meta);seen.add(r.sno);out.set(r.sno,r);}
  return out;
 }
+
+// A collector may replace same-day validation metadata. Trusted prior workflow artifacts can
+// still seed the queue, but never waive current wallet/date/base or product/option checks.
+export function reusableProofs({existing,candidates,targets,date,fingerprint}){
+ const allowed=new Map(targets.map(t=>[t.sno,t])),out=new Map(existing);
+ for(const r of candidates){
+  const t=allowed.get(r.sno);if(!t||t.base==null)continue;
+  try{checkProof(r,t,{date,fingerprint});}catch{continue;}
+  const old=out.get(r.sno);
+  if(!old||Date.parse(r.checkedAt)>Date.parse(old.checkedAt))out.set(r.sno,r);
+ }
+ return out;
+}

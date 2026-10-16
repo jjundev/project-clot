@@ -15,7 +15,7 @@ jobs:
   prepare:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     outputs:
       commit: ${{ steps.commit.outputs.sha }}
     env:
@@ -29,6 +29,12 @@ jobs:
       - id: commit
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - run: node src/cli.js 4910-db pull
+      - name: Recover completed same-day verification checkpoints
+        run: |
+          gh run list --workflow 4910-full.yml --branch main --status success --limit 3 --json databaseId --jq '.[].databaseId' > /tmp/previous-verification-runs
+          while IFS= read -r run_id; do
+            gh run download "$run_id" -p 'verification-part-*' -D "verification/archive/$run_id" || echo "::warning::Previous checkpoint unavailable: $run_id"
+          done < /tmp/previous-verification-runs
       - run: node scripts/4910-full-verify.js prepare
       - run: gzip -c data/4910.db > verification/source.db.gz
       - uses: actions/upload-artifact@v4

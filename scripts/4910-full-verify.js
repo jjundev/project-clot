@@ -1,7 +1,7 @@
 // Snapshot -> partitioned option checks -> guarded publication. No token is written to files or logs.
 import fs from 'node:fs';import path from 'node:path';import {DatabaseSync} from 'node:sqlite';
 import {createClient} from '../src/site4910/client.js';import {readAblyToken} from '../src/site4910/liked.js';import {Store4910} from '../src/site4910/store.js';
-import {resumeProofs,digest,walletFingerprint,readTargets,readExisting,collectPositiveTargets,verifyPartition,mergeVerification} from '../src/site4910/full-verification.js';
+import {reusableProofs,resumeProofs,digest,walletFingerprint,readTargets,readExisting,collectPositiveTargets,verifyPartition,mergeVerification} from '../src/site4910/full-verification.js';
 const args=process.argv.slice(2),mode=args.shift();
 const flag=(key,fallback)=>{const i=args.indexOf('--'+key);return i<0?fallback:args[i+1];};
 const dbPath=path.resolve(flag('db','data/4910.db')),dir=path.resolve(flag('dir','verification')),metaPath=path.join(dir,'meta.json');
@@ -12,14 +12,22 @@ const memberToken=readAblyToken();if(!memberToken)throw Error('ABLY_JWT_TOKEN mi
 if(!fs.existsSync(dbPath))throw Error('source database missing');
 const client=createClient();const wallet=await client.getMyCoupons({memberToken});const fingerprint=walletFingerprint(wallet);
 if(mode==='prepare'){
- const db=new DatabaseSync(dbPath,{readOnly:true});const targets=readTargets(db);
+ const db=new DatabaseSync(dbPath,{readOnly:true});const targets=readTargets(db);let recovered=readExisting(db,today());
  if(!targets.length)throw Error('empty catalog');
  const date=today(),scan=db.prepare('select date from scan_runs order by date desc limit 1').get();
  if(scan?.date!==date)throw Error('full verification requires a current-day catalog scan');db.close();
+ const archive=path.join(dir,'archive');
+ if(fs.existsSync(archive))for(const relative of fs.readdirSync(archive,{recursive:true})){
+  if(!/^part-\d+\.json$/.test(path.basename(relative)))continue;
+  const checkpoint=JSON.parse(fs.readFileSync(path.join(archive,relative)));
+  if(checkpoint.version===1&&checkpoint.date===date&&checkpoint.fingerprint===fingerprint)recovered=reusableProofs({existing:recovered,candidates:checkpoint.results,targets,date,fingerprint});
+ }
+ fs.rmSync(archive,{recursive:true,force:true});
  const positive=await collectPositiveTargets({client,wallet,memberToken,deadline:Date.now()+4*60_000,maxPages:12});
  const tracked=new Set(targets.map(t=>t.sno));
  const meta={version:1,sourceHash:hashFile(dbPath),date,fingerprint,partitions:32,targetDigest:digest(targets),total:targets.length,priority:[...positive.snos].filter(n=>tracked.has(n)),coupons:positive.coupons};
- write(metaPath,meta);console.log(JSON.stringify({total:meta.total,date,priority:meta.priority.length,coupons:meta.coupons}));
+ write(path.join(dir,'resume-proofs.json'),[...recovered.values()]);
+ write(metaPath,meta);console.log(JSON.stringify({total:meta.total,date,priority:meta.priority.length,recovered:recovered.size,coupons:meta.coupons}));
 }else{
  const meta=JSON.parse(fs.readFileSync(metaPath));
  if(meta.version!==1||meta.fingerprint!==fingerprint||meta.date!==today()||hashFile(dbPath)!==meta.sourceHash)throw Error('snapshot, date or wallet changed; prepare a fresh run');
@@ -28,6 +36,8 @@ if(mode==='prepare'){
  if(mode==='worker'){
   const partition=Number(flag('partition','-1')),output=path.join(dir,`part-${partition}.json`);
   let existing=readExisting(db,meta.date);db.close();
+  const recoveredPath=path.join(dir,'resume-proofs.json');
+  if(fs.existsSync(recoveredPath))existing=reusableProofs({existing,candidates:JSON.parse(fs.readFileSync(recoveredPath)),targets,date:meta.date,fingerprint});
   if(fs.existsSync(output))existing=resumeProofs({existing,checkpoint:JSON.parse(fs.readFileSync(output)),meta,partition,targets});
   const seconds=Number(flag('budget-seconds','3000'));if(!Number.isFinite(seconds)||seconds<1||seconds>3000)throw Error('invalid verification budget');
   const result=await verifyPartition({...meta,targets,partition,memberToken,existing,priority:new Set(meta.priority),makeClient:()=>createClient(),concurrency:2,deadline:Date.now()+seconds*1000,onCheckpoint:r=>write(output,r)});
