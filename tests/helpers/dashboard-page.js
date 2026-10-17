@@ -10,7 +10,7 @@ import {createDashboardRuntime} from '../../src/dashboard-runtime.js';
 import {buildDashboardCatalog} from '../../src/dashboard-catalog.js';
 import {MusinsaWideStore} from '../../src/musinsaWide/store.js';
 import {fixtureRaw} from './dashboard-fixture.js';
-export function writeFixture(dir,{scale=false,scanScenario=null,wide=false,historyDays=0}={}) {
+export function writeFixture(dir,{scale=false,scaleCount=439501,scanScenario=null,wide=false,historyDays=0}={}) {
  const model=createDashboardModel(),raw=fixtureRaw(),scan=raw.find(x=>x.src==='4910all');
  if(!scale) {
    for(const file of ['musinsa.db','fixture.db'])fs.rmSync(path.join(dir,file),{force:true});
@@ -52,12 +52,12 @@ export function writeFixture(dir,{scale=false,scanScenario=null,wide=false,histo
    }
    const result=generateDashboardHtml({db,dbMusinsaPath,db4910Path,outputPath:path.join(dir,'index.html'),openBrowser:false});db.close();return result;
  }
- const n=439501;
- const compact={v:1,brandSno:9,b:['나이키'],m:[''],imgBase:'',r:Array.from({length:n},(_,i)=>[i+3,0,0,i===n-1&&scale?'LAST_SENTINEL':'나이키 상품 '+(i+3),'','','top',[['2026-10-16',200,120,null]]])};
+ const n=scaleCount;
+ const compact={v:1,brandSno:9,b:['나이키'],m:[''],imgBase:'',r:Array.from({length:n},(_,i)=>[i+3,0,0,i===n-1&&scale?'LAST_SENTINEL':'나이키 상품 '+(i+3),'','',['top','outer','etc'][i%3],[['2026-10-16',200,120,null]]])};
  // Scale uses IDs outside the liked range so the target total is exact.
  if(scale)for(let i=0;i<n;i++)compact.r[i][0]=i+10;
  const base=raw.filter(x=>x!==scan);
- if(scale)for(let i=3;i<=626;i++)base.push({...raw[0],n:i,k:String(i),g:'무신사 상품 '+i});
+ if(scale)for(let i=3;i<=626;i++)base.push({...raw[0],n:i,k:String(i),g:'무신사 상품 '+i,c:['top','outer','etc'][i%3]});
  const sink=createDashboardBuilder({outDir:dir,revision:'fixture'});
  const legacy=buildDashboardCatalog({sink,baseItems:base,scanIndex:{brands:[[9,'나이키',n]]},readBrand:()=>compact,dir4910:path.join(dir,'4910'),revision:'fixture',scanState:'complete'});
  const packaged=sink.finish({scanState:'complete',notice:null,scanCount:n});
