@@ -23,7 +23,11 @@ export function createAssetWriter({ outDir, revision, maxBytes = 262144 }) {
       id,
       path: file,
       bytes,
-      count: record.rows?.length ?? record.items?.length ?? 1,
+      count:
+        record.rows?.length ??
+        record.items?.length ??
+        record.entries?.length ??
+        1,
     };
   }
   function writeRows(kind, rows) {

@@ -687,7 +687,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     </div>
   </div>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script>
 /* ══ 데이터 (빌드 시 인라인 주입 — file:// CORS 회피, 기획 S3) ══ */
 /* __CLOT_DATA_PLACEHOLDER__ */ window.__CLOT_DATA__ = {};
@@ -737,7 +737,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
 
   /* ── 상태 ───────────────────────────────────────────────── */
   var state = model.restoreState({src:store('src'),cat:store('cat'),filter:store('filter'),sort:store('sort')});
-  var view = [], shown = 0, PAGE = 120, lastQuery = null;
+  var view = [], shown = 0, PAGE = 120, lastQuery = null, brandCountsKnown = false;
   var grid = document.getElementById('grid'), qEl = document.getElementById('q'), sortSel = document.getElementById('sortSel');
   sortSel.value = state.sort;
   function loadDataScript(src) {
@@ -763,11 +763,11 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   }
   function loadAsset(ref) {
     if(!/^assets\/[a-z-]+-\d+\.js$/.test(ref.path))return Promise.reject(Error('알 수 없는 데이터 경로'));
-    if(location.protocol!=='file:')return fetch(ref.path+'?v='+encodeURIComponent(D.catalog.revision)).then(function(r){if(!r.ok)throw Error('파일 요청 실패');return r.text();}).then(function(text){(0,eval)(text);var payload=(globalThis.__CLOT_ASSETS__||{})[ref.id];delete globalThis.__CLOT_ASSETS__[ref.id];return {payload:payload,bytes:new TextEncoder().encode(text).length};});
+    if(location.protocol!=='file:')return fetch(ref.path+'?v='+encodeURIComponent(D.catalog.revision),{signal:AbortSignal.timeout(15000)}).then(function(r){if(!r.ok)throw Error('파일 요청 실패');return r.text();}).then(function(text){(0,eval)(text);var payload=(globalThis.__CLOT_ASSETS__||{})[ref.id];delete globalThis.__CLOT_ASSETS__[ref.id];return {payload:payload,bytes:new TextEncoder().encode(text).length};});
     return new Promise(function(resolve,reject){var tag=document.createElement('script'),timer=setTimeout(function(){finish(Error('파일 요청 시간 초과'));},15000),done=false;function finish(error){if(done)return;done=true;clearTimeout(timer);tag.remove();var p=(globalThis.__CLOT_ASSETS__||{})[ref.id];if(globalThis.__CLOT_ASSETS__)delete globalThis.__CLOT_ASSETS__[ref.id];if(error||!p)reject(error||Error('파일 내용 없음'));else resolve({payload:p,bytes:ref.bytes});}tag.onload=function(){finish();};tag.onerror=function(){finish(Error('파일 요청 실패'));};tag.src=ref.path+'?v='+encodeURIComponent(D.catalog.revision);document.head.appendChild(tag);});
   }
   var isV2=D.catalog.v===2,queryToken=0,pageBusy=false,firstOffset=0,topHeight=0;
-  var runtime = window.__CLOT_RUNTIME_FACTORY__({model:model,baseItems:D.items,inlineHistories:D.inlineHistories,manifest:D.catalog,loadScript:loadDataScript,loadAsset:loadAsset,createWorker:isV2&&location.protocol!=='file:'?function(file){return new Worker(file+'?v='+encodeURIComponent(D.catalog.revision));}:null,onChange:function(){if(isV2&&runtime.getState().status==='loading')return;render();}});
+  var runtime = window.__CLOT_RUNTIME_FACTORY__({model:model,baseItems:D.items,inlineHistories:D.inlineHistories,manifest:D.catalog,loadScript:loadDataScript,loadAsset:loadAsset,createWorker:isV2&&location.protocol!=='file:'?function(file){return new Worker(file+'?v='+encodeURIComponent(D.catalog.revision));}:null,onChange:function(data){if(!isV2)render();else if(data.status==='error'){grid.dataset.searchStatus='error';showStatus(data,true);}}});
   var topSpacer=document.createElement('div');topSpacer.id='gridTopSpacer';grid.before(topSpacer);
 
   var brandDialog=document.getElementById('brandDialog'),brandTrigger=document.getElementById('brandTrigger');
@@ -804,7 +804,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       (!selected.length?'<span class="group-label">모든 브랜드</span>':'');
     if(!brandDialog.open)return;
     var data=runtime.getCatalog();
-    if((state.src!=='musinsa'||D.catalog.musinsaCount>0)&&data.status!=='ready'){
+    if(!isV2&&(state.src!=='musinsa'||D.catalog.musinsaCount>0)&&data.status!=='ready'){
       brandOptions.innerHTML='<p>'+(data.status==='error'?'브랜드 목록을 불러오지 못했습니다. 창을 닫고 다시 시도해 주세요.':'브랜드 집계 중…')+'</p>';brandOptionKeys='';return;
     }
     var query=model.brandKey(brandSearch.value);
@@ -812,10 +812,10 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     var keys=JSON.stringify(choices.map(function(b){return b.key;}));
     var optionHadFocus=brandOptions.contains(document.activeElement);
     var focusedBrand=optionHadFocus?document.activeElement.dataset.brand:null;
-    if(keys!==brandOptionKeys){
+    if(keys!==brandOptionKeys||!choices.length){
       brandOptions.innerHTML=choices.length?choices.map(function(b){
-        return '<label class="brand-option"><input type="checkbox" data-brand="'+esc(b.key)+'"><span>'+esc(b.label)+'</span><b class="num">'+fmt(b.count)+'</b></label>';
-      }).join(''):'<p>조건에 맞는 브랜드가 없습니다</p>';
+        return '<label class="brand-option"><input type="checkbox" data-brand="'+esc(b.key)+'"><span>'+esc(b.label)+'</span><b class="num">'+fmt(brandCountsKnown?b.count:null)+'</b></label>';
+      }).join(''):(brandCountsKnown?'<p>조건에 맞는 브랜드가 없습니다</p>':'<p>브랜드 검색 준비 중…</p>');
       brandOptionKeys=keys;
       if(optionHadFocus){
         var nextFocus=[].find.call(brandOptions.querySelectorAll("input[data-brand]"),function(el){return el.dataset.brand===focusedBrand;});
@@ -825,7 +825,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     brandOptions.querySelectorAll('input[data-brand]').forEach(function(input){
       input.checked=selected.includes(input.dataset.brand);
       var b=choices.find(function(x){return x.key===input.dataset.brand;});
-      input.parentNode.querySelector('.num').textContent=fmt(b.count);
+      input.parentNode.querySelector('.num').textContent=fmt(brandCountsKnown?b.count:null);
     });
   }
 
@@ -878,24 +878,35 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       '<div class="gname">' + esc(it.g) + '</div>' + body + '</div></button>';
   }
 
-  function fmt(n) { return Number(n||0).toLocaleString('ko-KR'); }
+  function fmt(n) { return n==null?'—':Number(n).toLocaleString('ko-KR'); }
+  var previewSource=null, detailNotice='';
+  function showPreview(data) {
+    var p=D.catalog.previews&&D.catalog.previews[state.src],map=new Map((D.catalog.previewItems||D.items).map(function(x){return [x.k,x];}));
+    var query=p?Object.assign({},p.facets,{items:p.keys.map(function(k){return map.get(k);})}):D.catalog.bootstrap;
+    previewSource=state.src;
+    return query;
+  }
   function render() {
     if(isV2){
-      var token=++queryToken,data=runtime.getState(),defaults=JSON.stringify(model.restoreState(state))===JSON.stringify(model.restoreState({}));
-      if(data.status!=='ready'){
-        paint(D.catalog.bootstrap,data,!defaults);
-        if(data.status==='idle')setTimeout(function(){runtime.start();},0);
-        return;
-      }
-      runtime.query(state).then(function(q){if(token!==queryToken)return;paint(q,runtime.getState(),false);}).catch(function(error){if(token!==queryToken||error.code==='STALE_RESULT')return;paint(D.catalog.bootstrap,{...runtime.getState(),status:'error',error:error.message},true);});return;
+      var token=++queryToken,data=runtime.getState();
+      var baseline=model.restoreState({src:state.src});
+      var defaults=JSON.stringify(model.restoreState(state))===JSON.stringify(baseline);
+      var keep=lastQuery&&lastQuery.resultId&&previewSource===state.src;
+      var preview=keep?lastQuery:showPreview(data);
+      paint(preview,{...data,status:'loading',preview:true,previous:!!keep},!!keep||!defaults);
+      grid.dataset.searchStatus='loading';
+      runtime.query(state).then(function(q){if(token!==queryToken)return;paint(q,runtime.getState(),false);grid.dataset.searchStatus='ready';}).catch(function(error){
+        if(token!==queryToken||error.code==='STALE_RESULT')return;
+        grid.dataset.searchStatus='error';showStatus({...runtime.getState(),status:'error',error:error.message},true);
+      });return;
     }
     var data=runtime.getCatalog(), waiting=(state.src!=='musinsa'||D.catalog.musinsaCount>0)&&data.status!=='ready';
     var query=model.queryCatalog(data.items,state);paint(query,data,waiting);
   }
   function paint(query,data,waiting){
-    lastQuery=query;firstOffset=0;topHeight=0;topSpacer.style.height="0px";pageBusy=false;
-    view=waiting?[]:query.items;
-    document.getElementById('shownN').textContent=waiting?'집계 중':fmt(query.total);
+    lastQuery=query;brandCountsKnown=!waiting;firstOffset=0;topHeight=0;topSpacer.style.height="0px";pageBusy=false;
+    view=query.items;
+    document.getElementById('shownN').textContent=waiting?'—':fmt(query.total);
     document.getElementById('resetBtn').hidden=state.filter==='all'&&state.cat==='all'&&state.src==='all'&&!state.q&&!state.brandKeys.length;
     ['all','lowest','drop','onsale','out'].forEach(function(k){
       document.getElementById('c'+k.charAt(0).toUpperCase()+k.slice(1)).textContent=waiting?'—':fmt(query.quick[k]);
@@ -905,24 +916,30 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     });
     document.querySelectorAll('[data-cat]').forEach(function(b){
       b.setAttribute('aria-pressed',String(b.dataset.cat===state.cat));
-      b.querySelector('.c').textContent=waiting?'—':fmt(query.categories[b.dataset.cat]);
-      if(b.dataset.cat==='etc')b.hidden=!query.categories.etc&&state.cat!=='etc';
+      b.querySelector('.c').textContent=waiting?'—':fmt(Object.hasOwn(query.categories,b.dataset.cat)?query.categories[b.dataset.cat]:0);
+      if(b.dataset.cat==='etc')b.hidden=(query.categories.etc===0||!Object.hasOwn(query.categories,'etc'))&&state.cat!=='etc';
     });
     [['sAll','all'],['sMusinsa','musinsa'],['s4910','4910']].forEach(function(p){
-      document.getElementById(p[0]).textContent=waiting?'집계 중':fmt(query.sources[p[1]]);
+      document.getElementById(p[0]).textContent=waiting?'—':fmt(query.sources[p[1]]);
     });
     document.querySelectorAll('[data-src]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.src===state.src));});
     document.querySelectorAll('[data-filter]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.filter===state.filter));});
     var wideNotice=document.getElementById('musinsaNotice'), wm=D.musinsa;
     wideNotice.hidden=!wm;
     if(wm)wideNotice.textContent='무신사 '+wm.date+' 기준 · 조사 '+fmt(wm.selected)+'개 · 제공 '+fmt(wm.active)+'개(이전 회차 잔류 '+fmt(wm.retained||0)+'개 포함) · 직접 확인 '+fmt(wm.direct)+'개 · 추정 '+fmt(wm.estimated)+'개'+(wm.unknown?' · 출처 미확인 '+fmt(wm.unknown)+'개':'')+'. '+(wm.exceptionCoupons.length?'쿠폰 '+wm.exceptionCoupons.length+'종의 적용 상품 목록을 확인하지 못했습니다 ('+wm.exceptionCoupons.join(', ')+'). 추정가는 확인된 혜택 기준이며 실제 결제 가격이 더 낮을 수 있습니다.':'추정가는 확인된 혜택 기준이며 실제 결제 가격과 다를 수 있습니다.');
-    var notice=document.getElementById('catalogNotice');notice.hidden=!data.notice&&!(isV2&&data.status==='error'&&!waiting);notice.textContent=data.notice||'';if(isV2&&data.status==='error'&&!waiting)notice.innerHTML=esc(data.error||'전체 검색 준비 실패')+' · <button type="button" data-retry-catalog>다시 시도</button>';
+    showStatus(data,waiting);
     shown=0;renderBrandBar();
-    grid.innerHTML=waiting ? '<div class="empty"><b>'+(data.status==='error'?'전체 상품 요약을 불러오지 못했습니다':'전체 상품 집계 중…')+'</b>'+(data.status==='error'?'<button class="more" data-retry-catalog type="button">다시 시도</button>':'')+'</div>' :
-      view.length?'':'<div class="empty"><b>조건에 맞는 상품이 없습니다</b>검색어를 지우거나 다른 필터를 선택해 보세요.</div>';
+    grid.innerHTML=view.length?'':waiting||data.preview?'<div class="empty"><b>검색 준비 중 · 기본 상품 미리보기</b></div>':'<div class="empty"><b>조건에 맞는 상품이 없습니다</b>검색어를 지우거나 다른 필터를 선택해 보세요.</div>';
     renderMore();
     if(moreIo){moreIo.unobserve(moreBtn);moreIo.observe(moreBtn);}
     if(modalItem)updateStepper(view.findIndex(function(x){return x.k===modalItem.k;}));
+  }
+
+  function showStatus(data,waiting) {
+    var notice=document.getElementById('catalogNotice'),text=detailNotice||data.notice||'';
+    if(data.status==='error'){notice.hidden=false;notice.innerHTML=esc(data.error||'검색 준비 실패')+' · <button type="button" data-retry-catalog>다시 시도</button>';return;}
+    if(data.status==='loading')text=(data.previous?'검색 준비 중 · 이전 검색 결과 표시':waiting?'검색 준비 중 · 기본 상품 미리보기':'검색 준비 중')+(text?' · '+text:'');
+    notice.hidden=!text;notice.textContent=text;
   }
 
   var moreBtn = document.getElementById('gridMore');
@@ -969,7 +986,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       closeBrand();
       state.src = (state.src === b.dataset.src && b.dataset.src !== 'all') ? 'all' : b.dataset.src;
       store('src', state.src);
-      if (state.src !== 'musinsa'||D.catalog.musinsaCount>0) runtime.ensureCatalog();
+      if (!isV2&&(state.src !== 'musinsa'||D.catalog.musinsaCount>0)) runtime.ensureCatalog();
       render();
     });
   });
@@ -993,7 +1010,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   document.getElementById('resetBtn').addEventListener('click', function () {
     brandSearch.value='';
     state.filter = 'all'; state.cat = 'all'; state.src = 'all'; state.q = ''; state.brandKeys = []; qEl.value = '';
-    store('filter', 'all'); store('cat', 'all'); store('src', 'all'); if(state.src!=='musinsa'||D.catalog.musinsaCount>0)runtime.ensureCatalog(); render();
+    state.sort='rate';sortSel.value='rate';store('sort','rate');store('filter', 'all'); store('cat', 'all'); store('src', 'all'); if(!isV2&&(state.src!=='musinsa'||D.catalog.musinsaCount>0))runtime.ensureCatalog(); render();
   });
 
   /* ── 테마 ───────────────────────────────────────────────── */
@@ -1023,10 +1040,13 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   /* ── 모달 ───────────────────────────────────────────────── */
   var scrim = document.getElementById('scrim');
   var modalItem = null, chart = null, range = 90, lastFocus = null;
+  document.querySelector('script[src*="chart.umd.min.js"]').addEventListener('load',function(){
+    if(modalItem&&modalItem.historyLoaded&&scrim.classList.contains('open'))drawChart(modalItem);
+  });
 
-  document.getElementById('catalogNotice').addEventListener('click',function(e){if(e.target.closest('[data-retry-catalog]'))runtime.retryCatalog();});
+  document.getElementById('catalogNotice').addEventListener('click',function(e){if(e.target.closest('[data-retry-catalog]'))isV2?render():runtime.retryCatalog();});
   grid.addEventListener('click', function (e) {
-    if(e.target.closest('[data-retry-catalog]')){runtime.retryCatalog();return;}
+    if(e.target.closest('[data-retry-catalog]')){isV2?render():runtime.retryCatalog();return;}
     var c = e.target.closest('.card');
     if (c) openModal(c.dataset.k);
   });
@@ -1043,15 +1063,16 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     closeBrand();
     key=model.resolveKey(key);
     var token=++detailToken,selectionQuery=JSON.stringify(state);
-    var it;try{it=isV2?D.items.find(function(x){return x.k===key;})||await runtime.lookup(key):runtime.getCatalog().items.find(function(x){return x.k===key;});}catch(error){return;}
+    var it;try{it=isV2?(D.catalog.previewItems||D.items).find(function(x){return x.k===key;})||await runtime.lookup(key):runtime.getCatalog().items.find(function(x){return x.k===key;});}catch(error){return;}
     if(token!==detailToken||selectionQuery!==JSON.stringify(state))return;
+    if(!it&&isV2){detailNotice='상품을 찾을 수 없습니다';showStatus(runtime.getState(),false);return;}
     if(!it){
       await runtime.ensureCatalog();if(token!==detailToken)return;
       it=runtime.getCatalog().items.find(function(x){return x.k===key;});
     }
     if(!it)return;
     closeBrand();
-    if(!withinResult&&!view.some(function(x){return x.k===key;})){
+    if(!isV2&&!withinResult&&!view.some(function(x){return x.k===key;})){
       state.filter='all';state.cat='all';state.brandKeys=[];state.q='';qEl.value='';state.src='all';
       runtime.ensureCatalog();
       render();
@@ -1368,7 +1389,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   if(window.ResizeObserver)new ResizeObserver(measureHeader).observe(document.querySelector('.topbar'));
   else window.addEventListener('resize',measureHeader);
   render();
-  if(state.src!=='musinsa'||D.catalog.musinsaCount>0)runtime.ensureCatalog();
+  if(!isV2&&(state.src!=='musinsa'||D.catalog.musinsaCount>0))runtime.ensureCatalog();
   var qs=new URLSearchParams(location.search);
   var dl=qs.get('goods')||(D.targetGoodsNo?String(D.targetGoodsNo):null);
   if(dl)openModal(dl);

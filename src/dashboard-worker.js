@@ -2,6 +2,7 @@
 export async function createDashboardTransport({
   manifest,
   index,
+  scope,
   loadAsset,
   yieldTask = () => Promise.resolve(),
 }) {
@@ -14,6 +15,7 @@ export async function createDashboardTransport({
     )
       throw Error("데이터 파일 버전/크기 불일치");
   }
+  if (manifest.loadingMode === "scoped") return scoped();
   const chunks = new Array(manifest.indexParts.length);
   let next = 0;
   await Promise.all(
@@ -99,8 +101,202 @@ export async function createDashboardTransport({
     },
   });
   return engine;
+  function scoped() {
+    if (!scope) throw Error("Scope factory required");
+    const loaded = new Map(),
+      cards = new Map(),
+      routes = new Map(),
+      inflight = new Map(),
+      queue = [];
+    const preview = new Map(
+      (manifest.previewItems || manifest.bootstrap?.items || []).map((x) => [
+        x.k,
+        x,
+      ]),
+    );
+    let active = 0,
+      generation = 0,
+      current = null,
+      cancelCurrent = null;
+    const stale = () =>
+      Object.assign(Error("검색 결과가 변경되었습니다"), {
+        code: "STALE_RESULT",
+      });
+    function pump() {
+      while (active < 4 && queue.length) {
+        const job = queue.shift();
+        active++;
+        Promise.resolve()
+          .then(() => loadAsset(job.ref))
+          .then((v) => {
+            validate(job.ref, v.payload, v.bytes);
+            job.resolve(v.payload);
+          }, job.reject)
+          .catch(job.reject)
+          .finally(() => {
+            active--;
+            inflight.delete(job.ref.id);
+            pump();
+          });
+      }
+    }
+    function request(ref, kind, priority = Infinity) {
+      if (inflight.has(ref.id)) {
+        const job = inflight.get(ref.id);
+        job.priority = Math.max(job.priority, priority);
+        queue.sort((a, b) => b.priority - a.priority);
+        return job.promise;
+      }
+      let resolve, reject;
+      const promise = new Promise((a, b) => {
+        resolve = a;
+        reject = b;
+      });
+      const job = { ref, kind, promise, resolve, reject, priority };
+      inflight.set(ref.id, job);
+      queue.push(job);
+      queue.sort((a, b) => b.priority - a.priority);
+      pump();
+      return promise;
+    }
+    async function indexPart(ref, priority) {
+      if (loaded.has(ref.id)) return loaded.get(ref.id);
+      const payload = await request(ref, "index", priority),
+        rows = index.unpackIndex(payload);
+      if (
+        rows.length !== ref.count ||
+        new Set(rows.map((x) => x.k)).size !== rows.length ||
+        rows.some((x) => x.src !== ref.source || x.c !== ref.category)
+      )
+        throw Error("검색 범위/건수 불일치");
+      loaded.set(ref.id, rows);
+      await yieldTask();
+      return rows;
+    }
+    async function cardPart(ref, priority) {
+      if (cards.has(ref.id)) {
+        const p = cards.get(ref.id);
+        cards.delete(ref.id);
+        cards.set(ref.id, p);
+        return p;
+      }
+      const payload = await request(ref, "cards", priority);
+      if (
+        !Array.isArray(payload.items) ||
+        payload.items.length !== ref.count ||
+        new Set(payload.items.map((x) => x.k)).size !== ref.count
+      )
+        throw Error("카드 건수 불일치");
+      const map = new Map(payload.items.map((x) => [x.k, x]));
+      cards.set(ref.id, map);
+      while (cards.size > 8) cards.delete(cards.keys().next().value);
+      return map;
+    }
+    async function loadCards(keys, byKey, priority = Infinity) {
+      const values = await Promise.all(
+        keys.map(async (key) => {
+          if (preview.has(key)) return preview.get(key);
+          const ref = byKey.get(key)?.card;
+          if (!ref) throw Error("카드 참조 없음");
+          const x = (await cardPart(ref, priority)).get(key);
+          if (!x) throw Error("카드 상품 없음");
+          return x;
+        }),
+      );
+      return values;
+    }
+    function requireCurrent(id) {
+      if (!current || current.id !== id) throw stale();
+      return current;
+    }
+    function mask(result, coverage) {
+      for (const axis of ["sources", "categories"])
+        for (const [key, complete] of Object.entries(coverage[axis]))
+          result[axis][key] = complete ? (result[axis][key] ?? 0) : null;
+      return result;
+    }
+    return {
+      async query(state, requestId) {
+        const own = ++generation;
+        current = null;
+        cancelCurrent?.();
+        const superseded = new Promise((resolve, reject) => {
+          cancelCurrent = () => reject(stale());
+        });
+        const refs = scope.selectParts(manifest, state),
+          needed = new Set(refs.map((x) => x.id));
+        for (let i = queue.length - 1; i >= 0; i--)
+          if (queue[i].kind === "index" && !needed.has(queue[i].ref.id)) {
+            const [job] = queue.splice(i, 1);
+            inflight.delete(job.ref.id);
+            job.reject(stale());
+          }
+        try {
+          await Promise.race([
+            Promise.all(refs.map((ref) => indexPart(ref, own))),
+            superseded,
+          ]);
+          if (own !== generation) throw stale();
+          const rows = [...loaded.values()].flat(),
+            byKey = new Map(rows.map((x) => [x.k, x]));
+          if (byKey.size !== rows.length) throw Error("중복 상품 식별자");
+          const engine = index.createDashboardQueryEngine({
+            rows,
+            loadCards: (keys) => loadCards(keys, byKey, own),
+          });
+          const coverage = scope.facetCoverage(
+            manifest,
+            new Set(loaded.keys()),
+            state,
+          );
+          const result = await Promise.race([
+            engine.query(state, requestId),
+            superseded,
+          ]);
+          if (own !== generation) throw stale();
+          current = { id: own, engine, internal: result.resultId, coverage };
+          return { ...mask(result, coverage), resultId: own };
+        } catch (error) {
+          if (own !== generation) throw stale();
+          throw error;
+        }
+      },
+      async page(id, ...args) {
+        const c = requireCurrent(id),
+          r = await c.engine.page(c.internal, ...args);
+        requireCurrent(id);
+        return { ...mask(r, c.coverage), resultId: id };
+      },
+      async neighbor(id, ...args) {
+        const c = requireCurrent(id),
+          r = await c.engine.neighbor(c.internal, ...args);
+        requireCurrent(id);
+        return r;
+      },
+      async lookup(key) {
+        if (preview.has(key)) return preview.get(key);
+        const bucket = scope.routeBucket(key);
+        if (!routes.has(bucket)) {
+          const map = new Map();
+          for (const ref of manifest.routes[bucket] || []) {
+            const p = await request(ref, "routes");
+            if (!Array.isArray(p.entries) || p.entries.length !== ref.count)
+              throw Error("경로 건수 불일치");
+            for (const [k, card] of p.entries) {
+              if (scope.routeBucket(k) !== bucket || map.has(k))
+                throw Error("경로 상품 불일치");
+              map.set(k, { card });
+            }
+          }
+          routes.set(bucket, map);
+        }
+        const row = routes.get(bucket).get(key);
+        return row ? (await loadCards([key], new Map([[key, row]])))[0] : null;
+      },
+    };
+  }
 }
-export function runDashboardWorker({ model, index, transport }) {
+export function runDashboardWorker({ model, index, scope, transport }) {
   let enginePromise = null;
   const revisionAssets = new Map();
   async function loadAsset(ref) {
@@ -124,7 +320,7 @@ export function runDashboardWorker({ model, index, transport }) {
       if (method === "init") {
         const manifest = args[0];
         revisionAssets.set("revision", manifest.revision);
-        enginePromise = transport({ manifest, index, loadAsset });
+        enginePromise = transport({ manifest, index, scope, loadAsset });
         await enginePromise;
         result = true;
       } else {

@@ -187,7 +187,7 @@ describe('Visualizer HTML Generation', () => {
     assert.equal(res.totalItems, 1);
     const content = fs.readFileSync(tempOutput, 'utf-8');
     assert.ok(content.includes('"src":"musinsa"'));
-    assert.ok(!content.includes('"src":"4910"'));
+    assert.equal(JSON.parse(content.match(/window\.__CLOT_DATA__ = ([^\n]+);/)[1]).catalog.previews['4910'].keys.length,0);
     assert.equal(warns.length, 1);
   });
 

@@ -20,3 +20,10 @@ test('build verifier rejects missing summaries, revisions, counts and histories'
  const run=spawnSync(process.execPath,['scripts/verify-dashboard-build.js',output],{encoding:'utf8'});
  assert.notEqual(run.status,0);
 });
+test('scoped build verifier rejects wrong partition and route target',t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'clot-scope-verify-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const file=path.join(dir,'index.html');
+ function mutate(fn){writeFixture(dir);let html=fs.readFileSync(file,'utf8');const raw=html.match(/window\.__CLOT_DATA__ = ([^\n]+);/)[1],D=JSON.parse(raw);fn(D.catalog);fs.writeFileSync(file,html.replace(raw,JSON.stringify(D)));}
+ mutate(m=>m.indexParts[0].source='wrong');assert.throws(()=>verifyDashboardBuild(file),/partition/);
+ mutate(m=>{const buckets=Object.keys(m.routes);m.routes[(Number(buckets[0])+1)%256]=m.routes[buckets[0]];delete m.routes[buckets[0]];});assert.throws(()=>verifyDashboardBuild(file),/route/);
+});
