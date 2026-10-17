@@ -9,140 +9,65 @@ export function createDashboardRuntime(options) {
     onChange = () => {},
   } = options;
   if (manifest.v === 2) return v2(options);
-  function v2({
-    manifest,
-    model,
-    indexFactory,
-    historyFactory,
-    transportFactory,
-    loadAsset,
-    createWorker,
-    onChange = () => {},
-  }) {
-    indexFactory = indexFactory || globalThis.__CLOT_INDEX_FACTORY__;
-    historyFactory = historyFactory || globalThis.__CLOT_HISTORY_FACTORY__;
-    transportFactory =
-      transportFactory || globalThis.__CLOT_TRANSPORT_FACTORY__;
-    let state = {
-        status: "idle",
-        bootstrap: manifest.bootstrap,
-        error: null,
-        notice: manifest.notice,
-      },
-      pending = null,
-      engine = null,
-      worker = null,
-      disposed = false,
-      seq = 0;
-    const calls = new Map();
-    const emit = () => {
-      if (!disposed) onChange(state);
-    };
-    function rpc(method, args) {
-      const requestId = ++seq;
-      return new Promise((resolve, reject) => {
-        calls.set(requestId, { resolve, reject });
-        worker.postMessage({ requestId, method, args });
-      });
+  function v2({manifest,model,indexFactory,scopeFactory,historyFactory,transportFactory,loadAsset,createWorker,onChange=()=>{}}) {
+    indexFactory=indexFactory||globalThis.__CLOT_INDEX_FACTORY__;
+    scopeFactory=scopeFactory||globalThis.__CLOT_SCOPE_FACTORY__;
+    historyFactory=historyFactory||globalThis.__CLOT_HISTORY_FACTORY__;
+    transportFactory=transportFactory||globalThis.__CLOT_TRANSPORT_FACTORY__;
+    let state={status:'idle',phase:'preview',requestId:0,bootstrap:manifest.bootstrap,error:null,notice:manifest.notice};
+    let pending=null,engine=null,worker=null,initialized=false,disposed=false,seq=0,querySeq=0,lastQuery=null;
+    const calls=new Map(),local=new Set();
+    const emit=()=>{if(!disposed)onChange(state);};
+    const stale=()=>Object.assign(Error('검색 결과가 변경되었습니다'),{code:'STALE_RESULT'});
+    function guarded(promise) {
+      return new Promise((resolve,reject)=>{local.add(reject);Promise.resolve(promise).then(resolve,reject).finally(()=>local.delete(reject));});
     }
-    function stop() {
-      if (worker) worker.terminate();
-      worker = null;
-      for (const c of calls.values()) c.reject(Error("Worker stopped"));
-      calls.clear();
+    function rpc(method,args) {
+      const requestId=++seq;
+      return new Promise((resolve,reject)=>{calls.set(requestId,{resolve,reject});try{worker.postMessage({requestId,method,args});}catch(e){calls.delete(requestId);reject(e);}});
+    }
+    function stop(error=Error('Worker stopped')) {
+      initialized=false;engine=null;if(worker)worker.terminate();worker=null;
+      for(const c of calls.values())c.reject(error);calls.clear();
+      for(const reject of local)reject(error);local.clear();
     }
     function start() {
-      if (pending) return pending;
-      if (state.status === "ready") return Promise.resolve(state);
-      state = { ...state, status: "loading", error: null };
-      pending = (async () => {
+      if(disposed)return Promise.reject(Error('Runtime disposed'));
+      if(pending)return pending;
+      if(initialized)return Promise.resolve(state);
+      state={...state,status:'loading',error:null};
+      pending=Promise.resolve().then(async()=>{
         try {
-          if (createWorker) {
-            worker = createWorker(manifest.workerPath);
-            worker.onmessage = ({ data }) => {
-              const c = calls.get(data.requestId);
-              if (!c) return;
-              calls.delete(data.requestId);
-              data.ok
-                ? c.resolve(data.result)
-                : c.reject(
-                    Object.assign(Error(data.error.message), {
-                      code: data.error.code,
-                    }),
-                  );
-            };
-            worker.onerror = (event) => {
-              event.preventDefault?.();
-              state = {
-                ...state,
-                status: "error",
-                error: "검색 Worker를 시작하지 못했습니다",
-              };
-              stop();
-              emit();
-            };
-            await rpc("init", [manifest]);
-          } else {
-            const index = indexFactory(model);
-            if (!transportFactory) throw Error("Transport factory required");
-            engine = await transportFactory({
-              manifest,
-              index,
-              loadAsset,
-              yieldTask: () => new Promise((r) => setTimeout(r, 0)),
-            });
-          }
-          if (disposed) return state;
-          state = { ...state, status: "ready", error: null };
-        } catch (error) {
-          if (!disposed)
-            state = { ...state, status: "error", error: error.message };
-        } finally {
-          pending = null;
-          emit();
-        }
+          if(createWorker) {
+            const w=worker=createWorker(manifest.workerPath);
+            w.onmessage=({data})=>{if(disposed||worker!==w)return;const c=calls.get(data.requestId);if(!c)return;calls.delete(data.requestId);data.ok?c.resolve(data.result):c.reject(Object.assign(Error(data.error.message),{code:data.error.code}));};
+            w.onerror=event=>{if(disposed||worker!==w)return;event.preventDefault?.();const error=Error('검색 Worker를 시작하지 못했습니다');stop(error);state={...state,status:'error',error:error.message};emit();};
+            await rpc('init',[manifest]);
+          }else engine=await guarded(transportFactory({manifest,index:indexFactory(model),scope:scopeFactory?.(),loadAsset,yieldTask:()=>new Promise(r=>setTimeout(r,0))}));
+          if(disposed)throw Error('Runtime disposed');
+          initialized=true;state={...state,status:state.phase==='query'?'loading':'ready',error:null};
+        }catch(error){if(!disposed){stop(error);state={...state,status:'error',error:error.message};}}
+        finally{pending=null;emit();}
         return state;
-      })();
-      emit();
-      return pending;
+      });emit();return pending;
     }
-    async function invoke(method, args) {
-      await start();
-      if (disposed) throw Error("Runtime disposed");
-      if (state.status !== "ready") throw Error(state.error || "검색 준비 중");
-      return worker ? rpc(method, args) : engine[method](...args);
+    async function invoke(method,args) {
+      await start();if(disposed)throw Error('Runtime disposed');if(!initialized)throw Error(state.error||'검색 준비 중');
+      const result=await guarded(worker?rpc(method,args):engine[method](...args));if(disposed)throw Error('Runtime disposed');return result;
     }
-    const history = historyFactory({ revision: manifest.revision, loadAsset });
-    const api = {
-      getState: () => state,
-      getCatalog: () => state,
-      start,
-      ensureCatalog: start,
-      retry() {
-        stop();
-        engine = null;
-        state = { ...state, status: "idle", error: null };
-        return start();
+    const history=historyFactory({revision:manifest.revision,loadAsset});
+    const api={
+      getState:()=>state,getCatalog:()=>state,start,ensureCatalog:start,
+      async query(s) {
+        const own=++querySeq;lastQuery=model.restoreState(s);state={...state,status:'loading',phase:'query',requestId:own,error:null};emit();
+        try{const result=await invoke('query',[lastQuery,own]);if(own!==querySeq)throw stale();state={...state,status:'ready',error:null};emit();return result;}
+        catch(error){if(disposed)throw Error('Runtime disposed');if(own!==querySeq)throw stale();if(error.code!=='STALE_RESULT'){state={...state,status:'error',error:error.message};emit();}throw error;}
       },
-      query: (s) => invoke("query", [s, ++seq]),
-      page: (...a) => invoke("page", a),
-      lookup: (key) => invoke("lookup", [model.resolveKey(key)]),
-      neighbor: (...a) => invoke("neighbor", a),
-      async getHistory(key, options) {
-        const item =
-          manifest.bootstrap.items.find((x) => x.k === model.resolveKey(key)) ||
-          (await api.lookup(key));
-        if (!item) throw Error("상품을 찾을 수 없습니다");
-        return history.get(item.k, item.detail, options);
-      },
-      dispose() {
-        disposed = true;
-        stop();
-        history.clear();
-      },
-    };
-    api.retryCatalog = api.retry;
-    return api;
+      retry(){if(lastQuery)return api.query(lastQuery);return start();},
+      page:(...a)=>invoke('page',a),lookup:key=>invoke('lookup',[model.resolveKey(key)]),neighbor:(...a)=>invoke('neighbor',a),
+      async getHistory(key,options) {const resolved=model.resolveKey(key),item=(manifest.previewItems||manifest.bootstrap.items).find(x=>x.k===resolved)||(await api.lookup(key));if(!item)throw Error('상품을 찾을 수 없습니다');return guarded(history.get(item.k,item.detail,options));},
+      dispose(){disposed=true;querySeq++;stop(Error('Runtime disposed'));history.clear();}
+    };api.retryCatalog=api.retry;return api;
   }
   let state = {
       status: manifest.parts.length ? "idle" : "ready",

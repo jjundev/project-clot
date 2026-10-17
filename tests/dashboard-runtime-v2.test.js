@@ -65,3 +65,14 @@ test('transport reuses bootstrap cards and fetches other card files with bounded
  const seeded=await createDashboardTransport({manifest,index,loadAsset});assert.equal((await seeded.query({})).total,8);assert.equal(cardCalls,0);
  const fresh=await createDashboardTransport({manifest:{...manifest,bootstrap:{items:[]}},index,loadAsset});await fresh.query({});assert.ok(max>1&&max<=4);
 });
+import {createDashboardScope} from '../src/dashboard-scope.js';
+const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};};
+function runtimeHarness(t) {
+ const queries=[],events=[];let starts=0;
+ const api=createDashboardRuntime({manifest:{v:2,loadingMode:'scoped',revision:'r',bootstrap:{items:[]}},model:createDashboardModel(),indexFactory:createDashboardIndex,scopeFactory:createDashboardScope,historyFactory:createHistoryLoader,loadAsset:async()=>{throw Error('unexpected history');},transportFactory:async()=>{starts++;return {query:()=>{const d=deferred();queries.push(d);return d.promise;},lookup:async()=>null};},onChange:s=>events.push(s)});
+ t.after(()=>api.dispose());return {api,queries,events,starts:()=>starts};
+}
+test('runtime separates worker ready from scope ready',async t=>{const {api,queries}=runtimeHarness(t);await api.start();assert.equal(api.getState().phase,'preview');const p=api.query({src:'musinsa'});await new Promise(r=>setImmediate(r));assert.equal(api.getState().status,'loading');assert.equal(api.getState().phase,'query');queries[0].resolve({total:1});await p;assert.equal(api.getState().status,'ready');});
+test('late query success or error cannot replace current state',async t=>{const {api,queries}=runtimeHarness(t);const old=api.query({q:'old'});const caught=assert.rejects(old,{code:'STALE_RESULT'});await new Promise(r=>setImmediate(r));const latest=api.query({q:'latest'});await new Promise(r=>setImmediate(r));queries[1].resolve({total:2});await latest;queries[0].reject(Error('late failure'));await caught;assert.equal(api.getState().status,'ready');assert.equal(api.getState().error,null);});
+test('dispose rejects pending work without later emissions',async t=>{const {api,queries,events}=runtimeHarness(t);const p=api.query({});const rejected=assert.rejects(p,/disposed|stopped/i);await new Promise(r=>setImmediate(r));api.dispose();const n=events.length;queries[0].resolve({});await rejected;assert.equal(events.length,n);});
+test('history lookup does not prepare search scope',async t=>{const {api,queries}=runtimeHarness(t);await assert.rejects(api.getHistory('musinsa:999'),/찾을 수/);assert.equal(queries.length,0);});

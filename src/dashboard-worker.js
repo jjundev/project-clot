@@ -177,7 +177,7 @@ export async function createDashboardTransport({
   }
 
 }
-export function runDashboardWorker({ model, index, transport }) {
+export function runDashboardWorker({ model, index, scope, transport }) {
   let enginePromise = null;
   const revisionAssets = new Map();
   async function loadAsset(ref) {
@@ -201,7 +201,7 @@ export function runDashboardWorker({ model, index, transport }) {
       if (method === "init") {
         const manifest = args[0];
         revisionAssets.set("revision", manifest.revision);
-        enginePromise = transport({ manifest, index, loadAsset });
+        enginePromise = transport({ manifest, index, scope, loadAsset });
         await enginePromise;
         result = true;
       } else {
