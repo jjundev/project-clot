@@ -737,7 +737,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
 
   /* ── 상태 ───────────────────────────────────────────────── */
   var state = model.restoreState({src:store('src'),cat:store('cat'),filter:store('filter'),sort:store('sort')});
-  var view = [], shown = 0, PAGE = 120, lastQuery = null;
+  var view = [], shown = 0, PAGE = 120, lastQuery = null, brandCountsKnown = false;
   var grid = document.getElementById('grid'), qEl = document.getElementById('q'), sortSel = document.getElementById('sortSel');
   sortSel.value = state.sort;
   function loadDataScript(src) {
@@ -812,10 +812,10 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     var keys=JSON.stringify(choices.map(function(b){return b.key;}));
     var optionHadFocus=brandOptions.contains(document.activeElement);
     var focusedBrand=optionHadFocus?document.activeElement.dataset.brand:null;
-    if(keys!==brandOptionKeys){
+    if(keys!==brandOptionKeys||!choices.length){
       brandOptions.innerHTML=choices.length?choices.map(function(b){
-        return '<label class="brand-option"><input type="checkbox" data-brand="'+esc(b.key)+'"><span>'+esc(b.label)+'</span><b class="num">'+fmt(b.count)+'</b></label>';
-      }).join(''):'<p>조건에 맞는 브랜드가 없습니다</p>';
+        return '<label class="brand-option"><input type="checkbox" data-brand="'+esc(b.key)+'"><span>'+esc(b.label)+'</span><b class="num">'+fmt(brandCountsKnown?b.count:null)+'</b></label>';
+      }).join(''):(brandCountsKnown?'<p>조건에 맞는 브랜드가 없습니다</p>':'<p>브랜드 검색 준비 중…</p>');
       brandOptionKeys=keys;
       if(optionHadFocus){
         var nextFocus=[].find.call(brandOptions.querySelectorAll("input[data-brand]"),function(el){return el.dataset.brand===focusedBrand;});
@@ -825,7 +825,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     brandOptions.querySelectorAll('input[data-brand]').forEach(function(input){
       input.checked=selected.includes(input.dataset.brand);
       var b=choices.find(function(x){return x.key===input.dataset.brand;});
-      input.parentNode.querySelector('.num').textContent=fmt(b.count);
+      input.parentNode.querySelector('.num').textContent=fmt(brandCountsKnown?b.count:null);
     });
   }
 
@@ -904,7 +904,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     var query=model.queryCatalog(data.items,state);paint(query,data,waiting);
   }
   function paint(query,data,waiting){
-    lastQuery=query;firstOffset=0;topHeight=0;topSpacer.style.height="0px";pageBusy=false;
+    lastQuery=query;brandCountsKnown=!waiting;firstOffset=0;topHeight=0;topSpacer.style.height="0px";pageBusy=false;
     view=query.items;
     document.getElementById('shownN').textContent=waiting?'—':fmt(query.total);
     document.getElementById('resetBtn').hidden=state.filter==='all'&&state.cat==='all'&&state.src==='all'&&!state.q&&!state.brandKeys.length;
@@ -1040,6 +1040,9 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   /* ── 모달 ───────────────────────────────────────────────── */
   var scrim = document.getElementById('scrim');
   var modalItem = null, chart = null, range = 90, lastFocus = null;
+  document.querySelector('script[src*="chart.umd.min.js"]').addEventListener('load',function(){
+    if(modalItem&&modalItem.historyLoaded&&scrim.classList.contains('open'))drawChart(modalItem);
+  });
 
   document.getElementById('catalogNotice').addEventListener('click',function(e){if(e.target.closest('[data-retry-catalog]'))isV2?render():runtime.retryCatalog();});
   grid.addEventListener('click', function (e) {

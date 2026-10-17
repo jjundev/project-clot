@@ -363,3 +363,155 @@ test("verifier accepts untracked cards with absent optional price fields", async
   fs.writeFileSync(file, "window.__CLOT_DATA__ = " + JSON.stringify(D) + ";\n");
   assert.equal(verifyDashboardBuild(file).totalItems, 1);
 });
+test("new scope downloads precede the obsolete card backlog", async () => {
+  const { createDashboardScope } = await import("../src/dashboard-scope.js");
+  const makeRef = (id, count) => ({
+    id,
+    path: "assets/" + id + ".js",
+    bytes: 1,
+    count,
+  });
+  const rows = Array.from({ length: 9 }, (_, n) => ({
+    ...model.summarize({
+      src: n === 8 ? "4910" : "musinsa",
+      n,
+      b: "b",
+      g: "g",
+      c: "top",
+      L: [],
+    }),
+    card: makeRef("cards-" + n, 1),
+  }));
+  const refs = [
+    { ...makeRef("index-0", 8), source: "musinsa", category: "top" },
+    { ...makeRef("index-1", 1), source: "4910", category: "top" },
+  ];
+  const releases = [],
+    gates = rows.map((_, n) => new Promise((r) => (releases[n] = r))),
+    calls = [];
+  const engine = await createDashboardTransport({
+    manifest: {
+      v: 2,
+      loadingMode: "scoped",
+      revision: "r",
+      indexParts: refs,
+      bootstrap: { items: [] },
+      routes: {},
+    },
+    scope: createDashboardScope(),
+    index,
+    loadAsset: async (ref) => {
+      calls.push(ref.id);
+      if (ref.id.startsWith("index"))
+        return {
+          payload: index.packIndex(
+            ref.id === "index-0" ? rows.slice(0, 8) : rows.slice(8),
+            { revision: "r", id: ref.id },
+          ),
+          bytes: 1,
+        };
+      const n = Number(ref.id.split("-")[1]);
+      await gates[n];
+      return {
+        payload: { v: 2, revision: "r", id: ref.id, items: [rows[n]] },
+        bytes: 1,
+      };
+    },
+  });
+  const old = engine.query({ src: "musinsa" }),
+    rejected = assert.rejects(old, { code: "STALE_RESULT" });
+  await new Promise((r) => setImmediate(r));
+  const latest = engine.query({ src: "4910" });
+  releases[0]();
+  try {
+    await new Promise((r) => setImmediate(r));
+    assert.equal(calls[5], "index-1");
+  } finally {
+    for (const r of releases) r();
+    await rejected;
+    await latest;
+  }
+});
+test("direct lookup bypasses the queued whole-catalog index backlog", async () => {
+  const { createDashboardScope } = await import("../src/dashboard-scope.js"),
+    scope = createDashboardScope(),
+    ref = (id, count = 1) => ({
+      id,
+      path: "assets/" + id + ".js",
+      bytes: 1,
+      count,
+    });
+  const rows = Array.from({ length: 8 }, (_, n) => ({
+      ...model.summarize({
+        src: "musinsa",
+        n,
+        b: "b",
+        g: "g",
+        c: "top",
+        L: [],
+      }),
+      card: ref("cards-" + n),
+    })),
+    parts = rows.map((_, n) => ({
+      ...ref("index-" + n),
+      source: "musinsa",
+      category: "top",
+    })),
+    route = ref("routes-0");
+  const releases = [],
+    gates = rows.map((_, n) => new Promise((r) => (releases[n] = r))),
+    calls = [];
+  const engine = await createDashboardTransport({
+    manifest: {
+      v: 2,
+      loadingMode: "scoped",
+      revision: "r",
+      indexParts: parts,
+      bootstrap: { items: [] },
+      routes: { [scope.routeBucket("musinsa:7")]: [route] },
+    },
+    scope,
+    index,
+    loadAsset: async (r) => {
+      calls.push(r.id);
+      const n = Number(r.id.split("-")[1]);
+      if (r.id.startsWith("index")) {
+        await gates[n];
+        return {
+          payload: index.packIndex([rows[n]], { revision: "r", id: r.id }),
+          bytes: 1,
+        };
+      }
+      return {
+        payload: {
+          v: 2,
+          revision: "r",
+          id: r.id,
+          ...(r.id.startsWith("routes")
+            ? { entries: [["musinsa:7", rows[7].card]] }
+            : { items: [rows[n]] }),
+        },
+        bytes: 1,
+      };
+    },
+  });
+  const search = engine.query({ src: "all" });
+  await new Promise((r) => setImmediate(r));
+  const lookup = engine.lookup("musinsa:7");
+  releases[0]();
+  try {
+    await new Promise((r) => setImmediate(r));
+    assert.equal(calls[4], "routes-0");
+    assert.equal(
+      await Promise.race([
+        lookup.then((x) => x.k),
+        new Promise((r) => setTimeout(() => r("blocked"), 30)),
+      ]),
+      "musinsa:7",
+    );
+  } finally {
+    for (const r of releases) r();
+    await search;
+    await lookup;
+  }
+});

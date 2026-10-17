@@ -140,22 +140,28 @@ export async function createDashboardTransport({
           });
       }
     }
-    function request(ref, kind) {
-      if (inflight.has(ref.id)) return inflight.get(ref.id).promise;
+    function request(ref, kind, priority = Infinity) {
+      if (inflight.has(ref.id)) {
+        const job = inflight.get(ref.id);
+        job.priority = Math.max(job.priority, priority);
+        queue.sort((a, b) => b.priority - a.priority);
+        return job.promise;
+      }
       let resolve, reject;
       const promise = new Promise((a, b) => {
         resolve = a;
         reject = b;
       });
-      const job = { ref, kind, promise, resolve, reject };
+      const job = { ref, kind, promise, resolve, reject, priority };
       inflight.set(ref.id, job);
       queue.push(job);
+      queue.sort((a, b) => b.priority - a.priority);
       pump();
       return promise;
     }
-    async function indexPart(ref) {
+    async function indexPart(ref, priority) {
       if (loaded.has(ref.id)) return loaded.get(ref.id);
-      const payload = await request(ref, "index"),
+      const payload = await request(ref, "index", priority),
         rows = index.unpackIndex(payload);
       if (
         rows.length !== ref.count ||
@@ -167,14 +173,14 @@ export async function createDashboardTransport({
       await yieldTask();
       return rows;
     }
-    async function cardPart(ref) {
+    async function cardPart(ref, priority) {
       if (cards.has(ref.id)) {
         const p = cards.get(ref.id);
         cards.delete(ref.id);
         cards.set(ref.id, p);
         return p;
       }
-      const payload = await request(ref, "cards");
+      const payload = await request(ref, "cards", priority);
       if (
         !Array.isArray(payload.items) ||
         payload.items.length !== ref.count ||
@@ -186,13 +192,13 @@ export async function createDashboardTransport({
       while (cards.size > 8) cards.delete(cards.keys().next().value);
       return map;
     }
-    async function loadCards(keys, byKey) {
+    async function loadCards(keys, byKey, priority = Infinity) {
       const values = await Promise.all(
         keys.map(async (key) => {
           if (preview.has(key)) return preview.get(key);
           const ref = byKey.get(key)?.card;
           if (!ref) throw Error("카드 참조 없음");
-          const x = (await cardPart(ref)).get(key);
+          const x = (await cardPart(ref, priority)).get(key);
           if (!x) throw Error("카드 상품 없음");
           return x;
         }),
@@ -226,14 +232,17 @@ export async function createDashboardTransport({
             job.reject(stale());
           }
         try {
-          await Promise.race([Promise.all(refs.map(indexPart)), superseded]);
+          await Promise.race([
+            Promise.all(refs.map((ref) => indexPart(ref, own))),
+            superseded,
+          ]);
           if (own !== generation) throw stale();
           const rows = [...loaded.values()].flat(),
             byKey = new Map(rows.map((x) => [x.k, x]));
           if (byKey.size !== rows.length) throw Error("중복 상품 식별자");
           const engine = index.createDashboardQueryEngine({
             rows,
-            loadCards: (keys) => loadCards(keys, byKey),
+            loadCards: (keys) => loadCards(keys, byKey, own),
           });
           const coverage = scope.facetCoverage(
             manifest,

@@ -166,7 +166,7 @@ test('removing a zero-count brand keeps keyboard focus inside the open dialog',a
  const {page,url}=await fixture(t);await page.goto(url);
  await page.locator('#brandTrigger').click();await page.getByRole('checkbox',{name:'GU 1',exact:true}).check();await page.keyboard.press('Escape');
  await page.locator('[data-src=musinsa]').click();await page.locator('#brandTrigger').click();
- await page.getByRole('checkbox',{name:'GU 0',exact:true}).focus();await page.keyboard.press('Space');await page.getByRole('checkbox',{name:'GU 0',exact:true}).waitFor({state:'hidden'});
+ await page.getByRole('checkbox',{name:'GU 0',exact:true}).focus();await page.keyboard.press('Space');await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready');await page.locator('input[data-brand="gu"]').waitFor({state:'hidden'});
  assert.equal(await page.locator('#brandDialog').evaluate(e=>e.contains(document.activeElement)&&document.activeElement.offsetParent!==null),true);
  await page.keyboard.press('Tab');assert.equal(await page.locator('#brandDialog').evaluate(e=>e.contains(document.activeElement)),true);
 });
@@ -263,4 +263,16 @@ test('rapid scope changes retain newest results after delayed old downloads',asy
  await page.addInitScript(()=>{localStorage.setItem('clot.src','4910');localStorage.setItem('clot.cat','top');});
  await page.context().route('**/assets/index-*.js*',async r=>{if([...oldParts].some(p=>r.request().url().includes(p)))await gate;await r.continue();});
  try{await page.goto(url);await page.locator('[data-src=musinsa]').click();await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready');assert.equal(await page.locator('#shownN').textContent(),'1');release();await page.waitForTimeout(100);assert.equal(await page.locator('.card').first().getAttribute('data-k'),'musinsa:2');}finally{release();}
+});
+test('a deferred chart that arrives after deep-link history redraws the current modal',async t=>{
+ const {page,url}=await fixture(t);let release;const gate=new Promise(r=>release=r);
+ await page.route('**/chart.umd.min.js',async r=>{await gate;await r.fulfill({contentType:'text/javascript',body:'window.Chart=class {constructor(canvas,config){canvas.dataset.chartConfig=JSON.stringify(config);} destroy(){}}'});});
+ try{await page.goto(url+'?goods=1',{waitUntil:'commit'});await page.waitForFunction(()=>document.querySelector('#mRows')?.textContent.includes('2026-10-16'));release();await page.waitForFunction(()=>document.querySelector('#chart').dataset.chartConfig);assert.equal(await page.locator('#chartFallback').isVisible(),false);}finally{release();}
+});
+test('unconfirmed brand counts are dash while restored scoped search is blocked',async t=>{
+ const {page,url}=await fixture(t);await page.addInitScript(()=>{localStorage.setItem('clot.src','musinsa');localStorage.setItem('clot.cat','top');});await page.context().route('**/assets/index-*.js*',r=>r.abort());await page.goto(url);await page.locator('#brandTrigger').click();const counts=await page.locator('#brandOptions .num').allTextContents();assert.ok(counts.length);assert.ok(counts.every(x=>x==='—'));
+});
+test('pending empty brand choices become a confirmed empty result after scope readiness',async t=>{
+ const {page,url}=await fixture(t);let release;const gate=new Promise(r=>release=r);await page.addInitScript(()=>{localStorage.setItem('clot.src','musinsa');localStorage.setItem('clot.cat','top');});await page.context().route('**/assets/index-*.js*',async r=>{await gate;await r.continue();});
+ try{await page.goto(url);await page.locator('#brandTrigger').click();await page.locator('#brandSearch').fill('NEVER_EXISTS');assert.match(await page.locator('#brandOptions').textContent(),/준비 중/);release();await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready');assert.match(await page.locator('#brandOptions').textContent(),/조건에 맞는 브랜드가 없습니다/);}finally{release();}
 });
