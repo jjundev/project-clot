@@ -3,6 +3,7 @@ import path from "node:path";
 import { createAssetWriter } from "./dashboard-assets.js";
 import { createHistoryExporter } from "./dashboard-history.js";
 import { createDashboardModel } from "./dashboard-model.js";
+import { createDashboardScope } from "./dashboard-scope.js";
 import { packIndex } from "./dashboard-index.js";
 /** Build-time sink: retains current summaries, never the whole archive. */
 export function createDashboardBuilder({ outDir, revision }) {
@@ -66,11 +67,12 @@ export function createDashboardBuilder({ outDir, revision }) {
     finish({ scanState, notice, musinsaCount = 0, scanCount = 0 }) {
       history.finish();
       flush();
-      const indexParts = [];
-      for (let i = 0; i < summaries.length; i += 1200) {
+      const indexParts = [], groups = new Map();
+      for(const x of summaries) { const k=x.src+":"+x.c; if(!groups.has(k))groups.set(k,[]); groups.get(k).push(x); }
+      for (const group of groups.values()) for (let i = 0; i < group.length; i += 1200) {
         for (const { ref } of splitWrite(
           "index",
-          summaries.slice(i, i + 1200),
+          group.slice(i, i + 1200),
           (items) => {
             const {
               v,
@@ -81,11 +83,20 @@ export function createDashboardBuilder({ outDir, revision }) {
             return data;
           },
         ))
-          indexParts.push(ref);
+          indexParts.push({...ref,source:group[0].src,category:group[0].c});
       }
       const state = model.restoreState({}),
         q = model.queryCatalog(summaries, state),
         { items, ...facets } = q;
+      const previews={}, previewCards=new Map(), routes={}, buckets=new Map(), scope=createDashboardScope();
+      for(const src of ['all','musinsa','4910']) {
+        const state=model.restoreState({src}), {items,...facets}=model.queryCatalog(summaries,state);
+        const first=items.slice(0,120);
+        previews[src]={state,keys:first.map(x=>x.k),facets};
+        for(const {card,...x} of first) previewCards.set(x.k,x);
+      }
+      for(const x of summaries) {const bucket=scope.routeBucket(x.k); if(!buckets.has(bucket))buckets.set(bucket,[]); buckets.get(bucket).push([x.k,x.card]);}
+      for(const [bucket,entries]of buckets) routes[bucket]=splitWrite('routes',entries,entries=>({entries})).map(x=>x.ref);
       const first = items.slice(0, 120).map(({ card, ...x }) => x);
       return {
         catalog: {
@@ -95,6 +106,7 @@ export function createDashboardBuilder({ outDir, revision }) {
           notice,
           totalItems: summaries.length,
           indexParts,
+          loadingMode:"scoped", routes, previews, previewItems:[...previewCards.values()],
           bootstrap: { state, ...facets, items: first },
           workerPath: "dashboard-worker.js",
           musinsaCount,

@@ -1,3 +1,4 @@
+import { createDashboardScope } from "../src/dashboard-scope.js";
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
@@ -163,7 +164,12 @@ function verifyV2(D, directory) {
     cache.set(ref.id, p);
     return p;
   }
-  const rows = m.indexParts.flatMap((r) => unpackIndex(load(r))),
+  const rows = m.indexParts.flatMap((r) => {
+    const rows=unpackIndex(load(r));
+    if(rows.length!==r.count)throw Error('index count mismatch');
+    if(m.loadingMode==='scoped' && rows.some(x=>x.src!==r.source||x.c!==r.category))throw Error('index partition mismatch');
+    return rows;
+  }),
     keys = new Set(),
     cards = new Map();
   for (const row of rows) {
@@ -222,6 +228,24 @@ function verifyV2(D, directory) {
     JSON.stringify(D.items.map((x) => x.k))
   )
     throw Error("bootstrap order mismatch");
+  if(m.loadingMode==='scoped') {
+    const scope=createDashboardScope(), routes=new Map();
+    for(const [bucket,refs] of Object.entries(m.routes)) for(const ref of refs) {
+      const p=load(ref); if(!Array.isArray(p.entries)||p.entries.length!==ref.count)throw Error('route count mismatch');
+      for(const [key,card] of p.entries) {
+        if(scope.routeBucket(key)!==Number(bucket)||routes.has(key)||!load(card).items.some(x=>x.k===key))throw Error('route target mismatch');
+        routes.set(key,card);
+      }
+    }
+    if(routes.size!==keys.size||[...keys].some(k=>!routes.has(k)))throw Error('route coverage mismatch');
+    const preview=new Map(m.previewItems.map(x=>[x.k,x]));
+    if(preview.size!==m.previewItems.length)throw Error('duplicate preview');
+    for(const src of ['all','musinsa','4910']) {
+      const p=m.previews[src], {items,...facets}=model.queryCatalog([...cards.values()],model.restoreState({src}));
+      if(JSON.stringify(facets)!==JSON.stringify(p.facets)||JSON.stringify(p.keys)!==JSON.stringify(items.slice(0,120).map(x=>x.k)))throw Error('preview mismatch');
+      for(const key of p.keys)if(JSON.stringify(preview.get(key))!==JSON.stringify(cards.get(key)))throw Error('preview card mismatch');
+    }
+  }
   return {
     totalItems: rows.length,
     total4910: rows.filter((x) => x.src === "4910").length,
