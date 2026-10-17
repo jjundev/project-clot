@@ -208,7 +208,7 @@ test('recent 90 defaults and archived all-history failure retries without changi
 });
 test('default cards do not wait for index and saved filters do not show default counts',async t=>{
  const {page,url}=await fixture(t);let release;const gate=new Promise(r=>release=r);await page.route('**/assets/index-*.js*',async r=>{await gate;await r.continue();});
- await page.goto(url);assert.equal(await page.locator('.card').count(),5);assert.equal(await page.locator('#shownN').textContent(),'5');await page.locator('[data-src=musinsa]').click();assert.equal(await page.locator('#shownN').textContent(),'2');assert.equal(await page.locator('.card').count(),2);release();await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='2');
+ await page.goto(url);assert.equal(await page.locator('.card').count(),5);assert.equal(await page.locator('#shownN').textContent(),'5');assert.equal(await page.locator('#cntBag').textContent(),'0');await page.locator('[data-src=musinsa]').click();assert.equal(await page.locator('#shownN').textContent(),'2');assert.equal(await page.locator('.card').count(),2);release();await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='2');
 });
 
 test('bounded card window reloads previous pages without losing the result order',async t=>{

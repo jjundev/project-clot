@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { createDashboardScope } from "../src/dashboard-scope.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -138,6 +139,11 @@ export function verifyDashboardBuild(outputPath) {
   };
 }
 function verifyV2(D, directory) {
+  const equal = (a, b) =>
+    isDeepStrictEqual(
+      JSON.parse(JSON.stringify(a ?? null)),
+      JSON.parse(JSON.stringify(b ?? null)),
+    );
   const m = D.catalog,
     model = createDashboardModel(),
     cache = new Map();
@@ -165,11 +171,15 @@ function verifyV2(D, directory) {
     return p;
   }
   const rows = m.indexParts.flatMap((r) => {
-    const rows=unpackIndex(load(r));
-    if(rows.length!==r.count)throw Error('index count mismatch');
-    if(m.loadingMode==='scoped' && rows.some(x=>x.src!==r.source||x.c!==r.category))throw Error('index partition mismatch');
-    return rows;
-  }),
+      const rows = unpackIndex(load(r));
+      if (rows.length !== r.count) throw Error("index count mismatch");
+      if (
+        m.loadingMode === "scoped" &&
+        rows.some((x) => x.src !== r.source || x.c !== r.category)
+      )
+        throw Error("index partition mismatch");
+      return rows;
+    }),
     keys = new Set(),
     cards = new Map();
   for (const row of rows) {
@@ -181,7 +191,8 @@ function verifyV2(D, directory) {
     const x = cards.get(row.k);
     if (!x) throw Error("missing card");
     for (const f of ["my", "sale", "priceSource", "observedDate"])
-      if (x[f] !== row[f]) throw Error("index card mismatch");
+      if ((x[f] ?? null) !== (row[f] ?? null))
+        throw Error("index card mismatch");
   }
   // Decode each history file once; verify complete original history and global summary semantics.
   const histories = new Map();
@@ -221,29 +232,50 @@ function verifyV2(D, directory) {
     throw Error("total count mismatch");
   const q = model.queryCatalog([...cards.values()], m.bootstrap.state);
   for (const f of ["total", "sources", "quick", "categories", "brands"])
-    if (JSON.stringify(q[f]) !== JSON.stringify(m.bootstrap[f]))
-      throw Error("bootstrap mismatch " + f);
+    if (!equal(q[f], m.bootstrap[f])) throw Error("bootstrap mismatch " + f);
   if (
     JSON.stringify(q.items.slice(0, 120).map((x) => x.k)) !==
     JSON.stringify(D.items.map((x) => x.k))
   )
     throw Error("bootstrap order mismatch");
-  if(m.loadingMode==='scoped') {
-    const scope=createDashboardScope(), routes=new Map();
-    for(const [bucket,refs] of Object.entries(m.routes)) for(const ref of refs) {
-      const p=load(ref); if(!Array.isArray(p.entries)||p.entries.length!==ref.count)throw Error('route count mismatch');
-      for(const [key,card] of p.entries) {
-        if(scope.routeBucket(key)!==Number(bucket)||routes.has(key)||!load(card).items.some(x=>x.k===key))throw Error('route target mismatch');
-        routes.set(key,card);
+  if (m.loadingMode === "scoped") {
+    const scope = createDashboardScope(),
+      routes = new Map();
+    for (const [bucket, refs] of Object.entries(m.routes))
+      for (const ref of refs) {
+        const p = load(ref);
+        if (!Array.isArray(p.entries) || p.entries.length !== ref.count)
+          throw Error("route count mismatch");
+        for (const [key, card] of p.entries) {
+          if (
+            scope.routeBucket(key) !== Number(bucket) ||
+            routes.has(key) ||
+            !load(card).items.some((x) => x.k === key)
+          )
+            throw Error("route target mismatch");
+          routes.set(key, card);
+        }
       }
-    }
-    if(routes.size!==keys.size||[...keys].some(k=>!routes.has(k)))throw Error('route coverage mismatch');
-    const preview=new Map(m.previewItems.map(x=>[x.k,x]));
-    if(preview.size!==m.previewItems.length)throw Error('duplicate preview');
-    for(const src of ['all','musinsa','4910']) {
-      const p=m.previews[src], {items,...facets}=model.queryCatalog([...cards.values()],model.restoreState({src}));
-      if(JSON.stringify(facets)!==JSON.stringify(p.facets)||JSON.stringify(p.keys)!==JSON.stringify(items.slice(0,120).map(x=>x.k)))throw Error('preview mismatch');
-      for(const key of p.keys)if(JSON.stringify(preview.get(key))!==JSON.stringify(cards.get(key)))throw Error('preview card mismatch');
+    if (routes.size !== keys.size || [...keys].some((k) => !routes.has(k)))
+      throw Error("route coverage mismatch");
+    const preview = new Map(m.previewItems.map((x) => [x.k, x]));
+    if (preview.size !== m.previewItems.length)
+      throw Error("duplicate preview");
+    for (const src of ["all", "musinsa", "4910"]) {
+      const p = m.previews[src],
+        { items, ...facets } = model.queryCatalog(
+          [...cards.values()],
+          model.restoreState({ src }),
+        );
+      if (
+        !equal(facets, p.facets) ||
+        JSON.stringify(p.keys) !==
+          JSON.stringify(items.slice(0, 120).map((x) => x.k))
+      )
+        throw Error("preview mismatch");
+      for (const key of p.keys)
+        if (!equal(preview.get(key), cards.get(key)))
+          throw Error("preview card mismatch");
     }
   }
   return {

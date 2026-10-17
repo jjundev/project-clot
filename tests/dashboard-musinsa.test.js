@@ -1,4 +1,5 @@
 import './setup-env.js';
+import {createDashboardScope} from "../src/dashboard-scope.js";
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import vm from 'node:vm';
@@ -36,7 +37,7 @@ const db=new DatabaseSync(':memory:');t.after(()=>db.close());db.exec("CREATE TA
 const output=path.join(dir,'index.html');generateDashboardHtml({db,db4910Path:null,dbMusinsaPath:path.join(dir,'wide.db'),outputPath:output,openBrowser:false});
 const html=fs.readFileSync(output,'utf8'),D=JSON.parse(html.match(/window\.__CLOT_DATA__ = ([^\n]+);/)[1]);
 assert.equal(D.items.find(x=>x.k==='musinsa:1').my,80);assert.equal(D.musinsa.active,2);assert.equal(D.catalog.scanCount,2);
-const runtime=createDashboardRuntime({model:createDashboardModel(),manifest:D.catalog,indexFactory:createDashboardIndex,historyFactory:createHistoryLoader,transportFactory:createDashboardTransport,loadAsset:async ref=>{const w={};const text=fs.readFileSync(path.join(dir,ref.path),'utf8');vm.runInNewContext(text,w);return {payload:w.__CLOT_ASSETS__[ref.id],bytes:Buffer.byteLength(text)};}});
+const runtime=createDashboardRuntime({model:createDashboardModel(),manifest:D.catalog,indexFactory:createDashboardIndex,scopeFactory:createDashboardScope,historyFactory:createHistoryLoader,transportFactory:createDashboardTransport,loadAsset:async ref=>{const w={};const text=fs.readFileSync(path.join(dir,ref.path),'utf8');vm.runInNewContext(text,w);return {payload:w.__CLOT_ASSETS__[ref.id],bytes:Buffer.byteLength(text)};}});
 await runtime.start();assert.equal(runtime.getState().status,'ready');assert.equal((await runtime.lookup('1')).my,80);assert.equal((await runtime.getHistory('1')).rows.at(-1)[3],80);
 assert.equal(verifyDashboardBuild(output).totalItems,2);
 });
