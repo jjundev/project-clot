@@ -38,3 +38,38 @@ test('empty scopes and oversized route buckets stay valid',async t=>{
  for(const f of fs.readdirSync(path.join(dir,'assets')))assert.ok(fs.statSync(path.join(dir,'assets',f)).size<=262144);
 });
 export {fixture,model,index};
+import {createDashboardTransport} from '../src/dashboard-worker.js';
+async function transportFixture(t,options={}) {
+ const f=fixture(t,options.count??520), scope=(await import('../src/dashboard-scope.js')).createDashboardScope(); const calls=[];
+ const engine=await createDashboardTransport({manifest:f.data.catalog,index,scope,loadAsset:async ref=>{calls.push(ref);return options.load?options.load(ref,f.read):f.read(ref);}});
+ return {...f,engine,calls,scope};
+}
+test('scoped init does not fetch indexes',async t=>{const {calls}=await transportFixture(t);assert.equal(calls.length,0);});
+test('musinsa top query fetches only matching parts and incomplete cross facets are null',async t=>{
+ const {engine,calls,data}=await transportFixture(t);const r=await engine.query({src:'musinsa',cat:'top'},1);
+ assert.equal(r.total,173);assert.equal(r.sources.musinsa,173);assert.equal(r.sources['4910'],null);assert.equal(r.sources.all,null);assert.equal(r.categories.etc,null);assert.equal(r.categories.shoes,0);
+ assert.deepEqual(calls.filter(x=>x.id.startsWith('index')).map(x=>x.id),data.catalog.indexParts.filter(x=>x.source==='musinsa'&&x.category==='top').map(x=>x.id));
+ assert.ok(calls.every(x=>!x.id.startsWith('history')));
+});
+test('scope widening reuses loaded files and complete results preserve all sorts',async t=>{
+ const {engine,calls,data,read}=await transportFixture(t);await engine.query({src:'musinsa',cat:'top'});await engine.query({src:'musinsa'});
+ for(const sort of ['category','rate','priceAsc','priceDesc','dropAmt','brand','new']) {
+  const state={src:'all',sort,q:'product',filter:'all'},r=await engine.query(state),all=data.catalog.indexParts.flatMap(ref=>index.unpackIndex(read(ref).payload));
+  const expected=model.queryCatalog(all,state);assert.equal(r.total,expected.total);assert.deepEqual(r.items.map(x=>x.k),expected.items.slice(0,120).map(x=>x.k));assert.deepEqual(r.sources,expected.sources);
+ }
+ const ids=calls.filter(x=>x.id.startsWith('index')).map(x=>x.id);assert.equal(new Set(ids).size,ids.length);
+});
+test('lookup uses only route and card files',async t=>{
+ const {engine,calls}=await transportFixture(t);assert.equal((await engine.lookup('musinsa:518')).k,'musinsa:518');assert.equal(await engine.lookup('musinsa:999999'),null);assert.ok(calls.every(x=>!x.id.startsWith('index')&&!x.id.startsWith('history')));
+});
+test('failed part is retryable and never counted as complete',async t=>{
+ let fail=true;const {engine,calls}=await transportFixture(t,{load:(ref,read)=>{if(fail&&ref.id.startsWith('index')){fail=false;throw Error('offline');}return read(ref);}});
+ await assert.rejects(engine.query({src:'musinsa',cat:'top'}),/offline/);assert.equal((await engine.query({src:'musinsa',cat:'top'})).total,173);assert.equal(calls.filter(x=>x.id.startsWith('index')).length,2);
+});
+test('latest scope bypasses obsolete queued downloads',async t=>{
+ let release;const gate=new Promise(r=>release=r);let active=0,max=0;
+ const {engine,calls,data}=await transportFixture(t,{count:12000,load:async(ref,read)=>{max=Math.max(max,++active);if(ref.id.startsWith('index'))await gate;active--;return read(ref);}});
+ const old=engine.query({src:'all'},1);const rejected=assert.rejects(old,{code:'STALE_RESULT'});await new Promise(r=>setImmediate(r));
+ const newest=engine.query({src:'4910',cat:'etc'},2);release();await rejected;const result=await newest;assert.ok(result.items.every(x=>x.src==='4910'&&x.c==='etc'));assert.ok(max<=4);
+ const wanted=new Set(data.catalog.indexParts.filter(x=>x.source==='4910'&&x.category==='etc').map(x=>x.id));assert.ok(calls.filter(x=>x.id.startsWith('index')).slice(4).every(x=>wanted.has(x.id)));
+});
