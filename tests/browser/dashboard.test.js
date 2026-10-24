@@ -27,7 +27,7 @@ test('all includes every source; search and facets share the complete catalog ov
  assert.equal(await page.locator('#sAll').textContent(),'5');
  assert.equal(await page.locator('#sMusinsa').textContent(),'2');
  assert.equal(await page.locator('#s4910').textContent(),'3');
- await page.getByRole('searchbox',{name:'브랜드 또는 상품명 검색'}).fill('나이키');
+ await page.getByRole('searchbox',{name:'브랜드, 상품명, 상품번호 또는 URL 검색'}).fill('나이키');
  await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='3');
  await page.locator('.chip[data-filter=lowest]').click();
  await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='1');
@@ -275,4 +275,55 @@ test('unconfirmed brand counts are dash while restored scoped search is blocked'
 test('pending empty brand choices become a confirmed empty result after scope readiness',async t=>{
  const {page,url}=await fixture(t);let release;const gate=new Promise(r=>release=r);await page.addInitScript(()=>{localStorage.setItem('clot.src','musinsa');localStorage.setItem('clot.cat','top');});await page.context().route('**/assets/index-*.js*',async r=>{await gate;await r.continue();});
  try{await page.goto(url);await page.locator('#brandTrigger').click();await page.locator('#brandSearch').fill('NEVER_EXISTS');assert.match(await page.locator('#brandOptions').textContent(),/준비 중/);release();await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready');assert.match(await page.locator('#brandOptions').textContent(),/조건에 맞는 브랜드가 없습니다/);}finally{release();}
+});
+
+const coatSelector='.card[data-k="musinsa:2156295"]';
+test('product search bypasses blocked indexes over HTTP and file',async t=>{
+ const {page,dir,url}=await fixture(t,{search:true});
+ await page.route('**/assets/index-*.js*',r=>r.abort());
+ for(const location of [url,pathToFileURL(path.join(dir,'index.html')).href]){
+  await page.goto(location);await page.locator('#q').fill('https://www.musinsa.com/products/2156295?utm_content='+'x'.repeat(4096));
+  await page.locator(coatSelector).waitFor();assert.equal(await page.locator('.card').count(),1);
+  assert.equal(await page.locator('#gridMore').isVisible(),false);
+  assert.match(await page.locator('#catalogNotice').textContent(),/상품번호 조회/);
+  await page.locator(coatSelector).click();await page.locator('#scrim.open').waitFor();assert.equal(await page.locator('#prevBtn').isEnabled(),false);assert.equal(await page.locator('#nextBtn').isEnabled(),false);
+  await page.locator('#mRows').filter({hasText:'2026-10-16'}).waitFor();await page.locator('#closeBtn').click();
+ }
+});
+test('product search preserves saved filters',async t=>{
+ const {page,dir,url}=await fixture(t,{search:true});
+ for(const location of [url,pathToFileURL(path.join(dir,'index.html')).href]){
+  await page.goto(location);await page.evaluate(()=>{localStorage.setItem('clot.src','4910');localStorage.setItem('clot.cat','top');localStorage.setItem('clot.filter','drop');});await page.reload();
+  await page.locator('#q').fill('2156295');await page.locator(coatSelector).waitFor();
+  assert.equal(await page.locator('[data-od-id=kpi-row]').isVisible(),false);
+  assert.deepEqual(await page.evaluate(()=>['src','cat','filter'].map(k=>localStorage.getItem('clot.'+k))),['4910','top','drop']);
+  await page.locator('#q').fill('');await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready');
+  assert.equal(await page.locator('[data-src="4910"]').getAttribute('aria-pressed'),'true');
+  assert.equal(await page.locator('[data-cat="top"]').getAttribute('aria-pressed'),'true');
+  assert.equal(await page.locator('.chip[data-filter="drop"]').getAttribute('aria-pressed'),'true');
+ }
+});
+test('invalid, missing and failed lookup are separate screens',async t=>{
+ const {page,dir,url}=await fixture(t,{search:true});let fail=false,calls=0;
+ await page.route('**/assets/routes-*.js*',r=>{calls++;return fail?r.abort():r.continue();});
+ for(const location of [url,pathToFileURL(path.join(dir,'index.html')).href]){
+  await page.goto(location);await page.locator('#q').fill('https://musinsa.com.evil.test/products/2156295');
+  await page.locator('#grid[data-search-status=invalid]').waitFor();assert.equal(calls,0);
+  await page.locator('#q').fill('99999999');await page.getByText('현재 대시보드에 등록된 상품이 없습니다',{exact:true}).waitFor();
+  fail=true;await page.locator('#q').fill('2156295');await page.getByText('상품을 조회하지 못했습니다',{exact:true}).waitFor();
+  assert.equal(await page.getByText('현재 대시보드에 등록된 상품이 없습니다',{exact:true}).count(),0);
+  fail=false;await page.getByRole('button',{name:'다시 시도',exact:true}).click();await page.locator(coatSelector).waitFor();calls=0;
+ }
+});
+test('late lookup cannot replace newer text or invalid input',async t=>{
+ const {page,dir,url}=await fixture(t,{search:true});
+ for(const location of [url,pathToFileURL(path.join(dir,'index.html')).href]){
+  let release;const gate=new Promise(r=>release=r);let entered;const started=new Promise(r=>entered=r);
+  await page.route('**/assets/routes-*.js*',async r=>{entered();await gate;await r.continue();});
+  await page.goto(location);await page.locator('#q').fill('2156295');await Promise.race([started,new Promise((_,reject)=>setTimeout(()=>reject(Error('product route not requested')),8000))]);
+  await page.locator('#q').fill('https://evil.test/products/2156295');await page.locator('#grid[data-search-status=invalid]').waitFor();release();
+  await page.waitForTimeout(300);assert.equal(await page.locator('.card').count(),0);assert.equal(await page.locator('#grid').getAttribute('data-search-status'),'invalid');
+  await page.unroute('**/assets/routes-*.js*');
+  await page.locator('#q').fill('kimuir 캐시미어');await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready');assert.equal(await page.locator('.card').count(),2);
+ }
 });

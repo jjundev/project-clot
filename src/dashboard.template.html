@@ -502,6 +502,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
  .brand-options{max-height:55dvh}
  .resultbar{gap:12px;align-items:flex-start}
 }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
@@ -569,7 +570,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
         <circle cx="9" cy="9" r="5.5"/><path d="m13.2 13.2 3.3 3.3"/>
       </svg>
-      <input id="q" type="search" placeholder="브랜드 · 상품명 검색" autocomplete="off" aria-label="브랜드 또는 상품명 검색" data-od-id="search-input">
+      <input id="q" type="search" placeholder="브랜드 · 상품명 · 상품번호 · URL 검색" autocomplete="off" aria-label="브랜드, 상품명, 상품번호 또는 URL 검색" data-od-id="search-input">
       <kbd>/</kbd>
     </div>
 
@@ -766,8 +767,9 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     if(location.protocol!=='file:')return fetch(ref.path+'?v='+encodeURIComponent(D.catalog.revision),{signal:AbortSignal.timeout(15000)}).then(function(r){if(!r.ok)throw Error('파일 요청 실패');return r.text();}).then(function(text){(0,eval)(text);var payload=(globalThis.__CLOT_ASSETS__||{})[ref.id];delete globalThis.__CLOT_ASSETS__[ref.id];return {payload:payload,bytes:new TextEncoder().encode(text).length};});
     return new Promise(function(resolve,reject){var tag=document.createElement('script'),timer=setTimeout(function(){finish(Error('파일 요청 시간 초과'));},15000),done=false;function finish(error){if(done)return;done=true;clearTimeout(timer);tag.remove();var p=(globalThis.__CLOT_ASSETS__||{})[ref.id];if(globalThis.__CLOT_ASSETS__)delete globalThis.__CLOT_ASSETS__[ref.id];if(error||!p)reject(error||Error('파일 내용 없음'));else resolve({payload:p,bytes:ref.bytes});}tag.onload=function(){finish();};tag.onerror=function(){finish(Error('파일 요청 실패'));};tag.src=ref.path+'?v='+encodeURIComponent(D.catalog.revision);document.head.appendChild(tag);});
   }
+  var searchMode='empty';
   var isV2=D.catalog.v===2,queryToken=0,pageBusy=false,firstOffset=0,topHeight=0;
-  var runtime = window.__CLOT_RUNTIME_FACTORY__({model:model,baseItems:D.items,inlineHistories:D.inlineHistories,manifest:D.catalog,loadScript:loadDataScript,loadAsset:loadAsset,createWorker:isV2&&location.protocol!=='file:'?function(file){return new Worker(file+'?v='+encodeURIComponent(D.catalog.revision));}:null,onChange:function(data){if(!isV2)render();else if(data.status==='error'){grid.dataset.searchStatus='error';showStatus(data,true);}}});
+  var runtime = window.__CLOT_RUNTIME_FACTORY__({model:model,baseItems:D.items,inlineHistories:D.inlineHistories,manifest:D.catalog,loadScript:loadDataScript,loadAsset:loadAsset,createWorker:isV2&&location.protocol!=='file:'?function(file){return new Worker(file+'?v='+encodeURIComponent(D.catalog.revision));}:null,onChange:function(data){if(!isV2)render();else if((searchMode==='empty'||searchMode==='text')&&data.status==='error'){grid.dataset.searchStatus='error';showStatus(data,true);}}});
   var topSpacer=document.createElement('div');topSpacer.id='gridTopSpacer';grid.before(topSpacer);
 
   var brandDialog=document.getElementById('brandDialog'),brandTrigger=document.getElementById('brandTrigger');
@@ -886,9 +888,33 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     previewSource=state.src;
     return query;
   }
+  function setSearchMode(mode) {
+    searchMode=mode;
+    var special=mode==='product'||mode==='invalid';
+    document.querySelectorAll('.kpi,.cat-bar,.toolbar>.chips,.brand-controls,.sort,.resultbar').forEach(function(el){el.hidden=special;});
+    document.getElementById('musinsaNotice').hidden=special||!D.musinsa;
+  }
+  function paintProduct(item,status,message) {
+    lastQuery=null;brandCountsKnown=false;view=item?[item]:[];shown=view.length;
+    firstOffset=0;topHeight=0;pageBusy=false;topSpacer.style.height='0px';moreBtn.hidden=true;
+    grid.dataset.searchStatus=status;
+    grid.innerHTML=item?cardHtml(item):'<div class="empty"><b>'+esc(message||'상품 조회 중')+'</b></div>';
+    var notice=document.getElementById('catalogNotice');notice.hidden=false;
+    notice.innerHTML=status==='error'?'상품을 조회하지 못했습니다 · <button type="button" data-retry-catalog>다시 시도</button>':status==='invalid'?esc(message):'상품번호 조회 · 일반 검색 필터와 관계없이 표시합니다';
+    if(modalItem)updateStepper(-1);
+  }
+  function renderProduct(parsed,token) {
+    paintProduct(null,'loading');
+    var pending=isV2?runtime.searchProduct(parsed.key):runtime.ensureCatalog().then(function(data){if(data.status!=='ready')throw Error(data.error);return {item:data.items.find(function(x){return x.k===parsed.key;})||null};});
+    pending.then(function(result){if(token!==queryToken)return;paintProduct(result.item,'ready',result.item?'':'현재 대시보드에 등록된 상품이 없습니다');}).catch(function(error){if(token!==queryToken||error.code==='STALE_RESULT')return;paintProduct(null,'error','상품을 조회하지 못했습니다');});
+  }
   function render() {
+    var parsed=model.parseSearchInput(state.q),token=++queryToken;
+    setSearchMode(parsed.type);
+    if(parsed.type==='invalid'){paintProduct(null,'invalid',parsed.message);return;}
+    if(parsed.type==='product'){renderProduct(parsed,token);return;}
     if(isV2){
-      var token=++queryToken,data=runtime.getState();
+      var data=runtime.getState();
       var baseline=model.restoreState({src:state.src});
       var defaults=JSON.stringify(model.restoreState(state))===JSON.stringify(baseline);
       var keep=lastQuery&&lastQuery.resultId&&previewSource===state.src;
@@ -1052,6 +1078,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   });
 
   function updateStepper(i) {
+    if(searchMode==='product'||searchMode==='invalid'){document.getElementById('prevBtn').disabled=true;document.getElementById('nextBtn').disabled=true;document.getElementById('mPos').textContent='—';return;}
     if(isV2){if(!modalItem||!lastQuery?.resultId){document.getElementById('prevBtn').disabled=true;document.getElementById('nextBtn').disabled=true;return;}var key=modalItem.k,token=detailToken;runtime.neighbor(lastQuery.resultId,key,0).then(function(x){if(token!==detailToken||!x)return;document.getElementById('prevBtn').disabled=x._position<=0;document.getElementById('nextBtn').disabled=x._position>=lastQuery.total-1;document.getElementById('mPos').textContent=(x._position+1)+' / '+lastQuery.total;}).catch(function(){});return;}
     var p = document.getElementById('prevBtn'), n = document.getElementById('nextBtn');
     p.disabled = i <= 0; n.disabled = i < 0 || i >= view.length - 1;
