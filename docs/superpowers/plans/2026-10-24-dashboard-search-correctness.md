@@ -71,7 +71,7 @@
 - Produces: `parseSearchInput(input: string): SearchInput`, `normalizeSearchText(value: unknown): string`, `searchFields(item: object): string[]`, `matchesSearch(item: object, tokens: string[]): boolean`. SearchInput의 네 variant와 입력 규칙은 spec과 같다.
 - Produces: `queryCatalog()`가 단어별 AND를 집계 전에 적용한다. 기존 반환 구조·정렬·brandKey는 유지한다.
 
-- [ ] **Step 1: 실패 테스트 작성**
+- [x] **Step 1: 실패 테스트 작성**
 
 `tests/dashboard-search.test.js`에 spec 고정 fixture와 아래 assertion을 넣는다. `matchesSearch()` 검증은 `parseSearchInput(q).tokens`를 사용한다.
 
@@ -99,21 +99,21 @@ assert.notEqual(model.brandKey('A-B'), model.brandKey('AB'));
 
 두 단어가 서로 다른 필드에 나뉘어도 AND 일치하고 순서를 바꿔도 같은지 고정한다. factory를 vm에서 toString으로 재생성한 뒤 같은 파싱·검색 결과를 assert한다.
 
-- [ ] **Step 2: 실패 확인**
+- [x] **Step 2: 실패 확인**
 
 Run: `node --test tests/dashboard-search.test.js tests/dashboard-model.test.js`
 Expected: 새 함수 부재 또는 새 검색 기대값에서 FAIL. 기존 테스트 실패를 새 동작으로 덮어쓰지 않는다.
 
-- [ ] **Step 3: model 계약 구현**
+- [x] **Step 3: model 계약 구현**
 
 위 함수를 factory 안에 구현한다. NFKC 후 Unicode `\p{L}\p{M}\p{N}` 구간으로 token을 만들고 compact 필드의 includes로 각 token을 판정한다. `queryCatalog()`는 URL/상품번호 분류를 수행하지 않고 q 문자열을 같은 token 규칙으로 나누며, item을 mutate하지 않는다. 기호뿐인 q는 빈 검색과 달리 0건이며 UI에서는 invalid 안내가 된다. existing `_hay`만 있는 객체도 원본 필드로 검색할 수 있게 한다. 각 summarize 결과에 `_searchFields: string[]`를 만들되 브랜드 키와 기존 가격 속성은 변경하지 않는다.
 
-- [ ] **Step 4: 통과 확인**
+- [x] **Step 4: 통과 확인**
 
 Run: `node --test tests/dashboard-search.test.js tests/dashboard-model.test.js tests/dashboard-index.test.js`
 Expected: 전부 PASS. model query의 기존 input 불변성 assertion도 PASS.
 
-- [ ] **Step 5: 작업 범위만 커밋**
+- [x] **Step 5: 작업 범위만 커밋**
 
 Run: `git add src/dashboard-model.js tests/dashboard-search.test.js tests/dashboard-model.test.js` 후 `git diff --cached --check`.
 Run: `git commit -m "fix: support normalized multi-term dashboard search"`
@@ -130,7 +130,7 @@ Run: `git commit -m "fix: support normalized multi-term dashboard search"`
 - Produces: 모든 새 summary의 `searchAliases: string[]`, `_searchFields: string[]`. `searchAliases`는 기존 index fields 뒤의 마지막 열이며 누락 시 `[]`다.
 - Produces: buildMusinsaCatalog의 공개 brand 코드가 card, preview, index, 직접 조회에 보존된다. 표시명과 index v2 필드 위치는 그대로다.
 
-- [ ] **Step 1: 실패 테스트 작성**
+- [x] **Step 1: 실패 테스트 작성**
 
 ```js
 const raw = {...coat, searchAliases:['kimuir']};
@@ -146,21 +146,21 @@ assert.deepEqual(unpackIndex(old)[0].searchAliases, []);
 
 adapter test에서는 SQLite fixture의 `brand='kimuir', brand_name='키뮤어'`를 설정하고 실제 buildMusinsaCatalog → sink → pack/unpack으로 별칭이 유지되는지 assert한다. 표시명 키뮤어, 동일 원문 상품명, 가격 출처·가격 값은 유지돼야 한다. null/빈/누락 별칭은 []로 복원하고 brand만 없는 다른 출처에 추정 별칭을 만들지 않는다. 기존 SECRET_PRIVATE_RESPONSE 비노출 검사를 유지한다. `tests/dashboard-scope.test.js`에서 실제 builder의 별칭 검색과 build verifier 통과를 확인한다.
 
-- [ ] **Step 2: 실패 확인**
+- [x] **Step 2: 실패 확인**
 
 Run: `node --test tests/dashboard-musinsa.test.js tests/dashboard-index.test.js tests/dashboard-scope.test.js`
 Expected: brand 별칭 전달/round-trip assertion에서 FAIL.
 
-- [ ] **Step 3: adapter와 직렬화 계약 구현**
+- [x] **Step 3: adapter와 직렬화 계약 구현**
 
 model은 string 배열만 정리·중복 제거해 `searchAliases`로 보존한다. adapter는 공개 brand 코드만 전달한다. index는 fields 뒤에 열을 추가하고 unpack에서 누락을 []로 보완한 뒤 Task 1 helper로 `_searchFields`를 만든다. 기존 validate의 revision/bytes/v2 검사는 약화하지 않는다. builder의 크기별 분할을 재사용하며 원시 회원 응답이나 URL을 검색 index에 추가하지 않는다.
 
-- [ ] **Step 4: 통과 확인**
+- [x] **Step 4: 통과 확인**
 
 Run: `node --test tests/dashboard-search.test.js tests/dashboard-model.test.js tests/dashboard-musinsa.test.js tests/dashboard-index.test.js tests/dashboard-scope.test.js tests/dashboard-build.test.js`
 Expected: 전부 PASS, 기존 bounded asset·verifier·identity 검증 유지.
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 Run: `git add src/dashboard-musinsa.js src/dashboard-model.js src/dashboard-index.js tests/dashboard-musinsa.test.js tests/dashboard-index.test.js tests/dashboard-scope.test.js` 후 `git diff --cached --check`.
 Run: `git commit -m "fix: preserve public brand aliases in dashboard search"`
@@ -176,7 +176,7 @@ Run: `git commit -m "fix: preserve public brand aliases in dashboard search"`
 - Produces: transport `cancelQuery(): Promise<void>`와 Worker RPC `cancelQuery`.
 - Produces: v2 runtime `searchProduct(key: string): Promise<{mode:'product',key:string,item:Summary|null}>`. query와 공유하는 latest-request sequence, `state.phase='product'`, 마지막 operation을 재실행하는 retry(). 기존 query 결과 구조와 저수준 lookup 의미는 유지한다.
 
-- [ ] **Step 1: 실패 테스트 작성**
+- [x] **Step 1: 실패 테스트 작성**
 
 runtime harness의 transport에 controllable lookup/cancelQuery를 추가한다. fixture helper는 파일 내부에 정의하고 공개 제품 API로 추가하지 않는다.
 
@@ -192,21 +192,21 @@ assert.equal(api.getState().status, 'ready');
 
 transport tests는 query의 네 active index 요청을 gate로 묶고 cancelQuery 후 query가 gate 해제 전에 STALE_RESULT로 끝나는지, queued index가 실행되지 않는지, lookup이 새 index 없이 routes/card로 완료되는지 확인한다. 이미 시작된 gate 요청은 finally에서 해제한다.
 
-- [ ] **Step 2: 실패 확인**
+- [x] **Step 2: 실패 확인**
 
 Run: `node --test tests/dashboard-runtime-v2.test.js tests/dashboard-scope.test.js`
 Expected: searchProduct/cancelQuery 부재에서 FAIL.
 
-- [ ] **Step 3: runtime과 transport 계약 구현**
+- [x] **Step 3: runtime과 transport 계약 구현**
 
 공유 operation wrapper로 query/searchProduct의 sequence·status·guard·retry를 묶는다. searchProduct는 scoped 모드에서 cancelQuery를 RPC 호출하고 lookup을 수행한다. cancelQuery는 generation 증가·cancelCurrent 종료·current 무효화·queued index 취소를 수행하고 loaded cache는 유지한다. 기존 pending 초기화/worker 재시작/dispose 보호를 유지한다. non-scoped v2에서는 scoped 전용 cancelQuery를 호출하지 않는다. 저수준 lookup은 모달용으로 상태를 바꾸지 않는다.
 
-- [ ] **Step 4: 통과 확인**
+- [x] **Step 4: 통과 확인**
 
 Run: `node --test tests/dashboard-runtime-v2.test.js tests/dashboard-runtime.test.js tests/dashboard-scope.test.js tests/dashboard-index.test.js`
 Expected: 전부 PASS, 기존 query/page/neighbor 계약과 Worker 재시작 테스트 유지.
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 Run: `git add src/dashboard-worker.js src/dashboard-runtime.js tests/dashboard-runtime-v2.test.js tests/dashboard-scope.test.js` 후 `git diff --cached --check`.
 Run: `git commit -m "feat: add independent dashboard product lookup"`
@@ -223,7 +223,7 @@ Run: `git commit -m "feat: add independent dashboard product lookup"`
 - Produces: empty/text/product/invalid 화면 분기. 직접 조회는 q 이외의 State와 localStorage를 보존하고 페이징/집계를 사용하지 않는다. UI request token은 모든 입력 모드를 관통한다.
 - Produces: `writeFixture(dir,{search:true})` 옵션. 기존 기본 fixture와 scale fixture는 그대로다. search fixture는 production build 경로로 coat와 이름이 비슷한 other(2156296)를 만들며 coat는 직접 조회용 preview에 포함되지 않게 121개 이상의 높은 할인율 상품을 앞에 둔다. 방해 상품은 무신사 top/outer에 번갈아 배치해 범위 확대 테스트에 별도 index가 존재하도록 한다. 가격은 spec의 ESTIMATED 예시를 사용한다.
 
-- [ ] **Step 1: 실패 browser 테스트 작성**
+- [x] **Step 1: 실패 browser 테스트 작성**
 
 현재 browser fixture(t, options)의 options를 그대로 전달해 search fixture를 사용한다. 같은 테스트를 HTTP와 file://에서 실행한다. 표준 helper는 `await page.locator('#q').fill(value)` 후 기대 화면을 기다린다. 새 접근성 이름과 다음 assertion을 고정한다.
 
@@ -239,20 +239,20 @@ assert.equal(await page.locator('#nextBtn').isEnabled(), false);
 
 `product search bypasses blocked indexes over HTTP and file`는 모든 index 파일 요청을 abort하고 긴 무신사 URL로 coat가 표시되는지 확인한다. routes/card는 허용한다. `product search preserves saved filters`는 저장 src=4910/cat=top/filter=drop 상태에서도 coat를 찾고 q를 비우면 같은 필터가 복원되는지 확인한다. `invalid, missing and failed lookup are separate screens`는 유사 호스트 입력에 lookup 요청 0회, 존재하지 않는 번호에는 spec 미등록 문구, route/card 실패에는 spec 오류 문구와 재시도 버튼을 assert한다. 실패 파일을 복원한 뒤 버튼으로 같은 key가 표시돼야 한다. `late lookup cannot replace newer text or invalid input`은 지연 조회 후 다른 문구/잘못된 URL을 입력했을 때 이전 카드가 나타나지 않는지 확인한다.
 
-- [ ] **Step 2: 실패 확인**
+- [x] **Step 2: 실패 확인**
 
 Run: `CLOT_BROWSER_EXECUTABLE='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' node --test --test-name-pattern='product search|invalid, missing|late lookup' tests/browser/dashboard.test.js`
 Expected: 단일 상품/모드 안내/필터 보관 assertion에서 FAIL. 실행 환경에 Chrome이 없으면 검증된 Playwright Chromium 실행 경로를 사용하고 임의 설치하지 않는다.
 
-- [ ] **Step 3: UI 모드 구현**
+- [x] **Step 3: UI 모드 구현**
 
 render()에서 parseSearchInput으로 분기한다. product는 runtime.searchProduct 결과만 전용 painter에 전달하고 lastQuery를 null로 두어 결과 내 neighbor와 more를 비활성화한다. 원래 일반 상태를 변경하거나 restoreState에 새 임의 mode 필드를 저장하지 않는다. invalid는 요청을 시작하지 않고 token을 증가시켜 이전 결과를 무효화한다. runtime 생성부의 onChange도 현재 화면이 invalid이면 이전 operation 오류를 표시하지 않도록 보호한다. 일반 KPI/필터/정렬/집계는 각각 wrapper 또는 hidden 처리로 product 모드에서 숨기고 복귀 시 복원한다. spec의 placeholder·aria-label·세 상태 문구를 그대로 사용한다. 기존 상세 링크의 startup, modal history와 닫기 동작을 유지한다. legacy v1은 catalog 준비 후 key lookup으로 같은 표시 의미를 제공하며 index 우회 성능 보장에서는 제외한다.
 
-- [ ] **Step 4: 통과 확인**
+- [x] **Step 4: 통과 확인**
 
 Step 2 명령을 재실행한다. Expected: 새 browser tests 전부 PASS. 이어 `node --test tests/visualizer-html.test.js tests/dashboard-v2.test.js tests/visualizer-data.test.js`를 실행해 직렬화/HTML 회귀도 PASS인지 확인한다.
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 Run: `git add src/dashboard.template.html tests/helpers/dashboard-page.js tests/browser/dashboard.test.js` 후 `git diff --cached --check`.
 Run: `git commit -m "feat: support product IDs and URLs in dashboard search"`
@@ -267,7 +267,7 @@ Run: `git commit -m "feat: support product IDs and URLs in dashboard search"`
 - Consumes: Tasks 1–4의 검색 모드와 State.
 - Produces: `필터 해제`는 src/cat/filter='all', brandKeys=[]로 만들되 q/sort 유지. 전체 초기화는 기존 동작. IME는 compositionend 후 180ms debounce 한 번만 실행한다.
 
-- [ ] **Step 1: 실패 browser 테스트 작성**
+- [x] **Step 1: 실패 browser 테스트 작성**
 
 `clear filters preserves query and sorting`에서 일반 검색 q='키뮤어 캐시미어', sort=priceAsc와 일치하지 않는 출처/카테고리/하락/브랜드 조건을 설정한다. `필터 해제` 클릭 후 아래 assertion과 localStorage의 src/cat/filter='all'을 확인한다. 브랜드 선택을 위한 fixture 값은 Task 4 search fixture의 실제 브랜드를 사용한다.
 
@@ -282,20 +282,20 @@ await page.locator('.card[data-k="musinsa:2156295"]').waitFor();
 
 `filter clearing uses current pending input and full reset cancels it`는 180ms 전에 필터 해제/전체 초기화를 각각 클릭해 최신 q 보존과 전체 q 비움을 확인한다. `query failure marks counts unknown and labels previous cards`는 localStorage로 무신사 아우터만 먼저 준비하고 무신사 상의 index를 차단한 뒤 같은 출처에서 카테고리를 전체로 넓힌다. 전체 인덱스가 이미 cache된 상황에서 실패를 유도하지 않는다. 이전 카드 표시 문구·건수 —·재시도를 확인한다. `estimated drop exclusion has an explanation`은 ESTIMATED coat가 일반 하락 필터에서 빠지지만 spec 안내가 표시되는지 확인한다. 새 접근성 이름을 사용하도록 기존 browser searchbox 선택자도 갱신한다.
 
-- [ ] **Step 2: 실패 확인**
+- [x] **Step 2: 실패 확인**
 
 Run: `CLOT_BROWSER_EXECUTABLE='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' node --test --test-name-pattern='clear filters|composition searches|filter clearing|query failure marks|estimated drop exclusion' tests/browser/dashboard.test.js`
 Expected: 필터 해제/IME/오류 집계 안내 assertion에서 FAIL.
 
-- [ ] **Step 3: 필터·입력 상태 구현**
+- [x] **Step 3: 필터·입력 상태 구현**
 
 활성 조건 요약과 필터 해제 버튼을 일반 검색 resultbar에 추가한다. 저장 값 갱신과 brandSearch 초기화를 포함한다. 필터 해제는 pending timer를 취소하고 qEl의 최신 값을 state.q에 반영한다. compositionstart/end와 input의 composing flag로 spec debounce 규칙을 구현한다. 전체 초기화는 timer와 composing flag도 정리한다. loading/error painter는 shownN과 모든 미확정 facet/KPI를 —로 표시하고, 확정 0은 숫자 0으로 유지한다. 재시도는 현재 입력 모드의 render를 재실행한다.
 
-- [ ] **Step 4: 사용자 문서 반영**
+- [x] **Step 4: 사용자 문서 반영**
 
 README의 dashboard 검색 설명에 AND 단어 검색, 붙여쓰기 처리, 숫자=무신사·출처 접두어·허용 URL, 직접 조회의 필터 우회와 일반 검색 복원, 필터 해제/초기화 차이, 미등록과 실패 구분을 추가한다. 성능 개편이나 오타 교정을 완료했다고 쓰지 않는다.
 
-- [ ] **Step 5: 통합 검증**
+- [x] **Step 5: 통합 검증**
 
 Run: `node --test 'tests/*.test.js'`
 Expected: 전체 unit/integration PASS. 기존 baseline 실패는 별도로 비교하고 새 실패를 허용하지 않는다.
@@ -325,7 +325,7 @@ JS
 
 Expected: exit 0과 totalItems/total4910/scanState JSON. HTTP/file://에서 spec 입력 7개와 모드 복원을 확인하고, routes/card 실패 후 재시도를 확인한다. 실제 Release 다운로드·수집 실행·Pages 배포는 수행하지 않는다.
 
-- [ ] **Step 6: 최종 범위 검토와 커밋**
+- [x] **Step 6: 최종 범위 검토와 커밋**
 
 Run: `git diff --check` 및 `git status --short`. Expected: 범위 밖 실행 데이터의 변화 없음. 새 문서와 제품 변경 외 파일은 스테이징하지 않는다.
 Run: `git add src/dashboard.template.html tests/browser/dashboard.test.js README.md` 후 `git diff --cached --check`.
@@ -338,3 +338,13 @@ Run: `git commit -m "fix: clarify dashboard search filters and input states"`
 - Review Focus: 다섯 항목 모두 해당 task의 명명된 테스트에 연결했다.
 - Proportion: 함수 본문을 계획에 대신 작성하지 않고 서명·규칙·핵심 assertion만 명시했다.
 - Execution boundary: 계획 작성 턴에서는 제품 코드/테스트 실행/커밋/배포를 시작하지 않는다. 실행 방식은 아직 선택되지 않았다. 작업 간 공유 model·직렬화·runtime 계약이 많으므로 Native를 추천하고, 구현 완료 후 독립 리뷰를 수행한다.
+
+## 실행 기록 (2026-10-24)
+
+Native 방식으로 `codex/dashboard-search-correctness`에서 Tasks 1–5를 구현했다.
+
+- Baseline: 1,027/1,027 PASS. 변경 후 unit/integration: 1,039/1,039 PASS.
+- 전체 browser 41/41과 추가 검색 입력·카드 재시도 2/2 PASS (합계 43개). HTTP/file://와 44만 상품 fixture 포함.
+- production builder 독립 검증: totalItems=138, total4910=3, scanState=complete.
+- 데스크톱·모바일 화면 확인, 모바일 가로 넘침 없음.
+- 실행 데이터·실제 수집·Pages 배포는 변경하지 않았다.

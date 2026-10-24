@@ -71,7 +71,7 @@ test('bootstrap survives index failure and retry restores exact scoped counts',a
  await page.route('**/assets/index-*.js*',r=>fail?r.abort():r.continue());
  await page.goto(url);assert.equal(await page.locator('.card').count(),5);
  await page.locator('[data-src=musinsa]').click();await page.getByRole('button',{name:'다시 시도',exact:true}).waitFor();
- assert.equal(await page.locator('.card').count(),2);assert.equal(await page.locator('#shownN').textContent(),'2');
+ assert.equal(await page.locator('.card').count(),2);assert.equal(await page.locator('#shownN').textContent(),'—');
  fail=false;await page.getByRole('button',{name:'다시 시도',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='2');
  await page.locator('[data-src=all]').click();await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='5');
@@ -208,7 +208,7 @@ test('recent 90 defaults and archived all-history failure retries without changi
 });
 test('default cards do not wait for index and saved filters do not show default counts',async t=>{
  const {page,url}=await fixture(t);let release;const gate=new Promise(r=>release=r);await page.route('**/assets/index-*.js*',async r=>{await gate;await r.continue();});
- await page.goto(url);assert.equal(await page.locator('.card').count(),5);assert.equal(await page.locator('#shownN').textContent(),'5');assert.equal(await page.locator('#cntBag').textContent(),'0');await page.locator('[data-src=musinsa]').click();assert.equal(await page.locator('#shownN').textContent(),'2');assert.equal(await page.locator('.card').count(),2);release();await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='2');
+ await page.goto(url);assert.equal(await page.locator('.card').count(),5);assert.equal(await page.locator('#shownN').textContent(),'—');assert.equal(await page.locator('#cntBag').textContent(),'—');await page.locator('[data-src=musinsa]').click();assert.equal(await page.locator('#shownN').textContent(),'—');assert.equal(await page.locator('.card').count(),2);release();await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='2');
 });
 
 test('bounded card window reloads previous pages without losing the result order',async t=>{
@@ -325,5 +325,78 @@ test('late lookup cannot replace newer text or invalid input',async t=>{
   await page.waitForTimeout(300);assert.equal(await page.locator('.card').count(),0);assert.equal(await page.locator('#grid').getAttribute('data-search-status'),'invalid');
   await page.unroute('**/assets/routes-*.js*');
   await page.locator('#q').fill('kimuir 캐시미어');await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready');assert.equal(await page.locator('.card').count(),2);
+ }
+});
+test('clear filters preserves query and sorting',async t=>{
+ const {page,dir,url}=await fixture(t,{search:true});
+ for(const location of [url,pathToFileURL(path.join(dir,'index.html')).href]){
+  await page.goto(location);await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready');
+  await page.locator('#brandTrigger').click();await page.getByRole('checkbox',{name:/^다른 브랜드 /}).check();await page.keyboard.press('Escape');
+  await page.locator('[data-src="4910"]').click();await page.locator('[data-cat="top"]').click();await page.locator('.chip[data-filter="drop"]').click();
+  await page.locator('#sortSel').selectOption('priceAsc');await page.locator('#q').fill('키뮤어 캐시미어');
+  await page.locator('#activeFilters').filter({hasText:/4910/}).waitFor();
+  await page.getByRole('button',{name:'필터 해제',exact:true}).click();await page.locator(coatSelector).waitFor();
+  assert.equal(await page.locator('#q').inputValue(),'키뮤어 캐시미어');assert.equal(await page.locator('#sortSel').inputValue(),'priceAsc');
+  assert.deepEqual(await page.evaluate(()=>['src','cat','filter'].map(k=>localStorage.getItem('clot.'+k))),['all','all','all']);
+  assert.equal(await page.locator('.card').count(),2);
+ }
+});
+test('composition searches only committed input',async t=>{
+ const {page,dir,url}=await fixture(t,{search:true});
+ await page.addInitScript(()=>{window.queryMessages=[];const Base=window.Worker;window.Worker=class extends Base{postMessage(message,...args){if(message.method==='query')window.queryMessages.push(message.args[0].q);return super.postMessage(message,...args);}};});
+ for(const location of [url,pathToFileURL(path.join(dir,'index.html')).href]){
+  await page.goto(location);await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready');
+  await page.evaluate(()=>{window.queryMessages=[];const q=document.querySelector('#q');q.dispatchEvent(new CompositionEvent('compositionstart'));for(const value of ['ㅋ','키','키뮤어 캐시미어']){q.value=value;q.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));}});
+  await page.waitForTimeout(250);
+  assert.deepEqual(await page.evaluate(()=>window.queryMessages),[]);
+  assert.equal(await page.locator('#grid').getAttribute('data-search-status'),'ready');
+  await page.evaluate(()=>{const q=document.querySelector('#q');q.dispatchEvent(new CompositionEvent('compositionend'));q.dispatchEvent(new InputEvent('input',{bubbles:true}));});
+  await page.locator(coatSelector).waitFor();await page.waitForTimeout(250);
+  if(location===url)assert.deepEqual(await page.evaluate(()=>window.queryMessages),['키뮤어 캐시미어']);
+  assert.equal(await page.locator('#q').inputValue(),'키뮤어 캐시미어');assert.equal(await page.locator('.card').count(),2);
+ }
+});
+test('filter clearing uses current pending input and full reset cancels it',async t=>{
+ const {page,url}=await fixture(t,{search:true});await page.goto(url);
+ await page.locator('[data-src="4910"]').click();
+ await page.evaluate(()=>{const q=document.querySelector('#q');q.value='키뮤어 캐시미어';q.dispatchEvent(new InputEvent('input',{bubbles:true}));document.querySelector('#clearFiltersBtn').click();});
+ await page.locator(coatSelector).waitFor();assert.equal(await page.locator('#q').inputValue(),'키뮤어 캐시미어');
+ await page.evaluate(()=>{const q=document.querySelector('#q');q.value='존재하지않음';q.dispatchEvent(new InputEvent('input',{bubbles:true}));document.querySelector('#resetBtn').click();});
+ await page.waitForTimeout(300);await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready');
+ assert.equal(await page.locator('#q').inputValue(),'');assert.equal(await page.locator('#shownN').textContent(),'138');
+});
+test('query failure marks counts unknown and labels previous cards',async t=>{
+ const {page,url}=await fixture(t,{search:true});await page.goto(url);
+ await page.evaluate(()=>{localStorage.setItem('clot.src','musinsa');localStorage.setItem('clot.cat','outer');});await page.reload();
+ await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready');
+ const manifest=await page.evaluate(()=>window.__CLOT_DATA__.catalog);
+ const blocked=new Set(manifest.indexParts.filter(x=>x.source==='musinsa'&&x.category==='top').map(x=>'/'+x.path));
+ await page.route('**/assets/index-*.js*',r=>blocked.has(new URL(r.request().url()).pathname)?r.abort():r.continue());
+ await page.locator('[data-cat="all"]').click();await page.getByRole('button',{name:'다시 시도',exact:true}).waitFor();
+ assert.equal(await page.locator('#shownN').textContent(),'—');assert.equal(await page.locator('#sMusinsa').textContent(),'—');
+ assert.match(await page.locator('#catalogNotice').textContent(),/이전 검색 결과 표시/);assert.ok(await page.locator('.card').count()>0);
+});
+test('estimated drop exclusion has an explanation',async t=>{
+ const {page,url}=await fixture(t,{search:true});await page.goto(url);await page.locator('#q').fill('키뮤어 캐시미어');await page.locator(coatSelector).waitFor();
+ await page.locator('.chip[data-filter="drop"]').click();await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready'&&document.querySelector('#shownN').textContent==='0');
+ assert.equal(await page.locator('.card').count(),0);await page.getByText('하락·최저가 필터는 직접 확인된 가격을 기준으로 합니다',{exact:true}).waitFor();
+ await page.getByText('현재 조건에 맞는 상품이 없습니다',{exact:true}).waitFor();
+});
+test('normalized search variants find the same coat over HTTP and file',async t=>{
+ const {page,dir,url}=await fixture(t,{search:true});
+ for(const location of [url,pathToFileURL(path.join(dir,'index.html')).href]){
+  await page.goto(location);
+  for(const value of ['키뮤어 캐시미어','캐시미어 키뮤어','캐시미어 블렌드','발마칸 코트 블랙','Ｄｒａｐｅ','kimuir','musinsa:2156295']){
+   await page.locator('#q').fill(value);await page.waitForTimeout(200);await page.locator('#grid[data-search-status=ready]').waitFor();await page.locator(coatSelector).waitFor();
+  }
+ }
+});
+test('product card failure stays retryable over HTTP and file',async t=>{
+ const {page,dir,url}=await fixture(t,{search:true});let fail=true;
+ await page.route('**/assets/cards-*.js*',r=>fail?r.abort():r.continue());
+ for(const location of [url,pathToFileURL(path.join(dir,'index.html')).href]){
+  fail=true;await page.goto(location);await page.locator('#q').fill('2156295');await page.getByText('상품을 조회하지 못했습니다',{exact:true}).waitFor();
+  assert.equal(await page.locator('.card').count(),0);
+  fail=false;await page.getByRole('button',{name:'다시 시도',exact:true}).click();await page.locator(coatSelector).waitFor();
  }
 });
