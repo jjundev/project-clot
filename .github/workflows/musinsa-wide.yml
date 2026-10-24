@@ -24,6 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180 # 165-minute network budget + DB/Release headroom
     env:
+      CLOT_MUSINSA_POINTS_ENABLED: ${{ vars.CLOT_MUSINSA_POINTS_ENABLED }}
       MODE: ${{ github.event_name == 'schedule' && 'scan' || inputs.mode }}
       GH_TOKEN: ${{ github.token }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { runPointPolicyStep } from './musinsaWide/point-cli.js';
 import { DAILY_GOODS_TARGET } from './musinsaWide/partitions.js';
 import { resumeMusinsaPricing } from './musinsaWide/recover.js';
 import path from 'node:path';
@@ -1334,6 +1335,11 @@ async function main() {
       if (!res.ok) process.exitCode = 1;
       break;
     }
+    case 'musinsa-point-policies': {
+      const res = await runPointPolicyStep({ flags });
+      if (!res.ok) process.exitCode = 1;
+      break;
+    }
     case 'musinsa-db': {
       const res = runMusinsaDb({ sub: positional[0], allowFresh: Boolean(flags['allow-fresh']) });
       if (!res.ok) process.exitCode = 1;
@@ -1372,6 +1378,8 @@ Commands:
   track-musinsa [--category <codes>] [--depth <pages>] [--concurrency=1-4] [--dry-run] [--init] [--backfill [--from <n>]] [--resume-pricing]
                          Scan the Musinsa top-level categories into data/musinsa-wide.db (--dry-run writes nothing);
                          --backfill fills the coupon registry once (resumable, needs the DB and a member session)
+  musinsa-point-policies [--limit 1..5000] [--dry-run]
+                         Collect anonymous point policies (opt-in; no Release upload)
   musinsa-db pull|push [--allow-fresh]
                          Download / upload data/musinsa-wide.db as the data-musinsa GitHub Release asset (gh CLI)
   sync                   Sync liked items from Musinsa account

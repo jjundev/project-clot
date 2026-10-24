@@ -8,6 +8,7 @@ on:
       - src/dashboard.template.html
       - src/visualizer.js
       - src/dashboard-*.js
+      - src/musinsaWide/point-*.js
       - scripts/verify-dashboard-build.js
       - scripts/measure-dashboard-loading.js
       - tests/**
@@ -16,7 +17,7 @@ on:
       - .github/workflows/pages.yml
   # Pushes made with GITHUB_TOKEN (the Actions daily run) do not fire `push`, so follow it explicitly.
   workflow_run:
-    workflows: ['Daily price tracker', '4910 tracker', '4910 full price verification', 'Musinsa wide scan']
+    workflows: ['Daily price tracker', '4910 tracker', '4910 full price verification', 'Musinsa wide scan', 'Musinsa point policies']
     types: [completed]
     branches: [main]
   workflow_dispatch:
@@ -68,6 +69,7 @@ jobs:
       - name: Build dashboard from watched and wide snapshots
         env:
           CLOT_REQUIRE_MUSINSA_WIDE: '1'
+          CLOT_MUSINSA_POINTS_ENABLED: ${{ vars.CLOT_MUSINSA_POINTS_ENABLED }}
         run: |
           mkdir _site
           CLOT_DASHBOARD_PATH=_site/index.html node src/cli.js visualize --no-open

@@ -1,0 +1,44 @@
+name: Musinsa point policies
+
+on:
+  workflow_run:
+    workflows: ['Musinsa wide scan']
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'Daily attempt cap (1..5000, retries included; start with 1000)'
+        type: string
+        default: '1000'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clot-daily
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    if: >-
+      vars.CLOT_MUSINSA_POINTS_ENABLED == '1' &&
+      (github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CLOT_MUSINSA_POINTS_ENABLED: ${{ vars.CLOT_MUSINSA_POINTS_ENABLED }}
+      POINT_LIMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.limit || '1000' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # The job lock is held before this entry point pulls the current Release.
+      # The entry point validates limit before pull, and requires source=latest before collection.
+      - name: Pull latest, collect, validate and publish partial results
+        run: node scripts/run-musinsa-points.js

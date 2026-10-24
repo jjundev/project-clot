@@ -381,3 +381,22 @@ Pages는 `data-musinsa` Release의 `musinsa-wide.db.gz`를 읽어 무신사 대�
 같은 날 4910 목록 재수집으로 검증 메타데이터가 초기화돼도, 최근 성공한 전체 검증 작업의 artifact에서 날짜·쿠폰 조건·현재 목록가·상품번호가 모두 일치하는 결과를 복원한다. 더 최근의 관측이 우선하며, 조건이 바뀐 상품은 다시 조회한다.
 
 4910 전체 검증은 대기 항목이 남으면 같은 날짜 안에서 최대 4회 자동으로 이어 실행한다. 완료되면 추가 실행을 만들지 않는다. 재개 예약 실패나 반복 상한 도달은 워크플로 실패로 표시하며 마지막 성공 배포를 유지한다. 이 경우 이미 갱신된 partial Release DB의 추가 배포도 자동으로 중단되므로 실행 결과와 summary를 확인해야 한다. 재개에는 `GITHUB_TOKEN`의 `workflow_dispatch`를 사용한다([GitHub 공식 동작](https://docs.github.com/en/actions/concepts/security/github_token)).
+
+### 일반 상품 적립금 사용 예상가 (기본 비활성화)
+
+`CLOT_MUSINSA_POINTS_ENABLED=1`일 때 일반 상품의 쿠폰가 옆에 **적립금 최대 사용 예상가**를 표시한다. 필요한 적립금을 전액 보유한다는 가정이며, 개인 잔액을 조회하지 않는다. 등급·카드 할인과 적립 예정 포인트는 포함하지 않는다. 정렬·차트·알림·역대 최저가 판정은 기존 쿠폰가를 기준으로 유지한다.
+
+익명 상품 API에서 사용 제한과 최대 사용률을 점진 수집한다. 확인 후 **7일 미만**, 현재 판매가·추가 할인액 일치, 당일 쿠폰 수집 검증 통과, 저장된 예상가 존재 조건을 모두 만족해야 금액을 표시한다. 명시적인 제한은 ‘적립금 사용 불가’, 미조회·만료·가격 불일치·쿠폰 수집 실패는 ‘적립금 사용 조건 미확인’으로 표시한다. 조회 실패는 사용 가능을 뜻하지 않는다. 과거 쿠폰 기록을 현재 정책으로 재계산하지 않는다.
+
+```sh
+# 먼저 최신 DB를 받아 둔다. 아래 명령은 Release에 업로드하지 않는다.
+CLOT_MUSINSA_POINTS_ENABLED=1 node src/cli.js musinsa-point-policies --dry-run
+CLOT_MUSINSA_POINTS_ENABLED=1 node src/cli.js musinsa-point-policies --limit 1000
+node scripts/check-musinsa-points.js data/musinsa-wide.db
+```
+
+운영 활성화는 별도 승인 후 repository variable `CLOT_MUSINSA_POINTS_ENABLED`를 `1`로 설정한다. `Musinsa point policies` workflow는 성공한 main의 wide 수집 뒤 또는 수동으로 실행한다. 기존 `clot-daily` 잠금 획득 후 최신 Release를 받고 수집·계산·검증·업로드한다. prev fallback이면 수집과 업로드를 거절한다. quota·deadline·429로 중단하면 유효한 부분 결과를 보존하고 Actions summary에 중단 사유를 남긴다. 실제 업로드 실패는 workflow 실패로 보고한다. 이 작업은 쿠키·회원 API·알림 채널을 사용하지 않는다.
+
+첫 파일럿은 **1,000회**로 관측하고 이후 명시적 설정으로 하루 최대 **5,000회**까지 늘린다. 실패·재시도도 시도로 계산하며 같은 KST 날짜의 재실행은 한도를 초기화하지 않는다. 요청은 직렬이며 시작 간격은 1초 이상, timeout은 최대 15초, 실행 예산은 85분이다. 429는 즉시 중단한다. 5,000회 × 7일의 이론적 유효 범위 상한은 **35,000개**이며 실패·재시도·가격 변동에 따라 더 적다. 전체 상품 지원을 의미하지 않는다.
+
+변수를 해제하거나 `0`으로 설정하면 새 수집·계산·표시를 끈다. 이전 코드로 복구해도 새 테이블은 무시되며 기존 쿠폰 이력은 유지된다. 운영 DB를 삭제하거나 오래된 DB로 덮어써서 복구하지 않는다. 이 기능의 로컬 검증은 실제 Actions 직렬 실행·처리량·Release/Pages 갱신을 보증하지 않으며, 실제 파일럿과 활성화·배포는 별도로 수행한다.
