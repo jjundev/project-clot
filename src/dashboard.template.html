@@ -774,7 +774,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   }
   var searchMode='empty',previousCards=false;
   var isV2=D.catalog.v===2,queryToken=0,pageBusy=false,firstOffset=0,topHeight=0;
-  var runtime = window.__CLOT_RUNTIME_FACTORY__({model:model,baseItems:D.items,inlineHistories:D.inlineHistories,manifest:D.catalog,loadScript:loadDataScript,loadAsset:loadAsset,createWorker:isV2&&location.protocol!=='file:'?function(file){return new Worker(file+'?v='+encodeURIComponent(D.catalog.revision));}:null,onChange:function(data){if(!isV2)render();else if((searchMode==='empty'||searchMode==='text')&&data.status==='error'){grid.dataset.searchStatus='error';showStatus(data,true);}}});
+  var runtime = window.__CLOT_RUNTIME_FACTORY__({model:model,baseItems:D.items,inlineHistories:D.inlineHistories,manifest:D.catalog,loadScript:loadDataScript,loadAsset:loadAsset,createWorker:isV2&&location.protocol!=='file:'?function(file){return new Worker(file+'?v='+encodeURIComponent(D.catalog.revision));}:null,onChange:function(data){if(searchMode==='product'||searchMode==='invalid')return;if(!isV2)render();else if(data.status==='error'){grid.dataset.searchStatus='error';showStatus(data,true);}}});
   var topSpacer=document.createElement('div');topSpacer.id='gridTopSpacer';grid.before(topSpacer);
 
   var brandDialog=document.getElementById('brandDialog'),brandTrigger=document.getElementById('brandTrigger');
@@ -1102,9 +1102,9 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     if(modalItem&&modalItem.historyLoaded&&scrim.classList.contains('open'))drawChart(modalItem);
   });
 
-  document.getElementById('catalogNotice').addEventListener('click',function(e){if(e.target.closest('[data-retry-catalog]'))isV2?render():runtime.retryCatalog();});
+  document.getElementById('catalogNotice').addEventListener('click',function(e){if(e.target.closest('[data-retry-catalog]'))(isV2||searchMode==='product')?render():runtime.retryCatalog();});
   grid.addEventListener('click', function (e) {
-    if(e.target.closest('[data-retry-catalog]')){isV2?render():runtime.retryCatalog();return;}
+    if(e.target.closest('[data-retry-catalog]')){(isV2||searchMode==='product')?render():runtime.retryCatalog();return;}
     var c = e.target.closest('.card');
     if (c) openModal(c.dataset.k);
   });

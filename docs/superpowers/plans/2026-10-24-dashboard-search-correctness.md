@@ -344,7 +344,11 @@ Run: `git commit -m "fix: clarify dashboard search filters and input states"`
 Native 방식으로 `codex/dashboard-search-correctness`에서 Tasks 1–5를 구현했다.
 
 - Baseline: 1,027/1,027 PASS. 변경 후 unit/integration: 1,039/1,039 PASS.
-- 전체 browser 41/41과 추가 검색 입력·카드 재시도 2/2 PASS (합계 43개). HTTP/file://와 44만 상품 fixture 포함.
+- 최종 전체 browser 44/44 PASS. HTTP/file://, 44만 상품 fixture, 구형 v1 실패 후 명시적 재시도 포함.
 - production builder 독립 검증: totalItems=138, total4910=3, scanState=complete.
 - 데스크톱·모바일 화면 확인, 모바일 가로 넘침 없음.
 - 실행 데이터·실제 수집·Pages 배포는 변경하지 않았다.
+
+### 독립 리뷰와 수정
+
+전체 브랜치를 독립 리뷰해 Important 1건을 확인했다. 구형 v1에서 상품 조회 실패 알림이 render를 다시 호출해 자동 재시도가 반복됐다. 직접 조회/invalid 화면은 runtime 알림으로 재진입하지 않고, 명시적 재시도는 현재 검색 모드를 다시 실행하도록 수정했다. 실제 브라우저 회귀 테스트에서 실패 반복을 먼저 재현한 뒤 HTTP/file://에서 안정된 오류 화면과 한 번의 명시적 재시도를 검증했다. 수정 후 전체 unit/integration 1,039개와 browser 44개가 모두 통과했다. Critical 및 보류한 Minor는 없다.

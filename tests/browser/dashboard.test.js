@@ -400,3 +400,26 @@ test('product card failure stays retryable over HTTP and file',async t=>{
   fail=false;await page.getByRole('button',{name:'다시 시도',exact:true}).click();await page.locator(coatSelector).waitFor();
  }
 });
+test('legacy product failure stops until explicit retry over HTTP and file',async t=>{
+ const {page,dir,url}=await fixture(t);
+ const {createDashboardModel}=await import('../../src/dashboard-model.js');
+ const item=createDashboardModel().summarize({src:'musinsa',kind:'wide',n:2156295,b:'키뮤어',g:'Legacy coat',c:'outer',L:[]});
+ const file=path.join(dir,'index.html'),html=fs.readFileSync(file,'utf8');
+ const data=JSON.parse(html.match(/window\.__CLOT_DATA__ = ([^\n]+);/)[1]);
+ data.items=[];data.inlineHistories={};data.musinsa=null;
+ data.catalog={v:1,revision:'legacy',scanState:'complete',scanCount:1,musinsaCount:1,parts:[{id:'legacy',path:'musinsa/search.js',count:1}]};
+ fs.writeFileSync(file,html.replace(/window\.__CLOT_DATA__ = [^\n]+;/,()=> 'window.__CLOT_DATA__ = '+JSON.stringify(data)+';'));
+ let fail=true,attempts=0;
+ await page.route('**/musinsa/search.js*',async r=>{
+  attempts++;
+  if(fail){if(attempts>2)await new Promise(resolve=>setTimeout(resolve,500));return r.abort();}
+  return r.fulfill({contentType:'text/javascript',body:'window.__CLOT_CATALOG_PARTS__ = '+JSON.stringify({legacy:{v:1,id:'legacy',revision:'legacy',items:[item]}})+';'});
+ });
+ for(const location of [url,pathToFileURL(file).href]){
+  fail=true;attempts=0;await page.goto(location);await page.getByRole('button',{name:'다시 시도',exact:true}).waitFor();
+  assert.equal(attempts,1);await page.locator('#q').fill('2156295');await page.waitForTimeout(400);
+  assert.equal(attempts,2,'failed direct lookup must not automatically restart');
+  await page.getByText('상품을 조회하지 못했습니다',{exact:true}).waitFor();await page.waitForTimeout(200);assert.equal(attempts,2);
+  fail=false;await page.getByRole('button',{name:'다시 시도',exact:true}).click();await page.locator(coatSelector).waitFor();assert.equal(attempts,3);
+ }
+});
