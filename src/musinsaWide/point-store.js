@@ -2,7 +2,7 @@ import {POINT_TTL_MS,POINT_POLICY_VERSION} from './point-policy.js';
 export const quotaDate = ms => new Date(ms + 9*3600000).toISOString().slice(0,10);
 export const couponBasisFromRow = g => ({goodsNo:g.goods_no,status:g.status,salePrice:g.sale_price,
   extraDiscount:g.extra_discount,couponPrice:g.coupon_price,couponSource:g.coupon_price_source});
-const policyFromRow = p => p?.checked_at == null ? null : ({goodsNo:p.goods_no,restricted:p.restricted===1,
+const policyFromRow = p => p?.checked_at == null ? null : ({goodsNo:p.goods_no,restricted:p.restricted===1?true:p.restricted===0?false:null,
   maxUseRate:p.max_use_rate,observedSalePrice:p.observed_sale_price,observedExtraDiscount:p.observed_extra_discount,checkedAt:p.checked_at});
 const priceColumns = ['goods_no','date','state','sale_price','extra_discount','coupon_price','coupon_source','point_discount','point_price','policy_checked_at','max_use_rate','policy_version'];
 const priceKeys = ['goodsNo','date','state','salePrice','extraDiscount','couponPrice','couponSource','pointDiscount','pointPrice','policyCheckedAt','maxUseRate','policyVersion'];

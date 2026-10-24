@@ -50,3 +50,7 @@ test('기능 off/구형 DB는 DDL·신규행 없음',t=>{
   assert.deepEqual(db.prepare('SELECT sql FROM sqlite_master').all(),before);
   const f=fixture(t);refreshPointEstimates({...options(f.db),enabled:false});assert.equal(f.db.prepare('SELECT count(*) n FROM point_price_changes').get().n,0);
 });
+test('저장된 제한 값 NULL은 사용 가능으로 바뀌지 않는다',t=>{
+ const {db}=fixture(t);refreshPointEstimates(options(db));db.exec('UPDATE goods_point_policy SET restricted=NULL');
+ const r=readPointEstimateViews(options(db)).byGoods.get(2156295);assert.equal(r.price,null);assert.equal(r.state,'UNKNOWN');
+});
