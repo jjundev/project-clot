@@ -6,6 +6,7 @@ import { CATEGORIES_MUSINSA, DEPTH_PAGES, scanCategory } from './client.js';
 import { scanPartitions } from './partitions.js';
 import { refreshCouponPrices } from './pricing.js';
 import { ESTIMATE_POLICY } from './coverage.js';
+import { refreshPointEstimates } from './point-pricing.js';
 import {
   createMemberChecker, applyCouponPrices, sampleAccuracy, CLASSIFY_CAP, SAMPLE_PER_DAY, BACKFILL_CLASSIFY_CAP,
 } from './coupons.js';
@@ -309,6 +310,10 @@ export async function trackMusinsa({
     couponChecks: checker.calls,
     couponMetrics: registry,
   });
+  if (process.env.CLOT_MUSINSA_POINTS_ENABLED === '1') {
+    try { refreshPointEstimates({db:store.db,asOfMs:now(),enabled:true}); }
+    catch (e) { console.warn(`[무신사] 적립금 예상가 갱신 실패: ${e.message}`); }
+  }
   return { date, categoryCounts, diff, coupons, registry, durationMs };
 }
 

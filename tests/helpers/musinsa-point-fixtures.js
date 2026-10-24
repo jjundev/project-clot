@@ -27,3 +27,8 @@ export function makePointStoreFixture(t, {initialize=true}={}) {
   }
   return {dir,dbPath,wide,db,points:new PointPolicyStore(db,{initialize}),addGoods};
 }
+export function validPointScanRun(db,{date='2026-10-24',complete=1}={}) {
+  db.prepare(`INSERT OR REPLACE INTO scan_runs(date,complete,category_counts_json,coupons_ok,coupon_metrics_json,completed_at) VALUES(?,?,?,?,?,?)`)
+    .run(date,complete,JSON.stringify(['001','002','003','103','004'].map(cat=>({cat,scanned:60000,complete:true}))),1,
+      JSON.stringify({walk:{requested:3,walked:3,remaining:0,failed:0,complete:true,stop:null},pricing:{policy:'confirmed-benefits-estimate-v1',priced:300000,direct:2,estimated:299998,active:300000,unpriced:0,exceptionCoupons:[]}}),date+'T09:00:00.000Z');
+}
