@@ -125,6 +125,7 @@ export function buildMusinsaCatalog(db, { outDir, revision, sink }) {
           src: "musinsa",
           kind: "wide",
           b: g.brand_name || g.brand || "무신사",
+          searchAliases: g.brand ? [g.brand] : [],
           g: g.name,
           u: g.url,
           i: g.image_url || "",
