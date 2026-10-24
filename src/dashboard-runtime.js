@@ -40,7 +40,7 @@ export function createDashboardRuntime(options) {
       disposed = false,
       seq = 0,
       querySeq = 0,
-      lastQuery = null;
+      lastOperation = null;
     const calls = new Map(),
       local = new Set();
     const emit = () => {
@@ -125,7 +125,7 @@ export function createDashboardRuntime(options) {
           initialized = true;
           state = {
             ...state,
-            status: state.phase === "query" ? "loading" : "ready",
+            status: state.phase === "preview" ? "ready" : "loading",
             error: null,
           };
         } catch (error) {
@@ -153,40 +153,44 @@ export function createDashboardRuntime(options) {
       return result;
     }
     const history = historyFactory({ revision: manifest.revision, loadAsset });
+    async function operation(method, value) {
+      const own = ++querySeq;
+      lastOperation = { method, value };
+      state = { ...state, status: "loading", phase: method === "query" ? "query" : "product", requestId: own, error: null };
+      emit();
+      try {
+        await start();
+        if (own !== querySeq) throw stale();
+        let result;
+        if (method === "query") result = await invoke("query", [value, own]);
+        else {
+          if (manifest.loadingMode === "scoped") await invoke("cancelQuery", []);
+          if (own !== querySeq) throw stale();
+          result = { mode: "product", key: value, item: await invoke("lookup", [value]) };
+        }
+        if (own !== querySeq) throw stale();
+        state = { ...state, status: "ready", error: null };
+        emit();
+        return result;
+      } catch (error) {
+        if (disposed) throw Error("Runtime disposed");
+        if (own !== querySeq) throw stale();
+        if (error.code !== "STALE_RESULT") {
+          state = { ...state, status: "error", error: error.message };
+          emit();
+        }
+        throw error;
+      }
+    }
     const api = {
       getState: () => state,
       getCatalog: () => state,
       start,
       ensureCatalog: start,
-      async query(s) {
-        const own = ++querySeq;
-        lastQuery = model.restoreState(s);
-        state = {
-          ...state,
-          status: "loading",
-          phase: "query",
-          requestId: own,
-          error: null,
-        };
-        emit();
-        try {
-          const result = await invoke("query", [lastQuery, own]);
-          if (own !== querySeq) throw stale();
-          state = { ...state, status: "ready", error: null };
-          emit();
-          return result;
-        } catch (error) {
-          if (disposed) throw Error("Runtime disposed");
-          if (own !== querySeq) throw stale();
-          if (error.code !== "STALE_RESULT") {
-            state = { ...state, status: "error", error: error.message };
-            emit();
-          }
-          throw error;
-        }
-      },
+      query: s => operation("query", model.restoreState(s)),
+      searchProduct: key => operation("product", model.resolveKey(key)),
       retry() {
-        if (lastQuery) return api.query(lastQuery);
+        if (lastOperation) return operation(lastOperation.method, lastOperation.value);
         return start();
       },
       page: (...a) => invoke("page", a),

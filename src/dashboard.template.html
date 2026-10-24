@@ -502,6 +502,9 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
  .brand-options{max-height:55dvh}
  .resultbar{gap:12px;align-items:flex-start}
 }
+  .resultbar { flex-wrap: wrap; }
+  #activeFilters, #priceFilterHelp { font-size: 14px; color: var(--muted); }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
@@ -569,7 +572,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
         <circle cx="9" cy="9" r="5.5"/><path d="m13.2 13.2 3.3 3.3"/>
       </svg>
-      <input id="q" type="search" placeholder="브랜드 · 상품명 검색" autocomplete="off" aria-label="브랜드 또는 상품명 검색" data-od-id="search-input">
+      <input id="q" type="search" placeholder="브랜드 · 상품명 · 상품번호 · URL 검색" autocomplete="off" aria-label="브랜드, 상품명, 상품번호 또는 URL 검색" data-od-id="search-input">
       <kbd>/</kbd>
     </div>
 
@@ -608,9 +611,12 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
 
   <div class="resultbar" data-od-id="result-count">
     <span>조건에 맞는 상품 <b id="shownN">—</b>개 · 현재 <b id="renderedN">0</b>개 표시</span>
+    <span id="activeFilters"></span>
+    <button class="linkbtn" id="clearFiltersBtn" type="button" hidden>필터 해제</button>
     <button class="linkbtn" id="resetBtn" type="button" hidden>초기화</button>
   </div>
 
+  <p id="priceFilterHelp" role="status" hidden>하락·최저가 필터는 직접 확인된 가격을 기준으로 합니다</p>
   <p id="musinsaNotice" role="status" hidden></p>
   <p id="catalogNotice" role="status" hidden></p>
   <section class="grid" id="grid" data-od-id="product-grid" aria-label="추적 상품 목록"></section>
@@ -766,8 +772,9 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     if(location.protocol!=='file:')return fetch(ref.path+'?v='+encodeURIComponent(D.catalog.revision),{signal:AbortSignal.timeout(15000)}).then(function(r){if(!r.ok)throw Error('파일 요청 실패');return r.text();}).then(function(text){(0,eval)(text);var payload=(globalThis.__CLOT_ASSETS__||{})[ref.id];delete globalThis.__CLOT_ASSETS__[ref.id];return {payload:payload,bytes:new TextEncoder().encode(text).length};});
     return new Promise(function(resolve,reject){var tag=document.createElement('script'),timer=setTimeout(function(){finish(Error('파일 요청 시간 초과'));},15000),done=false;function finish(error){if(done)return;done=true;clearTimeout(timer);tag.remove();var p=(globalThis.__CLOT_ASSETS__||{})[ref.id];if(globalThis.__CLOT_ASSETS__)delete globalThis.__CLOT_ASSETS__[ref.id];if(error||!p)reject(error||Error('파일 내용 없음'));else resolve({payload:p,bytes:ref.bytes});}tag.onload=function(){finish();};tag.onerror=function(){finish(Error('파일 요청 실패'));};tag.src=ref.path+'?v='+encodeURIComponent(D.catalog.revision);document.head.appendChild(tag);});
   }
+  var searchMode='empty',previousCards=false;
   var isV2=D.catalog.v===2,queryToken=0,pageBusy=false,firstOffset=0,topHeight=0;
-  var runtime = window.__CLOT_RUNTIME_FACTORY__({model:model,baseItems:D.items,inlineHistories:D.inlineHistories,manifest:D.catalog,loadScript:loadDataScript,loadAsset:loadAsset,createWorker:isV2&&location.protocol!=='file:'?function(file){return new Worker(file+'?v='+encodeURIComponent(D.catalog.revision));}:null,onChange:function(data){if(!isV2)render();else if(data.status==='error'){grid.dataset.searchStatus='error';showStatus(data,true);}}});
+  var runtime = window.__CLOT_RUNTIME_FACTORY__({model:model,baseItems:D.items,inlineHistories:D.inlineHistories,manifest:D.catalog,loadScript:loadDataScript,loadAsset:loadAsset,createWorker:isV2&&location.protocol!=='file:'?function(file){return new Worker(file+'?v='+encodeURIComponent(D.catalog.revision));}:null,onChange:function(data){if(searchMode==='product'||searchMode==='invalid')return;if(!isV2)render();else if(data.status==='error'){grid.dataset.searchStatus='error';showStatus(data,true);}}});
   var topSpacer=document.createElement('div');topSpacer.id='gridTopSpacer';grid.before(topSpacer);
 
   var brandDialog=document.getElementById('brandDialog'),brandTrigger=document.getElementById('brandTrigger');
@@ -886,13 +893,39 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     previewSource=state.src;
     return query;
   }
+  function setSearchMode(mode) {
+    searchMode=mode;
+    var special=mode==='product'||mode==='invalid';
+    document.querySelectorAll('.kpi,.cat-bar,.toolbar>.chips,.brand-controls,.sort,.resultbar').forEach(function(el){el.hidden=special;});
+    document.getElementById('musinsaNotice').hidden=special||!D.musinsa;
+    document.getElementById('priceFilterHelp').hidden=special||!['drop','lowest'].includes(state.filter);
+  }
+  function paintProduct(item,status,message) {
+    lastQuery=null;brandCountsKnown=false;view=item?[item]:[];shown=view.length;
+    firstOffset=0;topHeight=0;pageBusy=false;topSpacer.style.height='0px';moreBtn.hidden=true;
+    grid.dataset.searchStatus=status;
+    grid.innerHTML=item?cardHtml(item):'<div class="empty"><b>'+esc(message||'상품 조회 중')+'</b></div>';
+    var notice=document.getElementById('catalogNotice');notice.hidden=false;
+    notice.innerHTML=status==='error'?'상품을 조회하지 못했습니다 · <button type="button" data-retry-catalog>다시 시도</button>':status==='invalid'?esc(message):'상품번호 조회 · 일반 검색 필터와 관계없이 표시합니다';
+    if(modalItem)updateStepper(-1);
+  }
+  function renderProduct(parsed,token) {
+    paintProduct(null,'loading');
+    var pending=isV2?runtime.searchProduct(parsed.key):runtime.ensureCatalog().then(function(data){if(data.status!=='ready')throw Error(data.error);return {item:data.items.find(function(x){return x.k===parsed.key;})||null};});
+    pending.then(function(result){if(token!==queryToken)return;paintProduct(result.item,'ready',result.item?'':'현재 대시보드에 등록된 상품이 없습니다');}).catch(function(error){if(token!==queryToken||error.code==='STALE_RESULT')return;paintProduct(null,'error','상품을 조회하지 못했습니다');});
+  }
   function render() {
+    var parsed=model.parseSearchInput(state.q),token=++queryToken;
+    setSearchMode(parsed.type);
+    if(parsed.type==='invalid'){paintProduct(null,'invalid',parsed.message);return;}
+    if(parsed.type==='product'){renderProduct(parsed,token);return;}
     if(isV2){
-      var token=++queryToken,data=runtime.getState();
+      var data=runtime.getState();
       var baseline=model.restoreState({src:state.src});
       var defaults=JSON.stringify(model.restoreState(state))===JSON.stringify(baseline);
       var keep=lastQuery&&lastQuery.resultId&&previewSource===state.src;
       var preview=keep?lastQuery:showPreview(data);
+      previousCards=!!keep;
       paint(preview,{...data,status:'loading',preview:true,previous:!!keep},!!keep||!defaults);
       grid.dataset.searchStatus='loading';
       runtime.query(state).then(function(q){if(token!==queryToken)return;paint(q,runtime.getState(),false);grid.dataset.searchStatus='ready';}).catch(function(error){
@@ -904,6 +937,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     var query=model.queryCatalog(data.items,state);paint(query,data,waiting);
   }
   function paint(query,data,waiting){
+    updateFilterSummary();
     lastQuery=query;brandCountsKnown=!waiting;firstOffset=0;topHeight=0;topSpacer.style.height="0px";pageBusy=false;
     view=query.items;
     document.getElementById('shownN').textContent=waiting?'—':fmt(query.total);
@@ -929,15 +963,30 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     if(wm)wideNotice.textContent='무신사 '+wm.date+' 기준 · 조사 '+fmt(wm.selected)+'개 · 제공 '+fmt(wm.active)+'개(이전 회차 잔류 '+fmt(wm.retained||0)+'개 포함) · 직접 확인 '+fmt(wm.direct)+'개 · 추정 '+fmt(wm.estimated)+'개'+(wm.unknown?' · 출처 미확인 '+fmt(wm.unknown)+'개':'')+'. '+(wm.exceptionCoupons.length?'쿠폰 '+wm.exceptionCoupons.length+'종의 적용 상품 목록을 확인하지 못했습니다 ('+wm.exceptionCoupons.join(', ')+'). 추정가는 확인된 혜택 기준이며 실제 결제 가격이 더 낮을 수 있습니다.':'추정가는 확인된 혜택 기준이며 실제 결제 가격과 다를 수 있습니다.');
     showStatus(data,waiting);
     shown=0;renderBrandBar();
-    grid.innerHTML=view.length?'':waiting||data.preview?'<div class="empty"><b>검색 준비 중 · 기본 상품 미리보기</b></div>':'<div class="empty"><b>조건에 맞는 상품이 없습니다</b>검색어를 지우거나 다른 필터를 선택해 보세요.</div>';
+    grid.innerHTML=view.length?'':waiting||data.preview?'<div class="empty"><b>검색 준비 중 · 기본 상품 미리보기</b></div>':'<div class="empty"><b>현재 조건에 맞는 상품이 없습니다</b>검색어를 지우거나 다른 필터를 선택해 보세요.</div>';
     renderMore();
     if(moreIo){moreIo.unobserve(moreBtn);moreIo.observe(moreBtn);}
     if(modalItem)updateStepper(view.findIndex(function(x){return x.k===modalItem.k;}));
   }
 
+  function updateFilterSummary() {
+    var labels=[];
+    if(state.src!=='all')labels.push(state.src==='musinsa'?'무신사':'4910');
+    if(state.cat!=='all')labels.push(CAT_NAMES[state.cat]||'기타');
+    if(state.brandKeys.length)labels.push('브랜드 '+state.brandKeys.length+'개');
+    if(state.filter!=='all')labels.push({drop:'하락',lowest:'최저가',onsale:'판매중',out:'품절'}[state.filter]);
+    document.getElementById('activeFilters').textContent=labels.length?'적용 조건: '+labels.join(' · '):'';
+    document.getElementById('clearFiltersBtn').hidden=!labels.length;
+  }
+  function unknownCounts() {
+    document.getElementById('shownN').textContent='—';
+    document.querySelectorAll('.kpi-val,.cat-bar .c,.toolbar>.chips .c').forEach(function(el){el.textContent='—';});
+    brandCountsKnown=false;brandOptionKeys='';renderBrandBar();
+  }
   function showStatus(data,waiting) {
     var notice=document.getElementById('catalogNotice'),text=detailNotice||data.notice||'';
-    if(data.status==='error'){notice.hidden=false;notice.innerHTML=esc(data.error||'검색 준비 실패')+' · <button type="button" data-retry-catalog>다시 시도</button>';return;}
+    if(data.status==='loading'||data.status==='error')unknownCounts();
+    if(data.status==='error'){notice.hidden=false;notice.innerHTML=(previousCards?'이전 검색 결과 표시 · ':'기본 상품 미리보기 · ')+esc(data.error||'검색 준비 실패')+' · <button type="button" data-retry-catalog>다시 시도</button>';return;}
     if(data.status==='loading')text=(data.previous?'검색 준비 중 · 이전 검색 결과 표시':waiting?'검색 준비 중 · 기본 상품 미리보기':'검색 준비 중')+(text?' · '+text:'');
     notice.hidden=!text;notice.textContent=text;
   }
@@ -976,10 +1025,19 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   if (moreIo) moreIo.observe(moreBtn);
 
   /* ── 툴바 이벤트 ────────────────────────────────────────── */
-  var deb;
-  qEl.addEventListener('input', function () {
+  var deb,composing=false;
+  function scheduleSearch() {
     clearTimeout(deb);
-    deb = setTimeout(function () { state.q = qEl.value.trim().toLowerCase(); render(); }, 180);
+    deb=setTimeout(function(){state.q=qEl.value.trim();render();},180);
+  }
+  qEl.addEventListener('compositionstart',function(){composing=true;clearTimeout(deb);});
+  qEl.addEventListener('compositionend',function(){composing=false;scheduleSearch();});
+  qEl.addEventListener('input',function(e){clearTimeout(deb);if(!composing&&!e.isComposing)scheduleSearch();});
+  document.getElementById('clearFiltersBtn').addEventListener('click',function(){
+    clearTimeout(deb);closeBrand();state.q=qEl.value.trim();
+    state.src='all';state.cat='all';state.filter='all';state.brandKeys=[];brandSearch.value='';brandOptionKeys='';
+    store('src','all');store('cat','all');store('filter','all');
+    if(!isV2)runtime.ensureCatalog();render();
   });
   document.querySelectorAll('[data-src]').forEach(function (b) {
     b.addEventListener('click', function () {
@@ -1008,7 +1066,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     state.sort = sortSel.value; store('sort', state.sort); render();
   });
   document.getElementById('resetBtn').addEventListener('click', function () {
-    brandSearch.value='';
+    clearTimeout(deb);composing=false;brandSearch.value='';
     state.filter = 'all'; state.cat = 'all'; state.src = 'all'; state.q = ''; state.brandKeys = []; qEl.value = '';
     state.sort='rate';sortSel.value='rate';store('sort','rate');store('filter', 'all'); store('cat', 'all'); store('src', 'all'); if(!isV2&&(state.src!=='musinsa'||D.catalog.musinsaCount>0))runtime.ensureCatalog(); render();
   });
@@ -1044,14 +1102,15 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     if(modalItem&&modalItem.historyLoaded&&scrim.classList.contains('open'))drawChart(modalItem);
   });
 
-  document.getElementById('catalogNotice').addEventListener('click',function(e){if(e.target.closest('[data-retry-catalog]'))isV2?render():runtime.retryCatalog();});
+  document.getElementById('catalogNotice').addEventListener('click',function(e){if(e.target.closest('[data-retry-catalog]'))(isV2||searchMode==='product')?render():runtime.retryCatalog();});
   grid.addEventListener('click', function (e) {
-    if(e.target.closest('[data-retry-catalog]')){isV2?render():runtime.retryCatalog();return;}
+    if(e.target.closest('[data-retry-catalog]')){(isV2||searchMode==='product')?render():runtime.retryCatalog();return;}
     var c = e.target.closest('.card');
     if (c) openModal(c.dataset.k);
   });
 
   function updateStepper(i) {
+    if(searchMode==='product'||searchMode==='invalid'){document.getElementById('prevBtn').disabled=true;document.getElementById('nextBtn').disabled=true;document.getElementById('mPos').textContent='—';return;}
     if(isV2){if(!modalItem||!lastQuery?.resultId){document.getElementById('prevBtn').disabled=true;document.getElementById('nextBtn').disabled=true;return;}var key=modalItem.k,token=detailToken;runtime.neighbor(lastQuery.resultId,key,0).then(function(x){if(token!==detailToken||!x)return;document.getElementById('prevBtn').disabled=x._position<=0;document.getElementById('nextBtn').disabled=x._position>=lastQuery.total-1;document.getElementById('mPos').textContent=(x._position+1)+' / '+lastQuery.total;}).catch(function(){});return;}
     var p = document.getElementById('prevBtn'), n = document.getElementById('nextBtn');
     p.disabled = i <= 0; n.disabled = i < 0 || i >= view.length - 1;

@@ -130,7 +130,7 @@ const deferred = () => {
   return { promise, resolve, reject };
 };
 function runtimeHarness(t) {
-  const queries = [],
+  const queries = [], lookups = [],
     events = [];
   let starts = 0;
   const api = createDashboardRuntime({
@@ -155,13 +155,14 @@ function runtimeHarness(t) {
           queries.push(d);
           return d.promise;
         },
-        lookup: async () => null,
+        cancelQuery: async () => {},
+        lookup: (key) => { const d=deferred(); lookups.push({...d,key}); return d.promise; },
       };
     },
     onChange: (s) => events.push(s),
   });
   t.after(() => api.dispose());
-  return { api, queries, events, starts: () => starts };
+  return { api, queries, lookups, events, starts: () => starts };
 }
 test("runtime separates worker ready from scope ready", async (t) => {
   const { api, queries } = runtimeHarness(t);
@@ -201,8 +202,10 @@ test("dispose rejects pending work without later emissions", async (t) => {
   assert.equal(events.length, n);
 });
 test("history lookup does not prepare search scope", async (t) => {
-  const { api, queries } = runtimeHarness(t);
-  await assert.rejects(api.getHistory("musinsa:999"), /찾을 수/);
+  const { api, queries, lookups } = runtimeHarness(t);
+  const history=api.getHistory("musinsa:999");
+  await new Promise(r=>setImmediate(r));lookups[0].resolve(null);
+  await assert.rejects(history, /찾을 수/);
   assert.equal(queries.length, 0);
 });
 test("worker error settles pending calls and retry recreates transport", async (t) => {
@@ -261,4 +264,29 @@ test("worker error settles pending calls and retry recreates transport", async (
   // A terminated worker cannot affect the replacement.
   workers[0].onerror({});
   assert.equal(api.getState().status, "ready");
+});
+
+const tick=()=>new Promise(r=>setImmediate(r));
+test('latest operation owns direct and catalog states',async t=>{
+ const {api,queries,lookups}=runtimeHarness(t);
+ const old=api.query({q:'old'}),staleQuery=assert.rejects(old,{code:'STALE_RESULT'});await tick();
+ const direct=api.searchProduct('musinsa:2156295');assert.equal(api.getState().phase,'product');await tick();
+ const coat={k:'musinsa:2156295'};lookups[0].resolve(coat);
+ assert.deepEqual(await direct,{mode:'product',key:'musinsa:2156295',item:coat});
+ queries[0].reject(Error('old failure'));await staleQuery;assert.equal(api.getState().status,'ready');
+ const late=api.searchProduct('musinsa:1'),staleProduct=assert.rejects(late,{code:'STALE_RESULT'});await tick();
+ const latest=api.query({q:'new'});await tick();queries[1].resolve({total:0});await latest;
+ lookups[1].resolve(null);await staleProduct;assert.equal(api.getState().phase,'query');assert.equal(api.getState().error,null);
+});
+test('retry repeats product lookup and preserves missing versus failure',async t=>{
+ const {api,queries,lookups}=runtimeHarness(t);
+ const missing=api.searchProduct('musinsa:99');await tick();lookups[0].resolve(null);
+ assert.equal((await missing).item,null);assert.equal(api.getState().status,'ready');
+ const bad=api.searchProduct('musinsa:2156295'),failed=assert.rejects(bad,/route failed/);await tick();lookups[1].reject(Error('route failed'));await failed;
+ assert.equal(api.getState().status,'error');const retry=api.retry();await tick();
+ assert.equal(lookups[2].key,'musinsa:2156295');lookups[2].resolve({k:'musinsa:2156295'});await retry;
+ assert.equal(queries.length,0);assert.equal(api.getState().status,'ready');
+});
+test('dispose settles product requests',async t=>{
+ const {api,lookups}=runtimeHarness(t);const pending=api.searchProduct('musinsa:1'),failed=assert.rejects(pending,/disposed/i);await tick();api.dispose();await failed;lookups[0].resolve(null);
 });

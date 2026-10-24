@@ -10,7 +10,7 @@ import {createDashboardRuntime} from '../../src/dashboard-runtime.js';
 import {buildDashboardCatalog} from '../../src/dashboard-catalog.js';
 import {MusinsaWideStore} from '../../src/musinsaWide/store.js';
 import {fixtureRaw} from './dashboard-fixture.js';
-export function writeFixture(dir,{scale=false,scaleCount=439501,scanScenario=null,wide=false,historyDays=0}={}) {
+export function writeFixture(dir,{scale=false,scaleCount=439501,scanScenario=null,wide=false,search=false,historyDays=0}={}) {
  const model=createDashboardModel(),raw=fixtureRaw(),scan=raw.find(x=>x.src==='4910all');
  if(!scale) {
    for(const file of ['musinsa.db','fixture.db'])fs.rmSync(path.join(dir,file),{force:true});
@@ -42,11 +42,16 @@ export function writeFixture(dir,{scale=false,scaleCount=439501,scanScenario=nul
    store.recordScanRun({date:'2026-10-16',brandCounts:{},complete:true,changed:0,added:1,dropped:0,durationMs:1});
    store.close();
    let dbMusinsaPath=null;
-   if(wide){
+   if(wide||search){
      dbMusinsaPath=path.join(dir,'wide.db');fs.rmSync(dbMusinsaPath,{force:true});
      const W=new MusinsaWideStore(dbMusinsaPath);
      for(const [id,source,price] of [[1,'DIRECT',80],[77,'ESTIMATED',70]]){
        W.db.prepare("INSERT INTO goods(goods_no,cat,name,url,brand_name,sale_price,normal_price,coupon_price,coupon_price_source,first_seen_date) VALUES(?,?,?,?,?,?,?,?,?,?)").run(id,'001','무신사 '+id,'https://www.musinsa.com/products/'+id,'새 브랜드',100,200,price,source,'2026-10-16');
+     }
+     if(search){
+       const insert=W.db.prepare("INSERT INTO goods(goods_no,cat,name,url,brand,brand_name,sale_price,normal_price,coupon_price,coupon_price_source,first_seen_date) VALUES(?,?,?,?,?,?,?,?,?,?,?)");
+       for(let i=0;i<130;i++)insert.run(900000+i,i%2?'001':'002','검색 방해 상품 '+i,'https://www.musinsa.com/products/'+(900000+i),'other','다른 브랜드',10,200,10,'DIRECT','2026-10-16');
+       for(const id of [2156295,2156296])insert.run(id,'002','[Drape Wool] 캐시미어블렌드 세미오버핏 발마칸 코트_블랙'+(id===2156296?' 다른 상품':''),'https://www.musinsa.com/products/'+id,'kimuir','키뮤어',263200,329000,248200,'ESTIMATED','2026-10-16');
      }
      W.db.prepare('INSERT INTO scan_runs(date,complete,completed_at,category_counts_json,coupon_metrics_json) VALUES(?,?,?,?,?)').run('2026-10-16',1,'2026-10-16T04:50:00Z','[]',JSON.stringify({pricing:{exceptionCoupons:[354317]}}));W.close();
    }

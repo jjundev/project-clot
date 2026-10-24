@@ -515,3 +515,22 @@ test("direct lookup bypasses the queued whole-catalog index backlog", async () =
     await lookup;
   }
 });
+
+test('cancelQuery settles before active downloads and removes queued indexes',async t=>{
+ let release;const gate=new Promise(r=>release=r);
+ const {engine,calls}=await transportFixture(t,{count:12000,load:async(ref,read)=>{if(ref.id.startsWith('index'))await gate;return read(ref);}});
+ const old=engine.query({src:'all'}),rejected=assert.rejects(old,{code:'STALE_RESULT'});
+ await new Promise(r=>setImmediate(r));
+ try {
+  await engine.cancelQuery();
+  assert.equal(await Promise.race([rejected.then(()=>true),new Promise(r=>setTimeout(()=>r(false),100))]),true);
+ }finally{release();await rejected;}
+ const item=await engine.lookup('musinsa:11998');assert.equal(item.k,'musinsa:11998');
+ assert.equal(calls.filter(ref=>ref.id.startsWith('index')).length,4);
+});
+test('direct lookup ignores blocked indexes after query failure',async t=>{
+ const {engine,calls}=await transportFixture(t,{load:(ref,read)=>{if(ref.id.startsWith('index'))throw Error('blocked index');return read(ref);}});
+ await assert.rejects(engine.query({}),/blocked index/);await engine.cancelQuery();
+ const count=calls.length;assert.equal((await engine.lookup('musinsa:518')).k,'musinsa:518');
+ assert.ok(calls.slice(count).every(ref=>!ref.id.startsWith('index')));
+});

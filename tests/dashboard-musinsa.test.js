@@ -53,3 +53,17 @@ const L=w.__CLOT_MUSINSA_H__.h0.histories['musinsa:1'];
 assert.equal(L.find(r=>r[0]==='2026-10-13')[8],'DIRECT');
 assert.notEqual(L.find(r=>r[0]==='2026-10-14')[8],'DIRECT');
 });
+test('public brand code survives adapter, builder, card and compact search',async t=>{
+ const {dir,store}=fixture(t);
+ store.db.prepare("UPDATE goods SET brand='kimuir',brand_name='키뮤어',name='캐시미어블렌드 코트' WHERE goods_no=1").run();
+ const {createDashboardBuilder}=await import('../src/dashboard-builder.js');
+ const builder=createDashboardBuilder({outDir:dir,revision:'alias'});
+ buildMusinsaCatalog(store.db,{outDir:dir,revision:'alias',sink:builder});
+ const data=builder.finish({scanState:'complete'}),model=createDashboardModel(),idx=createDashboardIndex(model);
+ const read=ref=>{const ctx={};vm.runInNewContext(fs.readFileSync(path.join(dir,ref.path),'utf8'),ctx);return JSON.parse(JSON.stringify(ctx.__CLOT_ASSETS__[ref.id]));};
+ const rows=data.catalog.indexParts.flatMap(ref=>idx.unpackIndex(read(ref)));
+ const result=model.queryCatalog(rows,{q:'kimuir 캐시미어'});
+ assert.equal(result.total,1);assert.equal(result.items[0].b,'키뮤어');assert.equal(result.items[0].my,80);assert.equal(result.items[0].priceSource,'DIRECT');
+ const card=read(result.items[0].card).items.find(x=>x.k==='musinsa:1');
+ assert.deepEqual(card.searchAliases,['kimuir']);assert.equal(JSON.stringify(data).includes('SECRET'),false);
+});
