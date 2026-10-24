@@ -216,6 +216,18 @@ export async function createDashboardTransport({
       return result;
     }
     return {
+      async cancelQuery() {
+        generation++;
+        current = null;
+        cancelCurrent?.();
+        cancelCurrent = null;
+        for (let i = queue.length - 1; i >= 0; i--) {
+          if (queue[i].kind !== "index") continue;
+          const [job] = queue.splice(i, 1);
+          inflight.delete(job.ref.id);
+          job.reject(stale());
+        }
+      },
       async query(state, requestId) {
         const own = ++generation;
         current = null;
@@ -327,7 +339,7 @@ export function runDashboardWorker({ model, index, scope, transport }) {
         const engine = await enginePromise;
         if (
           !engine ||
-          !["query", "page", "lookup", "neighbor"].includes(method)
+          !["query", "page", "lookup", "neighbor", "cancelQuery"].includes(method)
         )
           throw Error("Unknown method");
         result = await engine[method](...args);
