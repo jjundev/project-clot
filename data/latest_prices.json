@@ -1,8 +1,8 @@
 {
-  "updated_at": "2026-10-23T05:17:29.568Z",
+  "updated_at": "2026-10-24T04:59:30.023Z",
   "total_items": 1040,
-  "active_items": 610,
-  "soldout_items": 14,
+  "active_items": 609,
+  "soldout_items": 15,
   "unliked_items": 9,
   "dropped_items": 407,
   "items": [
@@ -17,7 +17,7 @@
       "lowest_price": 18510,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:28.052Z"
+      "last_checked": "2026-10-24T04:59:29.238Z"
     },
     {
       "goods_no": 7225475,
@@ -26,11 +26,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/7225475",
-      "current_price": 107380,
+      "current_price": 105380,
       "lowest_price": 99020,
       "lowest_price_date": "2026-10-01",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:27.815Z"
+      "last_checked": "2026-10-24T04:59:28.989Z"
     },
     {
       "goods_no": 7165744,
@@ -43,7 +43,7 @@
       "lowest_price": 22400,
       "lowest_price_date": "2026-10-23",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:27.802Z"
+      "last_checked": "2026-10-24T04:59:28.988Z"
     },
     {
       "goods_no": 7125482,
@@ -56,7 +56,7 @@
       "lowest_price": 44580,
       "lowest_price_date": "2026-10-03",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:27.801Z"
+      "last_checked": "2026-10-24T04:59:28.987Z"
     },
     {
       "goods_no": 7102173,
@@ -69,7 +69,7 @@
       "lowest_price": 27510,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:27.563Z"
+      "last_checked": "2026-10-24T04:59:28.737Z"
     },
     {
       "goods_no": 7074174,
@@ -82,7 +82,7 @@
       "lowest_price": 30970,
       "lowest_price_date": "2026-10-17",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:27.550Z"
+      "last_checked": "2026-10-24T04:59:28.736Z"
     },
     {
       "goods_no": 7061981,
@@ -95,7 +95,7 @@
       "lowest_price": 29600,
       "lowest_price_date": "2026-10-12",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:27.549Z"
+      "last_checked": "2026-10-24T04:59:28.734Z"
     },
     {
       "goods_no": 7059555,
@@ -108,7 +108,7 @@
       "lowest_price": 39290,
       "lowest_price_date": "2026-09-28",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:27.312Z"
+      "last_checked": "2026-10-24T04:59:28.485Z"
     },
     {
       "goods_no": 7008812,
@@ -121,7 +121,7 @@
       "lowest_price": 32670,
       "lowest_price_date": "2026-09-26",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:27.298Z"
+      "last_checked": "2026-10-24T04:59:28.484Z"
     },
     {
       "goods_no": 7008018,
@@ -134,7 +134,7 @@
       "lowest_price": 53660,
       "lowest_price_date": "2026-09-07",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:27.297Z"
+      "last_checked": "2026-10-24T04:59:28.482Z"
     },
     {
       "goods_no": 7008015,
@@ -147,7 +147,7 @@
       "lowest_price": 53660,
       "lowest_price_date": "2026-09-12",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:27.061Z"
+      "last_checked": "2026-10-24T04:59:28.233Z"
     },
     {
       "goods_no": 7007740,
@@ -160,7 +160,7 @@
       "lowest_price": 53660,
       "lowest_price_date": "2026-09-07",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:27.046Z"
+      "last_checked": "2026-10-24T04:59:28.232Z"
     },
     {
       "goods_no": 6999902,
@@ -173,7 +173,7 @@
       "lowest_price": 28840,
       "lowest_price_date": "2026-10-17",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:27.045Z"
+      "last_checked": "2026-10-24T04:59:28.229Z"
     },
     {
       "goods_no": 6982363,
@@ -186,7 +186,7 @@
       "lowest_price": 36180,
       "lowest_price_date": "2026-09-04",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:26.810Z"
+      "last_checked": "2026-10-24T04:59:27.979Z"
     },
     {
       "goods_no": 6976462,
@@ -199,7 +199,7 @@
       "lowest_price": 39990,
       "lowest_price_date": "2026-10-02",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:26.794Z"
+      "last_checked": "2026-10-24T04:59:27.978Z"
     },
     {
       "goods_no": 6976459,
@@ -212,7 +212,7 @@
       "lowest_price": 39990,
       "lowest_price_date": "2026-10-08",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:26.793Z"
+      "last_checked": "2026-10-24T04:59:27.976Z"
     },
     {
       "goods_no": 6969629,
@@ -225,7 +225,7 @@
       "lowest_price": 29300,
       "lowest_price_date": "2026-10-15",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:26.559Z"
+      "last_checked": "2026-10-24T04:59:27.727Z"
     },
     {
       "goods_no": 6968252,
@@ -238,7 +238,7 @@
       "lowest_price": 40180,
       "lowest_price_date": "2026-10-15",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:26.542Z"
+      "last_checked": "2026-10-24T04:59:27.726Z"
     },
     {
       "goods_no": 6961131,
@@ -251,7 +251,7 @@
       "lowest_price": 68770,
       "lowest_price_date": "2026-09-28",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:26.541Z"
+      "last_checked": "2026-10-24T04:59:27.724Z"
     },
     {
       "goods_no": 6948316,
@@ -264,7 +264,7 @@
       "lowest_price": 16740,
       "lowest_price_date": "2026-10-17",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:26.308Z"
+      "last_checked": "2026-10-24T04:59:27.476Z"
     },
     {
       "goods_no": 6886755,
@@ -273,11 +273,11 @@
       "source": "like",
       "status": "SOLDOUT",
       "url": "https://www.musinsa.com/products/6886755",
-      "current_price": 150771,
+      "current_price": 151771,
       "lowest_price": 118200,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": true,
-      "last_checked": "2026-10-23T05:17:26.290Z"
+      "last_checked": "2026-10-24T04:59:27.474Z"
     },
     {
       "goods_no": 6736331,
@@ -290,7 +290,7 @@
       "lowest_price": 60590,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:26.289Z"
+      "last_checked": "2026-10-24T04:59:27.473Z"
     },
     {
       "goods_no": 6710467,
@@ -303,7 +303,7 @@
       "lowest_price": 31080,
       "lowest_price_date": "2026-10-23",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:26.056Z"
+      "last_checked": "2026-10-24T04:59:27.223Z"
     },
     {
       "goods_no": 6710465,
@@ -316,7 +316,7 @@
       "lowest_price": 31080,
       "lowest_price_date": "2026-10-23",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:26.038Z"
+      "last_checked": "2026-10-24T04:59:27.222Z"
     },
     {
       "goods_no": 6708161,
@@ -329,7 +329,7 @@
       "lowest_price": 25870,
       "lowest_price_date": "2026-10-17",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:26.036Z"
+      "last_checked": "2026-10-24T04:59:27.220Z"
     },
     {
       "goods_no": 6536568,
@@ -342,7 +342,7 @@
       "lowest_price": 25670,
       "lowest_price_date": "2026-08-31",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:25.804Z"
+      "last_checked": "2026-10-24T04:59:26.972Z"
     },
     {
       "goods_no": 6461629,
@@ -355,7 +355,7 @@
       "lowest_price": 19800,
       "lowest_price_date": "2026-09-28",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:25.786Z"
+      "last_checked": "2026-10-24T04:59:26.970Z"
     },
     {
       "goods_no": 6445179,
@@ -368,7 +368,7 @@
       "lowest_price": 25940,
       "lowest_price_date": "2026-08-31",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:25.785Z"
+      "last_checked": "2026-10-24T04:59:26.968Z"
     },
     {
       "goods_no": 6425818,
@@ -381,7 +381,7 @@
       "lowest_price": 19990,
       "lowest_price_date": "2026-09-15",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:25.552Z"
+      "last_checked": "2026-10-24T04:59:26.720Z"
     },
     {
       "goods_no": 6391691,
@@ -394,7 +394,7 @@
       "lowest_price": 27540,
       "lowest_price_date": "2026-10-15",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:25.535Z"
+      "last_checked": "2026-10-24T04:59:26.719Z"
     },
     {
       "goods_no": 6263413,
@@ -407,7 +407,7 @@
       "lowest_price": 43720,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:25.534Z"
+      "last_checked": "2026-10-24T04:59:26.717Z"
     },
     {
       "goods_no": 6257984,
@@ -416,11 +416,11 @@
       "source": "like",
       "status": "SOLDOUT",
       "url": "https://www.musinsa.com/products/6257984",
-      "current_price": 147911,
+      "current_price": 148911,
       "lowest_price": 147911,
       "lowest_price_date": "2026-10-21",
       "is_sold_out": true,
-      "last_checked": "2026-10-23T05:17:25.301Z"
+      "last_checked": "2026-10-24T04:59:26.470Z"
     },
     {
       "goods_no": 6239250,
@@ -433,7 +433,7 @@
       "lowest_price": 16180,
       "lowest_price_date": "2026-10-06",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:25.284Z"
+      "last_checked": "2026-10-24T04:59:26.467Z"
     },
     {
       "goods_no": 6237142,
@@ -446,7 +446,7 @@
       "lowest_price": 24170,
       "lowest_price_date": "2026-10-04",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:25.282Z"
+      "last_checked": "2026-10-24T04:59:26.464Z"
     },
     {
       "goods_no": 6197079,
@@ -459,7 +459,7 @@
       "lowest_price": 22890,
       "lowest_price_date": "2026-08-31",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:25.050Z"
+      "last_checked": "2026-10-24T04:59:26.217Z"
     },
     {
       "goods_no": 6187200,
@@ -472,7 +472,7 @@
       "lowest_price": 31800,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:25.033Z"
+      "last_checked": "2026-10-24T04:59:26.215Z"
     },
     {
       "goods_no": 6154424,
@@ -485,7 +485,7 @@
       "lowest_price": 27760,
       "lowest_price_date": "2026-09-12",
       "is_sold_out": true,
-      "last_checked": "2026-10-23T05:17:25.029Z"
+      "last_checked": "2026-10-24T04:59:26.213Z"
     },
     {
       "goods_no": 6103298,
@@ -498,7 +498,7 @@
       "lowest_price": 31700,
       "lowest_price_date": "2026-09-12",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:24.799Z"
+      "last_checked": "2026-10-24T04:59:25.965Z"
     },
     {
       "goods_no": 6084885,
@@ -511,7 +511,7 @@
       "lowest_price": 11920,
       "lowest_price_date": "2026-10-14",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:24.782Z"
+      "last_checked": "2026-10-24T04:59:25.964Z"
     },
     {
       "goods_no": 6078643,
@@ -524,7 +524,7 @@
       "lowest_price": 31150,
       "lowest_price_date": "2026-10-23",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:24.778Z"
+      "last_checked": "2026-10-24T04:59:25.960Z"
     },
     {
       "goods_no": 6063096,
@@ -537,7 +537,7 @@
       "lowest_price": 27000,
       "lowest_price_date": "2026-09-28",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:24.547Z"
+      "last_checked": "2026-10-24T04:59:25.713Z"
     },
     {
       "goods_no": 6062891,
@@ -550,7 +550,7 @@
       "lowest_price": 37590,
       "lowest_price_date": "2026-10-23",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:24.531Z"
+      "last_checked": "2026-10-24T04:59:25.712Z"
     },
     {
       "goods_no": 6047897,
@@ -559,11 +559,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/6047897",
-      "current_price": 446041,
+      "current_price": 450041,
       "lowest_price": 374061,
       "lowest_price_date": "2026-09-06",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:24.525Z"
+      "last_checked": "2026-10-24T04:59:25.709Z"
     },
     {
       "goods_no": 6040017,
@@ -576,7 +576,7 @@
       "lowest_price": 86060,
       "lowest_price_date": "2026-10-19",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:24.296Z"
+      "last_checked": "2026-10-24T04:59:25.462Z"
     },
     {
       "goods_no": 6027250,
@@ -589,7 +589,7 @@
       "lowest_price": 33350,
       "lowest_price_date": "2026-10-06",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:24.280Z"
+      "last_checked": "2026-10-24T04:59:25.461Z"
     },
     {
       "goods_no": 5999621,
@@ -602,7 +602,7 @@
       "lowest_price": 66080,
       "lowest_price_date": "2026-10-01",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:24.274Z"
+      "last_checked": "2026-10-24T04:59:25.456Z"
     },
     {
       "goods_no": 5993364,
@@ -611,11 +611,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/5993364",
-      "current_price": 102980,
+      "current_price": 103980,
       "lowest_price": 86980,
       "lowest_price_date": "2026-10-04",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:24.044Z"
+      "last_checked": "2026-10-24T04:59:25.210Z"
     },
     {
       "goods_no": 5993286,
@@ -628,20 +628,20 @@
       "lowest_price": 30280,
       "lowest_price_date": "2026-10-13",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:24.028Z"
+      "last_checked": "2026-10-24T04:59:25.208Z"
     },
     {
       "goods_no": 5992266,
       "goods_name": "[VIP] 드레이프 L2B 자켓[블랙]",
       "brand_name": "후브스",
       "source": "like",
-      "status": "ACTIVE",
+      "status": "SOLDOUT",
       "url": "https://www.musinsa.com/products/5992266",
       "current_price": 86730,
       "lowest_price": 68780,
       "lowest_price_date": "2026-10-01",
-      "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:24.023Z"
+      "is_sold_out": true,
+      "last_checked": "2026-10-24T04:59:25.205Z"
     },
     {
       "goods_no": 5947867,
@@ -654,7 +654,7 @@
       "lowest_price": 28130,
       "lowest_price_date": "2026-10-13",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:23.793Z"
+      "last_checked": "2026-10-24T04:59:24.957Z"
     },
     {
       "goods_no": 5932663,
@@ -667,7 +667,7 @@
       "lowest_price": 23740,
       "lowest_price_date": "2026-09-12",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:23.777Z"
+      "last_checked": "2026-10-24T04:59:24.955Z"
     },
     {
       "goods_no": 5909598,
@@ -680,7 +680,7 @@
       "lowest_price": 46200,
       "lowest_price_date": "2026-09-26",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:23.771Z"
+      "last_checked": "2026-10-24T04:59:24.951Z"
     },
     {
       "goods_no": 5908832,
@@ -693,7 +693,7 @@
       "lowest_price": 54150,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:23.542Z"
+      "last_checked": "2026-10-24T04:59:24.702Z"
     },
     {
       "goods_no": 5903154,
@@ -702,11 +702,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/5903154",
-      "current_price": 99710,
+      "current_price": 100710,
       "lowest_price": 74570,
       "lowest_price_date": "2026-10-14",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:23.526Z"
+      "last_checked": "2026-10-24T04:59:24.700Z"
     },
     {
       "goods_no": 5898838,
@@ -719,7 +719,7 @@
       "lowest_price": 30420,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:23.519Z"
+      "last_checked": "2026-10-24T04:59:24.699Z"
     },
     {
       "goods_no": 5898780,
@@ -732,7 +732,7 @@
       "lowest_price": 28880,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:23.291Z"
+      "last_checked": "2026-10-24T04:59:24.450Z"
     },
     {
       "goods_no": 5885530,
@@ -741,11 +741,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/5885530",
-      "current_price": 113300,
+      "current_price": 114300,
       "lowest_price": 109780,
       "lowest_price_date": "2026-10-01",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:23.274Z"
+      "last_checked": "2026-10-24T04:59:24.448Z"
     },
     {
       "goods_no": 5884422,
@@ -758,7 +758,7 @@
       "lowest_price": 37850,
       "lowest_price_date": "2026-09-11",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:23.268Z"
+      "last_checked": "2026-10-24T04:59:24.446Z"
     },
     {
       "goods_no": 5870347,
@@ -771,7 +771,7 @@
       "lowest_price": 39210,
       "lowest_price_date": "2026-09-18",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:23.039Z"
+      "last_checked": "2026-10-24T04:59:24.198Z"
     },
     {
       "goods_no": 5866558,
@@ -780,11 +780,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/5866558",
-      "current_price": 35160,
+      "current_price": 37110,
       "lowest_price": 34380,
       "lowest_price_date": "2026-10-14",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:23.023Z"
+      "last_checked": "2026-10-24T04:59:24.196Z"
     },
     {
       "goods_no": 5589130,
@@ -797,7 +797,7 @@
       "lowest_price": 71830,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:23.015Z"
+      "last_checked": "2026-10-24T04:59:24.194Z"
     },
     {
       "goods_no": 5561294,
@@ -810,7 +810,7 @@
       "lowest_price": 26670,
       "lowest_price_date": "2026-10-17",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:22.788Z"
+      "last_checked": "2026-10-24T04:59:23.946Z"
     },
     {
       "goods_no": 5425197,
@@ -819,11 +819,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/5425197",
-      "current_price": 89570,
+      "current_price": 90570,
       "lowest_price": 57030,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:22.772Z"
+      "last_checked": "2026-10-24T04:59:23.944Z"
     },
     {
       "goods_no": 5386037,
@@ -832,11 +832,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/5386037",
-      "current_price": 105150,
+      "current_price": 106150,
       "lowest_price": 78140,
       "lowest_price_date": "2026-10-05",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:22.764Z"
+      "last_checked": "2026-10-24T04:59:23.943Z"
     },
     {
       "goods_no": 5386036,
@@ -845,11 +845,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/5386036",
-      "current_price": 105150,
+      "current_price": 106150,
       "lowest_price": 81980,
       "lowest_price_date": "2026-09-26",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:22.536Z"
+      "last_checked": "2026-10-24T04:59:23.694Z"
     },
     {
       "goods_no": 5384981,
@@ -862,7 +862,7 @@
       "lowest_price": 22140,
       "lowest_price_date": "2026-09-09",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:22.520Z"
+      "last_checked": "2026-10-24T04:59:23.693Z"
     },
     {
       "goods_no": 5336355,
@@ -875,7 +875,7 @@
       "lowest_price": 27910,
       "lowest_price_date": "2026-09-26",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:22.512Z"
+      "last_checked": "2026-10-24T04:59:23.691Z"
     },
     {
       "goods_no": 5329359,
@@ -888,7 +888,7 @@
       "lowest_price": 75600,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:22.285Z"
+      "last_checked": "2026-10-24T04:59:23.441Z"
     },
     {
       "goods_no": 5319541,
@@ -901,7 +901,7 @@
       "lowest_price": 60900,
       "lowest_price_date": "2026-09-28",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:22.269Z"
+      "last_checked": "2026-10-24T04:59:23.440Z"
     },
     {
       "goods_no": 5304466,
@@ -914,7 +914,7 @@
       "lowest_price": 41270,
       "lowest_price_date": "2026-08-31",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:22.259Z"
+      "last_checked": "2026-10-24T04:59:23.383Z"
     },
     {
       "goods_no": 5304429,
@@ -927,7 +927,7 @@
       "lowest_price": 56740,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:22.033Z"
+      "last_checked": "2026-10-24T04:59:23.139Z"
     },
     {
       "goods_no": 5295279,
@@ -940,7 +940,7 @@
       "lowest_price": 29930,
       "lowest_price_date": "2026-10-08",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:22.018Z"
+      "last_checked": "2026-10-24T04:59:23.137Z"
     },
     {
       "goods_no": 5294605,
@@ -953,7 +953,7 @@
       "lowest_price": 25890,
       "lowest_price_date": "2026-10-03",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:22.007Z"
+      "last_checked": "2026-10-24T04:59:23.132Z"
     },
     {
       "goods_no": 5290721,
@@ -966,7 +966,7 @@
       "lowest_price": 48700,
       "lowest_price_date": "2026-10-17",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:21.782Z"
+      "last_checked": "2026-10-24T04:59:22.887Z"
     },
     {
       "goods_no": 5288154,
@@ -979,7 +979,7 @@
       "lowest_price": 35060,
       "lowest_price_date": "2026-09-28",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:21.767Z"
+      "last_checked": "2026-10-24T04:59:22.886Z"
     },
     {
       "goods_no": 5180505,
@@ -992,7 +992,7 @@
       "lowest_price": 15200,
       "lowest_price_date": "2026-09-24",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:21.756Z"
+      "last_checked": "2026-10-24T04:59:22.880Z"
     },
     {
       "goods_no": 5152785,
@@ -1005,7 +1005,7 @@
       "lowest_price": 18470,
       "lowest_price_date": "2026-10-07",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:21.530Z"
+      "last_checked": "2026-10-24T04:59:22.636Z"
     },
     {
       "goods_no": 5087207,
@@ -1018,7 +1018,7 @@
       "lowest_price": 32670,
       "lowest_price_date": "2026-09-12",
       "is_sold_out": true,
-      "last_checked": "2026-10-23T05:17:21.515Z"
+      "last_checked": "2026-10-24T04:59:22.635Z"
     },
     {
       "goods_no": 5049024,
@@ -1031,7 +1031,7 @@
       "lowest_price": 21210,
       "lowest_price_date": "2026-08-31",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:21.504Z"
+      "last_checked": "2026-10-24T04:59:22.628Z"
     },
     {
       "goods_no": 5045545,
@@ -1044,7 +1044,7 @@
       "lowest_price": 21220,
       "lowest_price_date": "2026-09-14",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:21.265Z"
+      "last_checked": "2026-10-24T04:59:22.385Z"
     },
     {
       "goods_no": 5021834,
@@ -1057,7 +1057,7 @@
       "lowest_price": 23800,
       "lowest_price_date": "2026-09-05",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:21.254Z"
+      "last_checked": "2026-10-24T04:59:22.383Z"
     },
     {
       "goods_no": 4987284,
@@ -1066,11 +1066,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/4987284",
-      "current_price": 25030,
+      "current_price": 22250,
       "lowest_price": 20860,
       "lowest_price_date": "2026-09-12",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:21.252Z"
+      "last_checked": "2026-10-24T04:59:22.377Z"
     },
     {
       "goods_no": 4987277,
@@ -1083,7 +1083,7 @@
       "lowest_price": 27300,
       "lowest_price_date": "2026-09-05",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:21.003Z"
+      "last_checked": "2026-10-24T04:59:22.132Z"
     },
     {
       "goods_no": 4929606,
@@ -1096,7 +1096,7 @@
       "lowest_price": 43610,
       "lowest_price_date": "2026-09-12",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:21.002Z"
+      "last_checked": "2026-10-24T04:59:22.130Z"
     },
     {
       "goods_no": 4862750,
@@ -1109,7 +1109,7 @@
       "lowest_price": 25890,
       "lowest_price_date": "2026-10-23",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:21.000Z"
+      "last_checked": "2026-10-24T04:59:22.125Z"
     },
     {
       "goods_no": 4787010,
@@ -1118,11 +1118,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/4787010",
-      "current_price": 113300,
+      "current_price": 114300,
       "lowest_price": 85260,
       "lowest_price_date": "2026-09-12",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:20.751Z"
+      "last_checked": "2026-10-24T04:59:21.880Z"
     },
     {
       "goods_no": 4767951,
@@ -1135,7 +1135,7 @@
       "lowest_price": 27710,
       "lowest_price_date": "2026-08-31",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:20.750Z"
+      "last_checked": "2026-10-24T04:59:21.876Z"
     },
     {
       "goods_no": 4752738,
@@ -1148,7 +1148,7 @@
       "lowest_price": 71400,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": true,
-      "last_checked": "2026-10-23T05:17:20.749Z"
+      "last_checked": "2026-10-24T04:59:21.875Z"
     },
     {
       "goods_no": 4699443,
@@ -1161,7 +1161,7 @@
       "lowest_price": 15900,
       "lowest_price_date": "2026-08-31",
       "is_sold_out": true,
-      "last_checked": "2026-10-23T05:17:20.499Z"
+      "last_checked": "2026-10-24T04:59:21.626Z"
     },
     {
       "goods_no": 4663718,
@@ -1174,7 +1174,7 @@
       "lowest_price": 47650,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:20.498Z"
+      "last_checked": "2026-10-24T04:59:21.625Z"
     },
     {
       "goods_no": 4655025,
@@ -1187,7 +1187,7 @@
       "lowest_price": 18990,
       "lowest_price_date": "2026-10-14",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:20.497Z"
+      "last_checked": "2026-10-24T04:59:21.624Z"
     },
     {
       "goods_no": 4645216,
@@ -1196,11 +1196,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/4645216",
-      "current_price": 120750,
+      "current_price": 121750,
       "lowest_price": 90710,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:20.248Z"
+      "last_checked": "2026-10-24T04:59:21.374Z"
     },
     {
       "goods_no": 4593461,
@@ -1213,7 +1213,7 @@
       "lowest_price": 11860,
       "lowest_price_date": "2026-10-17",
       "is_sold_out": true,
-      "last_checked": "2026-10-23T05:17:20.247Z"
+      "last_checked": "2026-10-24T04:59:21.373Z"
     },
     {
       "goods_no": 4400540,
@@ -1226,7 +1226,7 @@
       "lowest_price": 67000,
       "lowest_price_date": "2026-09-07",
       "is_sold_out": true,
-      "last_checked": "2026-10-23T05:17:20.246Z"
+      "last_checked": "2026-10-24T04:59:21.371Z"
     },
     {
       "goods_no": 4326393,
@@ -1239,7 +1239,7 @@
       "lowest_price": 25410,
       "lowest_price_date": "2026-10-09",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:19.996Z"
+      "last_checked": "2026-10-24T04:59:21.123Z"
     },
     {
       "goods_no": 4318462,
@@ -1252,7 +1252,7 @@
       "lowest_price": 24290,
       "lowest_price_date": "2026-10-07",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:19.995Z"
+      "last_checked": "2026-10-24T04:59:21.121Z"
     },
     {
       "goods_no": 4309651,
@@ -1265,7 +1265,7 @@
       "lowest_price": 46040,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": true,
-      "last_checked": "2026-10-23T05:17:19.994Z"
+      "last_checked": "2026-10-24T04:59:21.116Z"
     },
     {
       "goods_no": 4300665,
@@ -1278,7 +1278,7 @@
       "lowest_price": 38350,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:19.744Z"
+      "last_checked": "2026-10-24T04:59:20.868Z"
     },
     {
       "goods_no": 4272768,
@@ -1291,7 +1291,7 @@
       "lowest_price": 21800,
       "lowest_price_date": "2026-10-09",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:19.743Z"
+      "last_checked": "2026-10-24T04:59:20.866Z"
     },
     {
       "goods_no": 4246352,
@@ -1304,7 +1304,7 @@
       "lowest_price": 25890,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:19.741Z"
+      "last_checked": "2026-10-24T04:59:20.864Z"
     },
     {
       "goods_no": 4104562,
@@ -1317,7 +1317,7 @@
       "lowest_price": 29900,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:19.492Z"
+      "last_checked": "2026-10-24T04:59:20.616Z"
     },
     {
       "goods_no": 4042935,
@@ -1330,7 +1330,7 @@
       "lowest_price": 31620,
       "lowest_price_date": "2026-09-12",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:19.491Z"
+      "last_checked": "2026-10-24T04:59:20.615Z"
     },
     {
       "goods_no": 4026545,
@@ -1343,7 +1343,7 @@
       "lowest_price": 42240,
       "lowest_price_date": "2026-09-24",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:19.489Z"
+      "last_checked": "2026-10-24T04:59:20.612Z"
     },
     {
       "goods_no": 3982118,
@@ -1356,7 +1356,7 @@
       "lowest_price": 18750,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": true,
-      "last_checked": "2026-10-23T05:17:19.240Z"
+      "last_checked": "2026-10-24T04:59:20.364Z"
     },
     {
       "goods_no": 3933001,
@@ -1365,11 +1365,11 @@
       "source": "like",
       "status": "SOLDOUT",
       "url": "https://www.musinsa.com/products/3933001",
-      "current_price": 91820,
+      "current_price": 92820,
       "lowest_price": 89910,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": true,
-      "last_checked": "2026-10-23T05:17:19.239Z"
+      "last_checked": "2026-10-24T04:59:20.363Z"
     },
     {
       "goods_no": 3830107,
@@ -1382,7 +1382,7 @@
       "lowest_price": 30980,
       "lowest_price_date": "2026-09-13",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:19.238Z"
+      "last_checked": "2026-10-24T04:59:20.361Z"
     },
     {
       "goods_no": 3813584,
@@ -1395,7 +1395,7 @@
       "lowest_price": 17430,
       "lowest_price_date": "2026-10-02",
       "is_sold_out": true,
-      "last_checked": "2026-10-23T05:17:18.988Z"
+      "last_checked": "2026-10-24T04:59:20.114Z"
     },
     {
       "goods_no": 3793560,
@@ -1408,7 +1408,7 @@
       "lowest_price": 41710,
       "lowest_price_date": "2026-10-01",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:18.987Z"
+      "last_checked": "2026-10-24T04:59:20.112Z"
     },
     {
       "goods_no": 3792018,
@@ -1421,7 +1421,7 @@
       "lowest_price": 29900,
       "lowest_price_date": "2026-09-24",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:18.986Z"
+      "last_checked": "2026-10-24T04:59:20.108Z"
     },
     {
       "goods_no": 3788359,
@@ -1430,11 +1430,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/3788359",
-      "current_price": 146780,
+      "current_price": 152780,
       "lowest_price": 74410,
       "lowest_price_date": "2026-10-01",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:18.737Z"
+      "last_checked": "2026-10-24T04:59:19.862Z"
     },
     {
       "goods_no": 3774989,
@@ -1447,7 +1447,7 @@
       "lowest_price": 26960,
       "lowest_price_date": "2026-10-01",
       "is_sold_out": true,
-      "last_checked": "2026-10-23T05:17:18.736Z"
+      "last_checked": "2026-10-24T04:59:19.861Z"
     },
     {
       "goods_no": 3659649,
@@ -1460,7 +1460,7 @@
       "lowest_price": 9480,
       "lowest_price_date": "2026-09-12",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:18.734Z"
+      "last_checked": "2026-10-24T04:59:19.856Z"
     },
     {
       "goods_no": 3646381,
@@ -1473,7 +1473,7 @@
       "lowest_price": 44990,
       "lowest_price_date": "2026-10-17",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:18.485Z"
+      "last_checked": "2026-10-24T04:59:19.610Z"
     },
     {
       "goods_no": 3435698,
@@ -1486,7 +1486,7 @@
       "lowest_price": 35530,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:18.484Z"
+      "last_checked": "2026-10-24T04:59:19.608Z"
     },
     {
       "goods_no": 3155225,
@@ -1499,7 +1499,7 @@
       "lowest_price": 23280,
       "lowest_price_date": "2026-10-23",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:18.483Z"
+      "last_checked": "2026-10-24T04:59:19.604Z"
     },
     {
       "goods_no": 3155223,
@@ -1512,7 +1512,7 @@
       "lowest_price": 29130,
       "lowest_price_date": "2026-10-23",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:18.233Z"
+      "last_checked": "2026-10-24T04:59:19.357Z"
     },
     {
       "goods_no": 2995103,
@@ -1525,7 +1525,7 @@
       "lowest_price": 19990,
       "lowest_price_date": "2026-09-12",
       "is_sold_out": true,
-      "last_checked": "2026-10-23T05:17:18.232Z"
+      "last_checked": "2026-10-24T04:59:19.355Z"
     },
     {
       "goods_no": 2741521,
@@ -1534,11 +1534,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/2741521",
-      "current_price": 49090,
+      "current_price": 49100,
       "lowest_price": 47510,
       "lowest_price_date": "2026-10-08",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:18.230Z"
+      "last_checked": "2026-10-24T04:59:19.354Z"
     },
     {
       "goods_no": 2741233,
@@ -1551,7 +1551,7 @@
       "lowest_price": 63960,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:17.982Z"
+      "last_checked": "2026-10-24T04:59:19.106Z"
     },
     {
       "goods_no": 2725419,
@@ -1564,7 +1564,7 @@
       "lowest_price": 48510,
       "lowest_price_date": "2026-10-23",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:17.980Z"
+      "last_checked": "2026-10-24T04:59:19.104Z"
     },
     {
       "goods_no": 2705799,
@@ -1577,7 +1577,7 @@
       "lowest_price": 28350,
       "lowest_price_date": "2026-10-23",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:17.979Z"
+      "last_checked": "2026-10-24T04:59:19.101Z"
     },
     {
       "goods_no": 2670691,
@@ -1590,7 +1590,7 @@
       "lowest_price": 31670,
       "lowest_price_date": "2026-10-13",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:17.730Z"
+      "last_checked": "2026-10-24T04:59:18.854Z"
     },
     {
       "goods_no": 2559402,
@@ -1603,7 +1603,7 @@
       "lowest_price": 23610,
       "lowest_price_date": "2026-10-14",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:17.729Z"
+      "last_checked": "2026-10-24T04:59:18.852Z"
     },
     {
       "goods_no": 2341126,
@@ -1612,11 +1612,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/2341126",
-      "current_price": 105660,
+      "current_price": 106660,
       "lowest_price": 69050,
       "lowest_price_date": "2026-09-22",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:17.727Z"
+      "last_checked": "2026-10-24T04:59:18.851Z"
     },
     {
       "goods_no": 595040,
@@ -1625,11 +1625,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/595040",
-      "current_price": 184101,
+      "current_price": 190901,
       "lowest_price": 161101,
       "lowest_price_date": "2026-10-04",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:17.479Z"
+      "last_checked": "2026-10-24T04:59:18.602Z"
     },
     {
       "goods_no": 595039,
@@ -1638,11 +1638,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/595039",
-      "current_price": 189201,
+      "current_price": 208671,
       "lowest_price": 189201,
       "lowest_price_date": "2026-10-23",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:17.477Z"
+      "last_checked": "2026-10-24T04:59:18.600Z"
     },
     {
       "goods_no": 595038,
@@ -1651,11 +1651,11 @@
       "source": "like",
       "status": "ACTIVE",
       "url": "https://www.musinsa.com/products/595038",
-      "current_price": 197101,
+      "current_price": 193891,
       "lowest_price": 187471,
       "lowest_price_date": "2026-10-13",
       "is_sold_out": false,
-      "last_checked": "2026-10-23T05:17:17.448Z"
+      "last_checked": "2026-10-24T04:59:18.558Z"
     },
     {
       "goods_no": 4463982,
