@@ -34,10 +34,13 @@ export async function collectPointPolicies({store,fetchPolicy=fetchPointPolicy,n
       borrow(lane);
       if(remaining[lane]<=0)break;
       const atMs=now();
+      if(atMs>=deadline){result.stop='deadline';break outer;}
       if(!store.reserveAttempt({goodsNo:candidate.goodsNo,lane,atMs,dailyCap}))continue outer;
       remaining[lane]--;result.attempted++;result.quotaDate=quotaDate(atMs);
+      const timeoutMs=Math.min(15000,deadline-now());
+      if(timeoutMs<=0){result.stop='deadline';break outer;}
       try {
-        const policy=await fetchPolicy(candidate.goodsNo,{now,timeoutMs:Math.min(15000,deadline-now())});
+        const policy=await fetchPolicy(candidate.goodsNo,{now,timeoutMs});
         store.savePolicy(policy);result.succeeded++;break;
       }catch(e){
         result.failed++;

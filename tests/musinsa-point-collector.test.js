@@ -54,3 +54,19 @@ test('KST 자정 통과에도 날짜별 cap과 간격 유지',async t=>{
 test('잘못된 한도는 호출 전에 거절',async()=>{
   for(const dailyCap of [0,5001,1.5,NaN])await assert.rejects(collectPointPolicies({dailyCap}),/cap/);
 });
+
+test('후보 조회가 deadline을 넘기면 예약·오류·cooldown 없이 종료',async t=>{
+  const {points,addGoods,db}=makePointStoreFixture(t);addGoods({goods_no:1});const c=clock();let network=0;
+  const pick=points.pickCandidates.bind(points);points.pickCandidates=options=>{const rows=pick(options);c.advance(200);return rows;};
+  const {fetchPointPolicy}=await import('../src/musinsaWide/point-policy.js');
+  const r=await collectPointPolicies({store:points,...c,dailyCap:1,budgetMs:100,fetchPolicy:(n,o)=>fetchPointPolicy(n,{...o,fetchFn:async()=>{network++;throw Error('must not request');}})});
+  assert.equal(r.stop,'deadline');assert.equal(r.attempted,0);assert.equal(r.failed,0);assert.equal(network,0);
+  assert.equal(points.getAttempts('2026-10-24'),0);assert.equal(db.prepare('SELECT count(*) n FROM goods_point_policy').get().n,0);
+});
+test('예약 중 deadline이 지나도 schema 오류나 실패 cooldown을 기록하지 않는다',async t=>{
+  const {points,addGoods,db}=makePointStoreFixture(t);addGoods({goods_no:1});const c=clock();let calls=0;
+  const reserve=points.reserveAttempt.bind(points);points.reserveAttempt=options=>{const r=reserve(options);c.advance(200);return r;};
+  const r=await collectPointPolicies({store:points,...c,dailyCap:1,budgetMs:100,fetchPolicy:async()=>{calls++;throw Error('must not request');}});
+  assert.equal(r.stop,'deadline');assert.equal(calls,0);assert.equal(r.failed,0);assert.equal(r.attempted,1);
+  const row=db.prepare('SELECT last_error_code,next_retry_at FROM goods_point_policy').get();assert.equal(row.last_error_code,null);assert.equal(row.next_retry_at,null);
+});
