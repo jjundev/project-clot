@@ -1,6 +1,32 @@
 /** Shared Node/browser domain model. Keep this factory free of module references. */
 export function createDashboardModel() {
  const brandKey=name=>String(name||'').normalize('NFC').trim().replace(/\s+/g,' ').toLowerCase();
+ // Search normalization is deliberately independent of stable brand identity.
+ const normalizeSearchText=value=>String(value??'').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}]/gu,'');
+ const searchTokens=value=>[...new Set(String(value??'').normalize('NFKC').toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu)||[])];
+ const searchFields=item=>[item.b,item.m,item.g,item.n,...(Array.isArray(item.searchAliases)?item.searchAliases:[])].map(normalizeSearchText).filter(Boolean);
+ const matchesSearch=(item,tokens)=>tokens.every(token=>(item._searchFields||searchFields(item)).some(field=>field.includes(token)));
+ function parseSearchInput(input) {
+ const value=String(input??'').normalize('NFKC').trim();
+ const invalid=()=>({type:'invalid',message:'상품번호 또는 지원하는 무신사 상품 URL을 입력해 주세요'});
+ const product=(source,digits)=>{
+ const n=Number(digits);
+ return /^\d+$/.test(digits)&&Number.isSafeInteger(n)&&n>0?{type:'product',key:source+':'+n}:invalid();
+ };
+ if(!value)return {type:'empty'};
+ if(/^[+-]?\d+$/.test(value))return product('musinsa',value);
+ const prefix=value.match(/^(musinsa|4910):(.*)$/i);
+ if(prefix)return product(prefix[1].toLowerCase(),prefix[2]);
+ if(/^www\./i.test(value)||/^[a-z][a-z\d+.-]*:/i.test(value)) {
+ try {
+ const url=new URL(value),match=url.pathname.match(/^\/products\/(\d+)\/?$/);
+ if(!['http:','https:'].includes(url.protocol)||!['musinsa.com','www.musinsa.com','m.musinsa.com'].includes(url.hostname)||url.username||url.password||url.port||!match)return invalid();
+ return product('musinsa',match[1]);
+ }catch{return invalid();}
+ }
+ const tokens=searchTokens(value);
+ return tokens.length?{type:'text',tokens}:invalid();
+ }
  const itemKey=(source,id)=>(source==='musinsa'?'musinsa':'4910')+':'+String(id).split(':').pop();
  const resolveKey=value=>String(value).includes(':')?String(value):itemKey('musinsa',value);
  function summarize(raw,{kind=raw.kind||(raw.src==='musinsa'?'musinsa':raw.src==='4910all'?'scan':'liked'),detail={type:'inline'}}={}) {
@@ -8,7 +34,7 @@ export function createDashboardModel() {
  delete x.L;
  x.b=raw.b||raw.m||(x.src==='4910'?'4910':'무신사');
  x.c=['top','outer','bottom','shoes','bag'].includes(raw.c)?raw.c:'etc';
- x.brandKey=brandKey(x.b);x._hay=brandKey([x.b,x.m,x.g,x.n].join(' '));x._init=x.b.trim().charAt(0).toUpperCase();
+ x._searchFields=searchFields(x);x.brandKey=brandKey(x.b);x._hay=brandKey([x.b,x.m,x.g,x.n].join(' '));x._init=x.b.trim().charAt(0).toUpperCase();
  const L=raw.L||[];x.tracked=L.length>0;
  Object.assign(x,{rate:-1,dropAmt:0,isOut:x.s==='SOLDOUT',isLow:false,lowEligible:false,my:null,sale:null,normal:null,newbie:null,coupon:0,couponName:null,lowMy:null,lowDate:null});
  if(!L.length)return x;
@@ -38,11 +64,11 @@ export function createDashboardModel() {
  }
  const quickMatch=(x,f)=>f==='all'||(f==='lowest'?x.isLow:f==='drop'?x.dropAmt>0:f==='out'?x.isOut:!x.isOut);
  function queryCatalog(items,input) {
- const s=restoreState(input),q=brandKey(s.q),selected=new Set(s.brandKeys);
+ const s=restoreState(input),tokens=searchTokens(s.q),selected=new Set(s.brandKeys);
  const sources={all:0,musinsa:0,'4910':0},quick={all:0,lowest:0,drop:0,onsale:0,out:0},categories={all:0},brands=new Map(),result=[];
  for(const x of items){
  if(!brands.has(x.brandKey))brands.set(x.brandKey,{key:x.brandKey,label:x.b,count:0});
- if(q&&!x._hay.includes(q))continue;
+ if(s.q.trim()&&(!tokens.length||!matchesSearch(x,tokens)))continue;
  const src=s.src==='all'||x.src===s.src,cat=s.cat==='all'||x.c===s.cat,brand=!selected.size||selected.has(x.brandKey),filter=quickMatch(x,s.filter);
  if(cat&&brand&&filter){sources.all++;sources[x.src]++;}
  if(src&&brand&&filter){categories.all++;categories[x.c]=(categories[x.c]||0)+1;}
@@ -63,5 +89,5 @@ export function createDashboardModel() {
  result.sort((a,b)=>sorts[s.sort](a,b)||a.k.localeCompare(b.k));
  return {items:result,total:result.length,sources,quick,categories,brands:[...brands.values()].filter(b=>b.count>0||selected.has(b.key)).sort((a,b)=>b.count-a.count||a.label.localeCompare(b.label,'ko'))};
  }
- return {itemKey,resolveKey,brandKey,summarize,mergeSummaries,queryCatalog,restoreState};
+ return {parseSearchInput,normalizeSearchText,searchFields,matchesSearch,itemKey,resolveKey,brandKey,summarize,mergeSummaries,queryCatalog,restoreState};
 }
