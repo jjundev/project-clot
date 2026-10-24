@@ -849,6 +849,14 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   }
 
   function priceKind(source){return source==='DIRECT'?'직접 확인 가격':source==='ESTIMATED'?'확인된 혜택 기준 추정가':'출처 미확인 가격';}
+  function pointHtml(it) {
+    if(it.kind!=='wide'||!D.musinsa?.points?.enabled)return '';
+    var text=it.pointState==='ELIGIBLE'&&it.pointEstimate!=null
+      ? '적립금 최대 사용 예상가 <b class="num">'+won(it.pointEstimate)+'</b><br>적립금 '+won(it.pointDiscount)+' 이상 보유 가정 · 등급·카드 할인 제외'
+      : it.pointState==='RESTRICTED'?'적립금 사용 불가':'적립금 사용 조건 미확인';
+    if(it.pointCheckedAt){var date=new Date(it.pointCheckedAt);if(Number.isFinite(date.getTime()))text+='<br>확인 '+esc(date.toLocaleString('sv-SE',{timeZone:'Asia/Seoul',hour12:false}))+' KST';}
+    return '<div class="point-estimate price-source">'+text+'</div>';
+  }
   function cardHtml(it) {
     var pins = '';
     if (!it.tracked) pins += '<span class="pin wait">관측 대기</span>';
@@ -868,6 +876,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         (it.coupon > 0 ? '<span class="tag">' + esc(it.couponName || '쿠폰') + ' −' + it.coupon.toLocaleString('ko-KR') + '원</span>' : '');
     }
     if(it.kind==='wide')body+='<div class="price-source">'+esc(priceKind(it.priceSource))+' · '+esc(it.observedDate||'')+' 기준'+(it.retained?' · 이번 목록 미포함':'')+'</div>';
+    body+=pointHtml(it);
     if (is4910(it) && it.my == null && it.tracked) body = '<div class="waitprice">가격 재검증 필요</div>';
     if (is4910(it) && it.vd) body += '<div class="was">' + (it.my == null ? '검토일 ' : '검증일 ') + esc(new Date(it.vd).toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })) + '</div>';
     if (it.vs === 'corrected') body += '<div class="was">가격 교정됨</div>';
@@ -1259,7 +1268,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       if (it.coupon > 0) f.push('<span class="fact">' + esc(it.couponName || '쿠폰') + ' <b class="num">−' + won(it.coupon) + '</b></span>');
       if (it.isOut) f.push('<span class="fact out">품절</span>');
       if(it.anchor)f.push('<span class="fact">기간 이전 이월 기준 '+esc(it.anchor[0])+' · '+won(it.anchor[3])+'</span>');
-      fx.innerHTML = f.join('');
+      fx.innerHTML = f.join('')+pointHtml(it);
     }
     updateStepper(view.findIndex(function(x){return x.k===it.k;}));
     if(it.L.length || !it.tracked || it.historyLoaded){ setupRanges(it);drawChart(it);fillTable(it); }

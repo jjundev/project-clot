@@ -1,4 +1,6 @@
 /** Read-only adapter: only public product fields and price provenance leave the DB. */
+import {readPointEstimateViews} from "./musinsaWide/point-pricing.js";
+import {PointPolicyStore,quotaDate} from "./musinsaWide/point-store.js";
 import fs from "node:fs";
 import path from "node:path";
 import { createDashboardModel } from "./dashboard-model.js";
@@ -25,7 +27,9 @@ function group(rows) {
   }
   return map;
 }
-export function buildMusinsaCatalog(db, { outDir, revision, sink }) {
+export function buildMusinsaCatalog(db, { outDir, revision, sink, pointEstimatesEnabled=process.env.CLOT_MUSINSA_POINTS_ENABLED==='1', asOfMs=Date.now() }) {
+  const points=readPointEstimateViews({db,asOfMs,enabled:pointEstimatesEnabled});
+  const pointStore=pointEstimatesEnabled?new PointPolicyStore(db):null;
   const run = db
     .prepare("SELECT * FROM scan_runs ORDER BY date DESC LIMIT 1")
     .get();
@@ -60,6 +64,7 @@ export function buildMusinsaCatalog(db, { outDir, revision, sink }) {
     estimated: 0,
     unknown: 0,
     exceptionCoupons: metrics.pricing?.exceptionCoupons || [],
+    points: {enabled:pointEstimatesEnabled,...points.counts,attemptedToday:pointStore?.getAttempts(quotaDate(asOfMs))??0,lastStop:pointStore?.getMeta("point_run:last")?.stop??null},
     retained: goods.filter((g) => g.misses > 0).length,
   };
   const dir = path.join(outDir, "musinsa");
@@ -119,9 +124,11 @@ export function buildMusinsaCatalog(db, { outDir, revision, sink }) {
           s,
         ]);
       }
+      const point=points.byGoods.get(g.goods_no);
       const summary = model.summarize(
         {
           n: g.goods_no,
+          pointEstimate:point?.price??null,pointDiscount:point?.discount??null,pointState:pointEstimatesEnabled?(point?.state??"UNKNOWN"):null,pointCheckedAt:point?.checkedAt??null,pointMaxUseRate:point?.maxUseRate??null,
           src: "musinsa",
           kind: "wide",
           b: g.brand_name || g.brand || "무신사",

@@ -423,3 +423,41 @@ test('legacy product failure stops until explicit retry over HTTP and file',asyn
   fail=false;await page.getByRole('button',{name:'다시 시도',exact:true}).click();await page.locator(coatSelector).waitFor();assert.equal(attempts,3);
  }
 });
+
+test('일반 검색의 적립금 병기와 쿠폰가 정렬 보존 HTTP/file',async t=>{
+ const {page,dir,url}=await fixture(t,{pointScenario:'ELIGIBLE'});
+ for(const location of [url,pathToFileURL(path.join(dir,'index.html')).href]){
+  await page.goto(location);await page.locator('#q').fill('kimuir 캐시미어');await page.locator(coatSelector).waitFor();
+  const card=await page.locator(coatSelector).textContent();assert.match(card,/248,200원/);assert.match(card,/230,830원/);assert.match(card,/적립금 17,370원 이상 보유 가정 · 등급·카드 할인 제외/);assert.match(card,/2026[.\-] ?10[.\-] ?24.*18:00.*KST/);
+  await page.locator('#sortSel').selectOption('priceAsc');await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready');
+  assert.deepEqual(await page.locator('.card').evaluateAll(xs=>xs.map(x=>x.dataset.k)),['musinsa:2156295','musinsa:2156296']);
+ }
+});
+test('독립 상품 조회의 적립금 병기, 필터 보존과 상세 재열기 HTTP/file',async t=>{
+ const {page,dir,url}=await fixture(t,{pointScenario:'ELIGIBLE'});await page.route('**/assets/index-*.js*',r=>r.abort());
+ const D=JSON.parse(fs.readFileSync(path.join(dir,'index.html'),'utf8').match(/window\.__CLOT_DATA__ = ([^\n]+);/)[1]);assert.ok(!D.catalog.previewItems.some(x=>x.k==='musinsa:2156295'));
+ for(const location of [url,pathToFileURL(path.join(dir,'index.html')).href]){
+  await page.goto(location);await page.evaluate(()=>{for(const [k,v] of [['src','4910'],['cat','top'],['filter','drop']])localStorage.setItem('clot.'+k,v);});await page.reload();
+  for(const q of ['2156295','https://www.musinsa.com/products/2156295']){
+   await page.locator('#q').fill(q);await page.locator(coatSelector).waitFor();assert.match(await page.locator(coatSelector).textContent(),/230,830원/);
+   for(let i=0;i<2;i++){
+    await page.locator(coatSelector).click();await page.locator('#scrim.open').waitFor();await page.locator('#mRows').filter({hasText:'2026-10-24'}).waitFor();
+    assert.match(await page.locator('#mPrice').textContent(),/248,200원/);assert.match(await page.locator('#mFacts').textContent(),/230,830원.*적립금 17,370원 이상 보유 가정/);
+    assert.equal(await page.locator('#prevBtn').isEnabled(),false);assert.equal(await page.locator('#nextBtn').isEnabled(),false);await page.locator('#closeBtn').click();
+   }
+   assert.deepEqual(await page.evaluate(()=>['src','cat','filter'].map(k=>localStorage.getItem('clot.'+k))),['4910','top','drop']);
+  }
+ }
+});
+for(const [scenario,enabled,message] of [['RESTRICTED',true,'적립금 사용 불가'],['UNKNOWN',true,'적립금 사용 조건 미확인'],['STALE',true,'적립금 사용 조건 미확인'],['ELIGIBLE',false,null]]){
+ test('적립금 상태 '+scenario+' enabled='+enabled+' HTTP/file',async t=>{
+  const {page,dir,url}=await fixture(t,{pointScenario:scenario,pointEstimatesEnabled:enabled});
+  for(const location of [url,pathToFileURL(path.join(dir,'index.html')).href]){
+   await page.goto(location);await page.locator('#q').fill('2156295');await page.locator(coatSelector).waitFor();
+   const text=await page.locator(coatSelector).textContent();if(message)assert.ok(text.includes(message));else assert.ok(!text.includes('적립금'));
+   assert.ok(!text.includes('230,830원'));await page.locator(coatSelector).click();await page.locator('#mRows').filter({hasText:'2026-10-24'}).waitFor();
+   const detail=await page.locator('#mFacts').textContent();if(message)assert.ok(detail.includes(message));else assert.ok(!detail.includes('적립금'));
+   await page.locator('#closeBtn').click();
+  }
+ });
+}

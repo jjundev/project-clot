@@ -27,6 +27,7 @@ export function createDashboardIndex(model) {
     "observedDate",
     "card",
     "searchAliases",
+    "pointEstimate", "pointDiscount", "pointState", "pointCheckedAt", "pointMaxUseRate",
   ];
   function packIndex(items, { revision, id }) {
     const dictionaries = {};
@@ -59,6 +60,7 @@ export function createDashboardIndex(model) {
         x[f] = part.dictionaries[f] ? part.dictionaries[f][a[i]] : a[i];
       });
       x.searchAliases = Array.isArray(x.searchAliases) ? x.searchAliases.filter(v => typeof v === "string" && v.trim()) : [];
+      for (const f of ["pointEstimate","pointDiscount","pointState","pointCheckedAt","pointMaxUseRate"]) x[f] = x[f] ?? null;
       x._searchFields = model.searchFields(x);
       x.brandKey = model.brandKey(x.b);
       x._hay = model.brandKey([x.b, x.m, x.g, x.n].join(" "));

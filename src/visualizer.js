@@ -428,6 +428,8 @@ export function generateDashboardHtml({
   targetGoodsNo,
   db4910Path = DEFAULT_4910_DB,
   dbMusinsaPath = DEFAULT_MUSINSA_DB,
+  pointEstimatesEnabled = process.env.CLOT_MUSINSA_POINTS_ENABLED === '1',
+  asOfMs = Date.now(),
 } = {}) {
   if (!fs.existsSync(templatePath)) {
     throw new Error(`Dashboard template file not found at: ${templatePath}`);
@@ -466,7 +468,7 @@ export function generateDashboardHtml({
     const wideDb=new DatabaseSync(dbMusinsaPath,{readOnly:true});
     try {
       if(process.env.CLOT_REQUIRE_MUSINSA_WIDE==='1')verifyDailyCoverage(wideDb.prepare('SELECT * FROM scan_runs ORDER BY date DESC LIMIT 1').get());
-      wide=buildMusinsaCatalog(wideDb,{outDir,revision,sink});
+      wide=buildMusinsaCatalog(wideDb,{outDir,revision,sink,pointEstimatesEnabled,asOfMs});
     } finally { wideDb.close(); }
   } else {
     if(process.env.CLOT_REQUIRE_MUSINSA_WIDE==='1')throw Error('Required Musinsa wide snapshot missing');

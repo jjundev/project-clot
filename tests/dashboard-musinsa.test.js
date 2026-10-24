@@ -67,3 +67,39 @@ test('public brand code survives adapter, builder, card and compact search',asyn
  const card=read(result.items[0].card).items.find(x=>x.k==='musinsa:1');
  assert.deepEqual(card.searchAliases,['kimuir']);assert.equal(JSON.stringify(data).includes('SECRET'),false);
 });
+
+import {makePointStoreFixture,pointPolicy,validPointScanRun,AS_OF} from './helpers/musinsa-point-fixtures.js';
+import {refreshPointEstimates} from '../src/musinsaWide/point-pricing.js';
+test('별도 예상가는 기본 가격 판정을 바꾸지 않는다 / read-only build와 만료',t=>{
+ const {dir,db,points,addGoods}=makePointStoreFixture(t);addGoods();points.savePolicy(pointPolicy());validPointScanRun(db);
+ refreshPointEstimates({db,asOfMs:AS_OF,enabled:true});
+ const build=options=>{let item;const p=buildMusinsaCatalog(db,{outDir:dir,revision:'point',asOfMs:AS_OF,sink:{add(x){item=x;}},...options});return {item,p};};
+ const old=build({pointEstimatesEnabled:false}).item,before=db.prepare('SELECT * FROM point_price_changes').all();
+ const {item,p}=build({pointEstimatesEnabled:true});assert.equal(item.my,248200);assert.equal(item.pointEstimate,230830);assert.equal(item.pointDiscount,17370);
+ for(const key of ['L','my','dropAmt','isLow','rate','priceSource'])assert.deepEqual(item[key],old[key]);
+ assert.deepEqual(p.metadata.points,{enabled:true,active:1,eligible:1,restricted:0,unknown:0,attemptedToday:0,lastStop:null});
+ assert.deepEqual(db.prepare('SELECT * FROM point_price_changes').all(),before);assert.equal(old.pointEstimate,null);
+ assert.equal(build({pointEstimatesEnabled:true,asOfMs:AS_OF+604800000}).item.pointEstimate,null);
+});
+test('summary 전달 경로 일치: card asset·preview·route',async t=>{
+ const {dir,db,points,addGoods}=makePointStoreFixture(t);addGoods();points.savePolicy(pointPolicy());validPointScanRun(db);refreshPointEstimates({db,asOfMs:AS_OF,enabled:true});
+ const {createDashboardBuilder}=await import('../src/dashboard-builder.js');const builder=createDashboardBuilder({outDir:dir,revision:'points'});
+ buildMusinsaCatalog(db,{outDir:dir,revision:'points',sink:builder,pointEstimatesEnabled:true,asOfMs:AS_OF});
+ const data=builder.finish({scanState:'complete'}),read=ref=>{const ctx={};vm.runInNewContext(fs.readFileSync(path.join(dir,ref.path),'utf8'),ctx);return JSON.parse(JSON.stringify(ctx.__CLOT_ASSETS__[ref.id]));};
+ const index=createDashboardIndex(createDashboardModel()),indexed=data.catalog.indexParts.flatMap(ref=>index.unpackIndex(read(ref)))[0];
+ const card=read(indexed.card).items[0],preview=data.catalog.previewItems[0];
+ const route=Object.values(data.catalog.routes).flat().flatMap(ref=>read(ref).entries).find(([key])=>key===card.k);
+ const routed=read(route[1]).items.find(x=>x.k===card.k);
+ for(const key of ['pointEstimate','pointDiscount','pointState','pointCheckedAt','pointMaxUseRate']){assert.equal(card[key],preview[key]);assert.equal(card[key],routed[key]);assert.equal(card[key],indexed[key]);}
+ assert.equal(card.pointEstimate,230830);
+});
+test('30만 ACTIVE build의 적립금 읽기는 상품 수만큼 SQL을 만들지 않는다',t=>{
+ const {dir,db,points}=makePointStoreFixture(t);validPointScanRun(db);points.savePolicy(pointPolicy({goodsNo:1}));
+ db.exec(`WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<300000)
+ INSERT INTO goods(goods_no,name,url,cat,status,sale_price,normal_price,extra_discount,coupon_price,coupon_price_source,first_seen_date)
+ SELECT x,'상품','https://www.musinsa.com','001','ACTIVE',263200,329000,0,248200,'ESTIMATED','2026-10-24' FROM n`);
+ refreshPointEstimates({db,asOfMs:AS_OF,enabled:true});let queries=0,count=0;
+ const spy=new Proxy(db,{get(target,key){if(key==='prepare')return sql=>{if(/goods_point_policy|point_price_changes|sqlite_master/.test(sql))queries++;return target.prepare(sql);};const value=target[key];return typeof value==='function'?value.bind(target):value;}});
+ const result=buildMusinsaCatalog(spy,{outDir:dir,revision:'scale',pointEstimatesEnabled:true,asOfMs:AS_OF,sink:{add(){count++;}}});
+ assert.equal(count,300000);assert.equal(result.metadata.points.active,300000);assert.equal(result.metadata.points.eligible,1);assert.ok(queries<=10,`${queries} point SQL statements`);
+});

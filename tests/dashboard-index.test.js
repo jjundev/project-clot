@@ -85,13 +85,17 @@ test("page boundary and stale result", async () => {
   await assert.rejects(engine.page(a.resultId, 0), { code: "STALE_RESULT" });
 });
 test('brand aliases survive compact indexes and older rows remain searchable',()=>{
- const item=model.summarize({src:'musinsa',n:2156295,b:'키뮤어',g:'캐시미어블렌드 코트',searchAliases:['kimuir','kimuir',null,''],L:[]});
+ const item=model.summarize({src:'musinsa',n:2156295,b:'키뮤어',g:'캐시미어블렌드 코트',searchAliases:['kimuir','kimuir',null,''],L:[],pointEstimate:230830,pointDiscount:17370,pointState:"ELIGIBLE",pointCheckedAt:"2026-10-24T09:00:00Z",pointMaxUseRate:.07});
  const packed=packIndex([item],{revision:'r',id:'alias'}),restored=unpackIndex(packed)[0];
  assert.deepEqual(item.searchAliases,['kimuir']);
  assert.deepEqual(restored.searchAliases,['kimuir']);
  assert.equal(model.queryCatalog([restored],{q:'kimuir 캐시미어'}).total,1);
- const old=structuredClone(packed);old.rows[0].pop();
- assert.deepEqual(unpackIndex(old)[0].searchAliases,[]);
- assert.equal(model.queryCatalog(unpackIndex(old),{q:'코트 키뮤어'}).total,1);
+ assert.equal(packed.rows[0][24][0],'kimuir');assert.deepEqual(packed.rows[0].slice(25),[230830,17370,'ELIGIBLE','2026-10-24T09:00:00Z',.07]);
+ for(const length of [24,25]){
+  const old=structuredClone(packed);old.rows=old.rows.map(row=>row.slice(0,length));
+  const x=unpackIndex(old)[0];assert.deepEqual(x.searchAliases,length===24?[]:['kimuir']);
+  for(const key of ['pointEstimate','pointDiscount','pointState','pointCheckedAt','pointMaxUseRate'])assert.equal(x[key],null);
+  assert.equal(model.queryCatalog([x],{q:'코트 키뮤어'}).total,1);
+ }
  for(const searchAliases of [null,undefined,'kimuir',[]])assert.deepEqual(model.summarize({src:'4910',n:1,L:[],searchAliases}).searchAliases,[]);
 });

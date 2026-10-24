@@ -9,8 +9,12 @@ import {createDashboardModel} from '../../src/dashboard-model.js';
 import {createDashboardRuntime} from '../../src/dashboard-runtime.js';
 import {buildDashboardCatalog} from '../../src/dashboard-catalog.js';
 import {MusinsaWideStore} from '../../src/musinsaWide/store.js';
+import {PointPolicyStore} from '../../src/musinsaWide/point-store.js';
+import {refreshPointEstimates} from '../../src/musinsaWide/point-pricing.js';
+import {pointPolicy,validPointScanRun} from './musinsa-point-fixtures.js';
 import {fixtureRaw} from './dashboard-fixture.js';
-export function writeFixture(dir,{scale=false,scaleCount=439501,scanScenario=null,wide=false,search=false,historyDays=0}={}) {
+export function writeFixture(dir,{scale=false,scaleCount=439501,scanScenario=null,wide=false,search=false,historyDays=0,pointScenario=null,pointEstimatesEnabled=(pointScenario!==null),asOfMs=Date.parse('2026-10-24T10:00:00Z')}={}) {
+ if(pointScenario!==null)search=true;
  const model=createDashboardModel(),raw=fixtureRaw(),scan=raw.find(x=>x.src==='4910all');
  if(!scale) {
    for(const file of ['musinsa.db','fixture.db'])fs.rmSync(path.join(dir,file),{force:true});
@@ -53,9 +57,16 @@ export function writeFixture(dir,{scale=false,scaleCount=439501,scanScenario=nul
        for(let i=0;i<130;i++)insert.run(900000+i,i%2?'001':'002','검색 방해 상품 '+i,'https://www.musinsa.com/products/'+(900000+i),'other','다른 브랜드',10,200,10,'DIRECT','2026-10-16');
        for(const id of [2156295,2156296])insert.run(id,'002','[Drape Wool] 캐시미어블렌드 세미오버핏 발마칸 코트_블랙'+(id===2156296?' 다른 상품':''),'https://www.musinsa.com/products/'+id,'kimuir','키뮤어',263200,329000,248200,'ESTIMATED','2026-10-16');
      }
-     W.db.prepare('INSERT INTO scan_runs(date,complete,completed_at,category_counts_json,coupon_metrics_json) VALUES(?,?,?,?,?)').run('2026-10-16',1,'2026-10-16T04:50:00Z','[]',JSON.stringify({pricing:{exceptionCoupons:[354317]}}));W.close();
+     W.db.prepare('INSERT INTO scan_runs(date,complete,completed_at,category_counts_json,coupon_metrics_json) VALUES(?,?,?,?,?)').run('2026-10-16',1,'2026-10-16T04:50:00Z','[]',JSON.stringify({pricing:{exceptionCoupons:[354317]}}));
+     if(pointScenario!==null){
+       const date=new Date(asOfMs).toISOString().slice(0,10);W.db.exec('DELETE FROM scan_runs');validPointScanRun(W.db,{date});
+       const points=new PointPolicyStore(W.db,{initialize:true});
+       if(pointScenario!=='UNKNOWN')points.savePolicy(pointPolicy({restricted:pointScenario==='RESTRICTED',checkedAt:new Date(asOfMs-(pointScenario==='STALE'?604800000:3600000)).toISOString()}));
+       refreshPointEstimates({db:W.db,asOfMs,enabled:true});
+     }
+     W.close();
    }
-   const result=generateDashboardHtml({db,dbMusinsaPath,db4910Path,outputPath:path.join(dir,'index.html'),openBrowser:false});db.close();return result;
+   const result=generateDashboardHtml({db,dbMusinsaPath,db4910Path,pointEstimatesEnabled,asOfMs,outputPath:path.join(dir,'index.html'),openBrowser:false});db.close();return result;
  }
  const n=scaleCount;
  const compact={v:1,brandSno:9,b:['나이키'],m:[''],imgBase:'',r:Array.from({length:n},(_,i)=>[i+3,0,0,i===n-1&&scale?'LAST_SENTINEL':'나이키 상품 '+(i+3),'','',['top','outer','etc'][i%3],[['2026-10-16',200,120,null]]])};

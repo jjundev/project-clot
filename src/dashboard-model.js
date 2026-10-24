@@ -32,6 +32,7 @@ export function createDashboardModel() {
  function summarize(raw,{kind=raw.kind||(raw.src==='musinsa'?'musinsa':raw.src==='4910all'?'scan':'liked'),detail={type:'inline'}}={}) {
  const x={...raw,k:itemKey(raw.src,raw.n),src:raw.src==='musinsa'?'musinsa':'4910',kind,detail};
  delete x.L;
+ for(const f of ["pointEstimate","pointDiscount","pointState","pointCheckedAt","pointMaxUseRate"])x[f]=raw[f]??null;
  x.searchAliases=[...new Set((Array.isArray(raw.searchAliases)?raw.searchAliases:[]).filter(v=>typeof v==='string').map(v=>v.trim()).filter(Boolean))];
  x.b=raw.b||raw.m||(x.src==='4910'?'4910':'무신사');
  x.c=['top','outer','bottom','shoes','bag'].includes(raw.c)?raw.c:'etc';
