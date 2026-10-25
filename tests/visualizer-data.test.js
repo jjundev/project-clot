@@ -451,3 +451,53 @@ describe('mergeCouponHistory4910', () => {
     assert.deepEqual(mergeCouponHistory4910({ ...base, changes: [] }), []);
   });
 });
+
+function scanValidationFixture(t) {
+  const store = new Store4910(':memory:');
+  t.after(() => store.close());
+  const goods = [1, 100000, 50000, 60000, 70000].map(sno => ({
+    sno, brand_sno: sno === 50000 ? 20 : 10, brand: 'fixture', name: String(sno),
+    url: 'https://4910.kr', market_sno: 1, market_name: null, category: null,
+    image_url: null, sale_price: 85200, original_price: 90000, discount_rate: null,
+  }));
+  store.applyScan('2026-10-24', goods);
+  store.db.exec("UPDATE goods SET status='DROPPED' WHERE sno=60000");
+  store.syncLiked([goods.find(g => g.sno === 70000)], '2026-10-24');
+  for (const {sno} of goods) store.putPriceValidation({
+    kind: 'scan', sno, date: '2026-10-24', status: 'corrected', reason: 'fixture',
+    corrected: {sale_price: 75900, coupon_price: 72110}, evidence: {sentinel: 'not-for-export'},
+  });
+  store.recordScanRun({date: '2026-10-24', complete: true, brandCounts: [], changed: 0, added: 5, dropped: 0, durationMs: 1, couponsOk: true});
+  const observations = [];
+  const db = {prepare(sql) {
+    const statement = store.db.prepare(sql);
+    if (!/FROM price_validations/i.test(sql)) return statement;
+    return {
+      all: statement.all.bind(statement), get: statement.get.bind(statement),
+      iterate(...params) {
+        return (function* () {
+          for (const row of statement.iterate(...params)) { observations.push(row); yield row; }
+        })();
+      },
+    };
+  }};
+  return {db, observations};
+}
+
+test('scan validation reads match the selected active non-liked goods', t => {
+  const {db, observations} = scanValidationFixture(t);
+  const payload = buildScan4910Payload(db, {brandSno: 10, snoFrom: 1, snoTo: 100000});
+  assert.deepEqual(payload.r.map(r => r[0]), [1, 100000]);
+  assert.deepEqual(observations.map(row => row.sno).sort((a,b) => a-b), [1, 100000]);
+  assert.ok(observations.every(row => !Object.hasOwn(row, 'evidence_json')));
+  assert.deepEqual(payload.r.map(r => r[7]), [
+    [['2026-10-24', 90000, 75900, 72110]],
+    [['2026-10-24', 90000, 75900, 72110]],
+  ]);
+});
+
+test('empty selected goods never reads scan validations', t => {
+  const {db, observations} = scanValidationFixture(t);
+  assert.deepEqual(buildScan4910Payload(db, {brandSno: 999}).r, []);
+  assert.equal(observations.length, 0);
+});

@@ -201,7 +201,9 @@ export function buildScan4910Payload(db4910, { brandSno = null, snoFrom = null, 
 
   // A 4910.db from before the coupon history has neither the table nor scan_runs.coupons_ok: no coupon prices then.
   const hasCouponHistory = !!db4910.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'coupon_price_changes'").get();
-  const validations = readPriceValidations(db4910, 'scan', { brandSno, snoFrom, snoTo });
+  const validations = readPriceValidations(db4910, 'scan', {
+    snos: goods.map(g => Number(g.sno)), includeEvidence: false,
+  });
   const couponsBySno = hasCouponHistory
     ? group(
         db4910
