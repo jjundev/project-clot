@@ -27,3 +27,13 @@ test('scoped build verifier rejects wrong partition and route target',t=>{
  mutate(m=>m.indexParts[0].source='wrong');assert.throws(()=>verifyDashboardBuild(file),/partition/);
  mutate(m=>{const buckets=Object.keys(m.routes);m.routes[(Number(buckets[0])+1)%256]=m.routes[buckets[0]];delete m.routes[buckets[0]];});assert.throws(()=>verifyDashboardBuild(file),/route/);
 });
+test('verifier checks complete histories after cycling through more assets than its cache',t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'clot-verify-working-set-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const file=path.join(dir,'index.html');writeFixture(dir,{scale:true,scaleCount:14000});
+ assert.ok(fs.readdirSync(path.join(dir,'assets')).length>32);
+ assert.deepEqual(verifyDashboardBuild(file),{totalItems:14628,total4910:14002,scanState:'complete'});
+ // A history well outside the bootstrap still has to be read and verified.
+ const histories=fs.readdirSync(path.join(dir,'assets')).filter(x=>x.startsWith('history-'));
+ fs.unlinkSync(path.join(dir,'assets',histories.at(-1)));
+ assert.throws(()=>verifyDashboardBuild(file),/missing asset/);
+});

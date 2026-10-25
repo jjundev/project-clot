@@ -156,7 +156,12 @@ function verifyV2(D, directory) {
   function load(ref) {
     if (!/^assets\/[a-z-]+-\d+\.js$/.test(ref.path))
       throw Error("invalid asset path");
-    if (cache.has(ref.id)) return cache.get(ref.id);
+    if (cache.has(ref.id)) {
+      const p = cache.get(ref.id);
+      cache.delete(ref.id);
+      cache.set(ref.id, p);
+      return p;
+    }
     const file = path.join(directory, ref.path);
     if (!fs.existsSync(file)) throw Error("missing asset " + ref.path);
     const s = fs.readFileSync(file, "utf8");
@@ -168,43 +173,55 @@ function verifyV2(D, directory) {
     if (p?.revision !== m.revision || p.id !== ref.id || p.v !== 2)
       throw Error("asset revision mismatch");
     cache.set(ref.id, p);
+    // VM-created objects retain their realm. Keep only a bounded working set.
+    while (cache.size > 32) cache.delete(cache.keys().next().value);
     return p;
   }
-  const rows = m.indexParts.flatMap((r) => {
-      const rows = unpackIndex(load(r));
-      if (rows.length !== r.count) throw Error("index count mismatch");
-      if (
-        m.loadingMode === "scoped" &&
-        rows.some((x) => x.src !== r.source || x.c !== r.category)
-      )
-        throw Error("index partition mismatch");
-      return rows;
-    }),
-    keys = new Set(),
-    cards = new Map();
-  for (const row of rows) {
-    if (keys.has(row.k) || row.k !== model.itemKey(row.src, row.n))
-      throw Error("invalid summary identity");
-    keys.add(row.k);
-    const part = load(row.card);
-    for (const x of part.items) cards.set(x.k, x);
-    const x = cards.get(row.k);
-    if (!x) throw Error("missing card");
-    for (const f of ["my", "sale", "priceSource", "observedDate"])
-      if ((x[f] ?? null) !== (row[f] ?? null))
-        throw Error("index card mismatch");
-  }
-  // Decode each history file once; verify complete original history and global summary semantics.
-  const histories = new Map();
-  for (const x of cards.values()) for (const r of x.detail.parts) load(r);
-  for (const p of cache.values())
-    if (p.id.startsWith("history-"))
-      for (const [key, row] of p.rows) {
-        if (!histories.has(key)) histories.set(key, []);
-        histories.get(key).push(row);
+  const keys = new Set(), cards = new Map(), cardParts = new Map(), cardOwners = new Map();
+  let totalItems = 0, total4910 = 0;
+  for (const r of m.indexParts) {
+    const rows = unpackIndex(load(r));
+    if (rows.length !== r.count) throw Error("index count mismatch");
+    if (
+      m.loadingMode === "scoped" &&
+      rows.some((x) => x.src !== r.source || x.c !== r.category)
+    ) throw Error("index partition mismatch");
+    for (const row of rows) {
+      totalItems++;
+      if (row.src === "4910") total4910++;
+      if (keys.has(row.k) || row.k !== model.itemKey(row.src, row.n))
+        throw Error("invalid summary identity");
+      keys.add(row.k);
+      if (!cardParts.has(row.card.id)) {
+        const part = load(row.card);
+        // Detach cards from the asset VM so its other objects can be collected.
+        for (const x of JSON.parse(JSON.stringify(part.items))) {
+          cards.set(x.k, x);
+          cardOwners.set(x.k, row.card.id);
+        }
+        cardParts.set(row.card.id, row.card);
       }
+      const x = cards.get(row.k);
+      if (!x) throw Error("missing card");
+      for (const f of ["my", "sale", "priceSource", "observedDate"])
+        if ((x[f] ?? null) !== (row[f] ?? null))
+          throw Error("index card mismatch");
+    }
+  }
+  // Verify every original history while retaining only one product's rows.
   for (const x of cards.values()) {
-    const L = histories.get(x.k) || [];
+    const L = [];
+    for (const ref of x.detail.parts) {
+      const p = load(ref);
+      if (!p.historyByKey) {
+        p.historyByKey = new Map();
+        for (const [key, row] of p.rows) {
+          if (!p.historyByKey.has(key)) p.historyByKey.set(key, []);
+          p.historyByKey.get(key).push(row);
+        }
+      }
+      L.push(...(p.historyByKey.get(x.k) || []));
+    }
     L.sort((a, b) => a[0].localeCompare(b[0]));
     const d = model.summarize({ ...x, L }, { kind: x.kind, detail: x.detail,asOfMs:m.asOfMs??Date.now() });
     for (const f of [
@@ -228,7 +245,7 @@ function verifyV2(D, directory) {
       if (d[f] !== x[f])
         throw Error("summary history mismatch: " + x.k + " " + f);
   }
-  if (rows.length !== m.totalItems || cards.size !== rows.length)
+  if (totalItems !== m.totalItems || cards.size !== totalItems)
     throw Error("total count mismatch");
   const q = model.queryCatalog([...cards.values()], m.bootstrap.state,{asOfMs:m.asOfMs??Date.now()});
   for (const f of ["total", "sources", "quick", "categories", "brands"])
@@ -250,7 +267,8 @@ function verifyV2(D, directory) {
           if (
             scope.routeBucket(key) !== Number(bucket) ||
             routes.has(key) ||
-            !load(card).items.some((x) => x.k === key)
+            cardOwners.get(key) !== card.id ||
+            !equal(card, cardParts.get(card.id))
           )
             throw Error("route target mismatch");
           routes.set(key, card);
@@ -280,8 +298,8 @@ function verifyV2(D, directory) {
     }
   }
   return {
-    totalItems: rows.length,
-    total4910: rows.filter((x) => x.src === "4910").length,
+    totalItems,
+    total4910,
     scanState: m.scanState,
   };
 }
