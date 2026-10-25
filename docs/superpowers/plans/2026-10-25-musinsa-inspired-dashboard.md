@@ -251,4 +251,4 @@ assert.ok(await page.locator('.card').count()<=360);
 
 ## 실행 결과
 
-사용자가 Native 구현을 승인한 뒤 격리 워크트리에서 Task 1–5를 실행했다. 회귀·생성물·화면·로딩 증거는 `docs/verify/2026-10-25-musinsa-inspired-dashboard.md`에 기록했다. 최종 전체 브랜치 리뷰는 실행 ledger로 이어진다.
+사용자가 Native 구현을 승인한 뒤 격리 워크트리에서 Task 1–5를 실행했다. 회귀·생성물·화면·로딩 증거는 `docs/verify/2026-10-25-musinsa-inspired-dashboard.md`에 기록했다. 최종 독립 리뷰의 Important 4건도 회귀 테스트와 함께 수정하고 전체 검증을 통과했다. 상세는 위 검증 문서에 기록했다.

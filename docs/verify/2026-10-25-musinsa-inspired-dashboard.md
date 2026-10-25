@@ -15,7 +15,7 @@ Native 실행. 기준 커밋 `6ef9f3e`, 브랜치 `codex/musinsa-dashboard`. Nod
 | 검증 | 결과 |
 |---|---|
 | `npm test` | 1118 passed, 0 failed |
-| `npm run test:dashboard:browser` | 72 passed, 0 failed |
+| `npm run test:dashboard:browser` | 76 passed, 0 failed |
 | 일반 fixture 생성물 검증 | 5개, exit 0 |
 | wide/search + 적립금 fixture 생성물 검증 | 138개, exit 0 |
 | scale fixture 생성물 검증 | 440,129개 / 4910 439,503개, exit 0 |
@@ -25,11 +25,11 @@ Native 실행. 기준 커밋 `6ef9f3e`, 브랜치 `codex/musinsa-dashboard`. Nod
 실행한 fixture 생성은 `tests/helpers/dashboard-page.js`의 `writeFixture(dir, options)`이며 options는 각각 `{}`, `{search:true,pointScenario:'ELIGIBLE'}`, `{scale:true}`다. 최종 빌드 상세:
 
 ```text
-{"name":"normal","node":"v24.17.0","output":"/tmp/clot-design-verify-normal-ORJx8W","status":0}
+{"name":"normal","node":"v24.17.0","output":"/tmp/clot-design-verify-normal-Zs6gI8","status":0}
 {"totalItems":5,"total4910":3,"scanState":"complete"}
-{"name":"wide-search","node":"v24.17.0","output":"/tmp/clot-design-verify-wide-search-PmoUl8","status":0}
+{"name":"wide-search","node":"v24.17.0","output":"/tmp/clot-design-verify-wide-search-6RZ1QK","status":0}
 {"totalItems":138,"total4910":3,"scanState":"complete"}
-{"name":"scale","node":"v24.17.0","output":"/tmp/clot-design-verify-scale-oHIaDb","status":0}
+{"name":"scale","node":"v24.17.0","output":"/tmp/clot-design-verify-scale-rZ25dN","status":0}
 {"totalItems":440129,"total4910":439503,"scanState":"complete"}
 ```
 
@@ -67,3 +67,18 @@ Node 24.17.0, 동일 Chromium·440,129개 fixture·무신사 상의 scope·1440�
 모바일에서 필터가 첫 가격을 밀어내는 캡처를 확인해 640px 미만에서만 기본 접힘으로 바꿨다. 검색과 가격 필터는 항상 보인다. 대가: 모바일의 세부 필터는 한 번 더 눌러야 한다.
 
 원래 checkout의 사용자 package.json 변경, rea-musinsa와 기타 미추적 자료는 보존했다. REA의 더미 상품·가격·후기·상거래 기능이나 asset을 런타임에 가져오지 않았다. push·merge·Pages 배포는 수행하지 않았다.
+
+## 최종 독립 리뷰 및 수정 — 2026-10-26
+
+Native 구현 뒤 gpt-6-astra가 기준 커밋부터 전체 변경을 읽기 전용으로 검토했다. Critical 0, Important 4, Minor 0, 판단 보류 항목 0이었다. 네 건 모두 실제 사용자 동작으로 재현하고 한 번의 수정 묶음으로 처리했다.
+
+| 확인한 문제 | 회귀 테스트와 결과 |
+|---|---|
+| 복원 중 재진입하면 dirty 상태를 잃어 만료 카드가 남음 | `reopening detail during pending freshness restore cannot revive expired catalog` RED→GREEN |
+| 복원 중 필터 변경 시 결과 2개인데 카드 0개 | `filter changes cancel a pending restoration before painting ready cards` RED→GREEN |
+| 취소된 요청의 cleanup이 새 요청 잠금을 풀어 카드 중복(360개/고유 키 240개) | `canceled page cleanup cannot unlock a newer page and append duplicate keys` RED→GREEN |
+| 신선도 갱신 후 복귀 시 독립 상품번호 조회가 일반 필터 쿼리로 바뀜 | `freshness return preserves independent product search and focus` RED→GREEN |
+
+진행 상태 해제는 해당 query token 소유자만 수행한다. 새 필터는 이전 복원을 취소하고, 상세 재진입은 미완료 복원을 dirty 상태로 넘긴다. 상품번호 조회 복귀는 기존 독립 조회 경로를 기다린 뒤 포커스를 복원한다.
+
+수정 후 Node 24.17.0에서 `npm test` 1,118/1,118, 브라우저 76/76, 일반·wide/search·440,129개 생성물의 4GiB 검증을 다시 모두 통과했다. 추가 리뷰 요청은 하지 않았으며 실패→수정→전체 재검증으로 네 건을 닫았다. 미해결 Critical/Important 및 보류한 Minor는 없다. 원격 merge/push/배포는 하지 않았다.

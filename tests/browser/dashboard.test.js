@@ -644,3 +644,47 @@ test('legacy targetGoodsNo opens without adding a foreign back destination',asyn
  const {page,url,dir}=await fixture(t),file=path.join(dir,'index.html');let html=fs.readFileSync(file,'utf8');const data=JSON.parse(html.match(/window\.__CLOT_DATA__ = ([^\n]+);/)[1]);data.targetGoodsNo=1;fs.writeFileSync(file,html.replace(/window\.__CLOT_DATA__ = [^\n]+;/,()=> 'window.__CLOT_DATA__ = '+JSON.stringify(data)+';'));
  await page.goto(url+'?keep=1');await page.locator('#mName').filter({hasText:'나이키 상품 1'}).waitFor();await page.locator('#detailBack').click();await page.locator('#catalogView').waitFor({state:'visible'});assert.equal(new URL(page.url()).searchParams.get('keep'),'1');assert.equal(new URL(page.url()).searchParams.has('goods'),false);
 });
+
+// Delay real Worker replies at the browser boundary, preserving all query/page side effects.
+async function gateWorkerReplies(page,{noObserver=false}={}){
+ await page.addInitScript(noObserver=>{
+  if(noObserver)window.IntersectionObserver=class{observe(){}unobserve(){}};
+  const Base=Worker,g=window.__workerGate={queries:false,pageFrom:Infinity,requests:new Map(),held:[],delivered:[]};
+  g.releaseAt=index=>g.held.splice(index,1)[0]?.deliver();
+  g.releaseAll=()=>{g.queries=false;g.pageFrom=Infinity;for(const x of g.held.splice(0))x.deliver();};
+  window.Worker=class extends Base{
+   postMessage(message,...args){g.requests.set(message.requestId,{message,hold:message.method==='query'?g.queries:message.method==='page'&&message.args[1]>=g.pageFrom});super.postMessage(message,...args);}
+   set onmessage(fn){super.onmessage=event=>{const id=event.data.requestId,request=g.requests.get(id);g.requests.delete(id);const deliver=()=>{fn.call(this,event);g.delivered.push(id);};if(request?.hold)g.held.push({message:request.message,deliver});else deliver();};}
+  };
+ },noObserver);
+}
+test('reopening detail during pending freshness restore cannot revive expired catalog',async t=>{
+ const {page,url}=await fixture(t);await gateWorkerReplies(page);await page.clock.install();await page.goto(url);await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='5');
+ await page.locator('.card[data-k="musinsa:2"]').click();await page.locator('#detailContent').waitFor({state:'visible'});await page.clock.fastForward(49*3600000);await page.evaluate(()=>__workerGate.queries=true);
+ await page.locator('#detailBack').click();await page.locator('#catalogView').waitFor({state:'visible'});await page.waitForFunction(()=>__workerGate.held.length===1);
+ await page.locator('.card[data-k="musinsa:2"]').click();await page.locator('#detailContent').waitFor({state:'visible'});await page.locator('#detailBack').click();await page.locator('#catalogView').waitFor({state:'visible'});
+ await page.evaluate(()=>__workerGate.releaseAll());await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='0',null,{timeout:1500});assert.equal(await page.locator('.card').count(),0);
+});
+test('filter changes cancel a pending restoration before painting ready cards',async t=>{
+ const {page,url}=await fixture(t);await gateWorkerReplies(page);await page.clock.install();await page.goto(url);await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='5');
+ await page.locator('.card').first().click();await page.locator('#detailContent').waitFor({state:'visible'});await page.clock.fastForward(60000);await page.evaluate(()=>__workerGate.queries=true);
+ try{
+  await page.locator('#detailBack').click();await page.locator('#catalogView').waitFor({state:'visible'});await page.waitForFunction(()=>__workerGate.held.length===1);await page.evaluate(()=>__workerGate.queries=false);
+  await page.locator('[data-src=musinsa]').click();await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='2'&&document.querySelector('#grid').dataset.searchStatus==='ready');assert.equal(await page.locator('.card').count(),2);
+ }finally{await page.evaluate(()=>__workerGate.releaseAll());}
+});
+test('canceled page cleanup cannot unlock a newer page and append duplicate keys',async t=>{
+ const {page,url}=await fixture(t,{scale:true,scaleCount:1500});await gateWorkerReplies(page,{noObserver:true});await page.goto(url);await page.locator('#grid[data-search-status=ready]').waitFor();
+ for(const n of [240,360]){await page.locator('#gridMore').click();await page.waitForFunction(n=>document.querySelectorAll('.card').length===n,n);}
+ await page.evaluate(()=>__workerGate.pageFrom=360);await page.locator('#gridMore').click();await page.waitForFunction(()=>__workerGate.held.length===1);
+ const card=page.locator('.card').nth(3),key=await card.getAttribute('data-k');await card.click();await page.locator('#detailContent').waitFor({state:'visible'});await page.locator('#detailBack').click();await page.waitForFunction(k=>document.activeElement.dataset.k===k,key);
+ await page.locator('#gridMore').click();await page.waitForFunction(()=>__workerGate.held.length===2);const oldId=await page.evaluate(()=>__workerGate.held[0].message.requestId);await page.evaluate(()=>__workerGate.releaseAt(0));await page.waitForFunction(id=>__workerGate.delivered.includes(id),oldId);
+ await page.locator('#gridMore').click();await page.waitForFunction(()=>Array.from(__workerGate.requests.values()).every(x=>x.message.method!=='page'||x.message.args[1]<360));const ids=await page.evaluate(()=>__workerGate.held.map(x=>x.message.requestId));await page.evaluate(()=>__workerGate.releaseAll());await page.waitForFunction(ids=>ids.every(id=>__workerGate.delivered.includes(id)),ids);
+ const keys=await page.locator('.card').evaluateAll(xs=>xs.map(x=>x.dataset.k));assert.equal(keys.length,360);assert.equal(new Set(keys).size,360);
+});
+test('freshness return preserves independent product search and focus',async t=>{
+ const {page,url}=await fixture(t);await page.clock.install();await page.goto(url);await page.locator('[data-src=musinsa]').click();await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='2');
+ await page.locator('#q').fill('4910:1');await page.locator('.card[data-k="4910:1"]').waitFor();await page.locator('.card').click();await page.locator('#detailContent').waitFor({state:'visible'});await page.clock.fastForward(60000);
+ await page.locator('#detailBack').click();await page.locator('#catalogView').waitFor({state:'visible'});await page.locator('.card[data-k="4910:1"]').waitFor({timeout:1500});
+ assert.equal(await page.locator('[data-src=musinsa]').getAttribute('aria-pressed'),'true');assert.equal(await page.locator('#q').inputValue(),'4910:1');assert.match(await page.locator('#catalogNotice').textContent(),/상품번호 조회/);assert.equal(await page.evaluate(()=>document.activeElement.dataset.k),'4910:1');
+});
