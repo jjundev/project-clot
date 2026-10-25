@@ -225,7 +225,7 @@ git add .github/workflows/pages.yml tests/dashboard-workflow.test.js docs/verify
 git commit -m "ci(dashboard): measure build and verification memory separately"
 ```
 
-- [ ] **Step 7: 통합과 공개 상태 인계**
+- [x] **Step 7: 통합과 공개 상태 인계**
 
 차분 리뷰 후 선택된 실행방식과 finishing-a-development-branch 에 따라 통합한다. push/merge/운영 deploy 는 기존 사용자 승인범위를 확인한다. 승인이 있으면 Pages 실행의 생성·검증·upload·deploy 각각의 성공과 공개 URL 을 확인한다. 미승인이라면 로컬 수정검증 완료·공개 미확인을 명확히 구분하고 공개 성공을 주장하지 않는다.
 
@@ -244,4 +244,4 @@ git commit -m "ci(dashboard): measure build and verification memory separately"
 
 ## 실행 결과
 
-Native 구현과 로컬 실데이터 생성·검증을 완료했다. 세부 수치와 입력 hash는 `docs/verify/2026-10-25-dashboard-deploy-memory.md`에 기록한다. 최종 독립 리뷰와 통합 선택은 마지막 단계로 진행하며 원격 배포는 아직 실행하지 않았다.
+Native 구현과 로컬 실데이터 생성·검증을 완료했다. 세부 수치와 입력 hash는 `docs/verify/2026-10-25-dashboard-deploy-memory.md`에 기록한다. 최종 독립 리뷰에서 지적사항이 없었다. 원격 배포는 아직 실행하지 않았으며 main 통합·PR·브랜치 보존 중 선택을 사용자에게 인계한다.
