@@ -1,3 +1,4 @@
+import {trackingFromLogs,priceSignalEligibility} from '../price-observation.js';
 // Daily sync of the member's liked 4910 items: refresh the like list, then record each item's display (list),
 // coupon and member price. The member token is only ever passed to the client and never logged or stored.
 // member_price is the 4910 wallet price (list price minus the best-coupon discount) from the first track-4910 run
@@ -153,7 +154,8 @@ export async function syncLiked4910({
     result.logged++;
 
     const cmp = memberPrice != null && prev && comparablePrices(prev, logRow);
-    if (cmp && cmp.prevPrice != null && cmp.currentPrice != null && cmp.currentPrice < cmp.prevPrice) {
+    const observation=trackingFromLogs(cmp?[{...prev,price:cmp.prevPrice},{...logRow,created_at:new Date().toISOString(),price:cmp.currentPrice}]:[],{priceOf:r=>r.price,basisOf:()=> '4910 검증가'});
+    if (cmp && priceSignalEligibility(observation,{price:cmp.currentPrice,basis:'4910 검증가'}).dropAmt>0 && cmp.prevPrice != null && cmp.currentPrice != null && cmp.currentPrice < cmp.prevPrice) {
       result.drops.push({ sno: item.sno, name: item.name, market_name: item.market_name, url: item.url, ...cmp });
     }
   }

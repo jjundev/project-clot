@@ -1,3 +1,4 @@
+import {priceSignalEligibility} from '../price-observation.js';
 // Musinsa coupon math for the wide scan (docs/verify/musinsa-coupon-price.md). A product's coupon price is its
 // sale price − the extra discount − the single best coupon (a percent coupon floors to 10 won, capped by the
 // coupon's max). Each goods keeps the coupon list its own coupon call returned (createMemberChecker makes those calls),
@@ -236,7 +237,7 @@ export function bestCoupon(salePrice, coupons) {
  * an ESTIMATED price. Unknown/invalid prices have no source. DIRECT-to-DIRECT drops alone may alert; coupons first
  * seen today but started earlier move to lateDrops. `best` identifies the winning coupon for every ACTIVE goods.
  */
-export function applyCouponPrices({ store, date, ready = false, allowEmptyLists = false }) {
+export function applyCouponPrices({ store, date, ready = false, allowEmptyLists = false, asOfMs=Date.now() }) {
   const rows = store.getActivePriceRows();
   const best = new Map();
   const prices = new Map();
@@ -246,7 +247,7 @@ export function applyCouponPrices({ store, date, ready = false, allowEmptyLists 
       best.set(row.goods_no, null);
       prices.set(row.goods_no, null);
     }
-    store.setCouponPrices(prices, sources);
+    store.setCouponPrices(prices, sources, {date,observedAt:new Date(asOfMs).toISOString()});
     return { priced: 0, direct: 0, estimated: 0, withCoupon: 0, drops: [], lateDrops: [], best };
   }
 
@@ -291,13 +292,15 @@ export function applyCouponPrices({ store, date, ready = false, allowEmptyLists 
     prices.set(row.goods_no, price);
     best.set(row.goods_no, top?.id ?? null);
   }
-  store.setCouponPrices(prices, sources);
+  store.setCouponPrices(prices, sources, {date,observedAt:new Date(asOfMs).toISOString()});
   const logged = store.logCouponPriceChanges(
     date, rows.map((r) => ({ goods_no: r.goods_no, sale_price: r.sale_price, coupon_price: prices.get(r.goods_no), source: sources.get(r.goods_no) })),
   );
   const drops = [];
   const lateDrops = [];
   for (const drop of logged.drops) {
+    const g=store.getGoods(drop.goods_no),o=store.observations.get(drop.goods_no);
+    if(!priceSignalEligibility({...o,status:g?.status==='ACTIVE'?(g.misses?'RETAINED':'ACTIVE'):'STOPPED'},{price:drop.currentPrice,basis:'DIRECT',asOfMs}).dropAmt)continue;
     const id = best.get(drop.goods_no);
     const c = id == null ? null : store.getCoupon(Number(id));
     (c && c.first_seen_date === date && c.start_date != null && c.start_date < date ? lateDrops : drops).push(drop);

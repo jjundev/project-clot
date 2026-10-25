@@ -18,7 +18,7 @@ test("bootstrap survives stalled index and async query pages preserve identity",
       }),
       card: { id: "cards-0", path: "assets/cards-0.js", count: 121, bytes: 1 },
     }));
-  const q = model.queryCatalog(items, {});
+  const q = model.queryCatalog(items, {includeHistory:true});
   let release;
   const gate = new Promise((r) => (release = r));
   const manifest = {
@@ -51,7 +51,7 @@ test("bootstrap survives stalled index and async query pages preserve identity",
   assert.equal("items" in api.getState(), false);
   release();
   await pending;
-  const r = await api.query({});
+  const r = await api.query({includeHistory:true});
   assert.equal(r.total, 121);
   assert.equal((await api.page(r.resultId, 120)).items.length, 1);
   assert.equal((await api.lookup("musinsa:120")).n, 120);
@@ -110,14 +110,14 @@ test("transport reuses bootstrap cards and fetches other card files with bounded
     };
   };
   const seeded = await createDashboardTransport({ manifest, index, loadAsset });
-  assert.equal((await seeded.query({})).total, 8);
+  assert.equal((await seeded.query({includeHistory:true})).total, 8);
   assert.equal(cardCalls, 0);
   const fresh = await createDashboardTransport({
     manifest: { ...manifest, bootstrap: { items: [] } },
     index,
     loadAsset,
   });
-  await fresh.query({});
+  await fresh.query({includeHistory:true});
   assert.ok(max > 1 && max <= 4);
 });
 import { createDashboardScope } from "../src/dashboard-scope.js";
@@ -192,7 +192,7 @@ test("late query success or error cannot replace current state", async (t) => {
 });
 test("dispose rejects pending work without later emissions", async (t) => {
   const { api, queries, events } = runtimeHarness(t);
-  const p = api.query({});
+  const p = api.query({includeHistory:true});
   const rejected = assert.rejects(p, /disposed|stopped/i);
   await new Promise((r) => setImmediate(r));
   api.dispose();

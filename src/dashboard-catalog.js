@@ -51,6 +51,7 @@ export function buildDashboardCatalog({
               sink.add(
                 {
                   n: r[0],
+                  tracking:r[8]??null,
                   src: "4910all",
                   bs: Number(bs),
                   b: P.b[r[1]],
@@ -154,6 +155,7 @@ export function buildDashboardCatalog({
           model.summarize(
             {
               n: r[0],
+              tracking:r[8]??null,
               src: "4910all",
               bs: Number(bs),
               b: P.b[r[1]],

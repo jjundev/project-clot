@@ -95,7 +95,7 @@ describe('Deferred (sleep-aware) collection mode', () => {
       // baseline is yesterday's authenticated snapshot
       getLatestPriceBefore: (goodsNo, date) => {
         assert.equal(date, today);
-        return { date: '2000-01-01', sale_price: 15000, my_price: 14000, is_sold_out: 0 };
+        return { date: new Date(Date.now()-86400000).toISOString().slice(0,10), sale_price: 15000, my_price: 14000, is_sold_out: 0 };
       },
     });
     const okExec = () =>

@@ -50,12 +50,14 @@ test('unchanged price writes no history row', () => {
   assert.equal(s.getChanges(1).length, 1);
 });
 
-test('an unchanged rescan writes no goods row', () => {
+test('an unchanged rescan updates observations without adding price history', () => {
   // data/4910.db is committed daily: rows that did not change must keep their bytes, or every commit rewrites ~16k rows.
   s.applyScan('2026-10-10', [row(1, 50000), row(2, 30000)], BOTH);
   const before = s.db.prepare('SELECT total_changes() AS n').get().n;
   s.applyScan('2026-10-11', [row(1, 50000), row(2, 30000)], BOTH);
-  assert.equal(s.db.prepare('SELECT total_changes() AS n').get().n, before);
+  assert.equal(s.db.prepare('SELECT total_changes() AS n').get().n, before+2);
+  assert.equal(JSON.parse(s.getGoods(1).observation_json).saleAt,'2026-10-11T00:00:00.000Z');
+  assert.equal(s.getChanges(1).length,1);
   assert.equal('last_seen_date' in s.getGoods(1), false);
 });
 

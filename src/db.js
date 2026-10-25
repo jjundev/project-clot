@@ -78,6 +78,7 @@ export class ClotDatabase {
 
     // Migration check for existing databases
     const priceLogsCols = this.db.prepare("PRAGMA table_info(price_logs)").all().map((c) => c.name);
+    for(const column of ['my_observed_at','sale_observed_at','estimated_observed_at'])if(!priceLogsCols.includes(column))this.db.exec(`ALTER TABLE price_logs ADD COLUMN ${column} TEXT`);
     if (!priceLogsCols.includes('coupon_price')) {
       try {
         this.db.exec("ALTER TABLE price_logs ADD COLUMN coupon_price INTEGER;");
@@ -367,7 +368,10 @@ export class ClotDatabase {
           coupon_discount = ?,
           member_discount = ?,
           point_discount = ?,
-          is_sold_out = ?
+          is_sold_out = ?,
+          my_observed_at = CASE WHEN ? IS NOT NULL THEN ? ELSE my_observed_at END,
+          sale_observed_at = CASE WHEN ? IS NOT NULL THEN ? ELSE sale_observed_at END,
+          estimated_observed_at = CASE WHEN ? IS NOT NULL THEN ? ELSE estimated_observed_at END
         WHERE id = ?
       `);
       updateStmt.run(
@@ -382,6 +386,7 @@ export class ClotDatabase {
         member_discount,
         point_discount,
         is_sold_out ? 1 : 0,
+        my_price,my_price!=null?now:null,sale_price,sale_price!=null?now:null,estimated_my_price,estimated_my_price!=null?now:null,
         existing.id
       );
       return existing.id;
@@ -410,6 +415,7 @@ export class ClotDatabase {
         is_sold_out ? 1 : 0,
         now
       );
+      this.db.prepare('UPDATE price_logs SET my_observed_at=?,sale_observed_at=?,estimated_observed_at=? WHERE id=?').run(my_price!=null?now:null,sale_price!=null?now:null,estimated_my_price!=null?now:null,Number(res.lastInsertRowid));
       return res.lastInsertRowid;
     }
   }

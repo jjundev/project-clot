@@ -162,11 +162,11 @@ export function createDashboardRuntime(options) {
         await start();
         if (own !== querySeq) throw stale();
         let result;
-        if (method === "query") result = await invoke("query", [value, own]);
+        if (method === "query") result = await invoke("query", [value, own,Date.now()]);
         else {
           if (manifest.loadingMode === "scoped") await invoke("cancelQuery", []);
           if (own !== querySeq) throw stale();
-          result = { mode: "product", key: value, item: await invoke("lookup", [value]) };
+          result = { mode: "product", key: value, item: await invoke("lookup", [value,Date.now()]) };
         }
         if (own !== querySeq) throw stale();
         state = { ...state, status: "ready", error: null };
@@ -194,7 +194,7 @@ export function createDashboardRuntime(options) {
         return start();
       },
       page: (...a) => invoke("page", a),
-      lookup: (key) => invoke("lookup", [model.resolveKey(key)]),
+      lookup: (key) => invoke("lookup", [model.resolveKey(key),Date.now()]),
       neighbor: (...a) => invoke("neighbor", a),
       async getHistory(key, options) {
         const resolved = model.resolveKey(key),

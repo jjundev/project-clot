@@ -282,13 +282,13 @@ describe('Visualizer Data Extraction', () => {
       return store;
     }
 
-    test('emits compact ACTIVE listings', () => {
+    test('exports active and historical listings with explicit tracking state', () => {
       const store = fixture();
       const p = buildScan4910Payload(store.db);
       assert.equal(p.v, 1);
       assert.equal(p.imgBase, 'https://d3ha2047wt6x28.cloudfront.net/');
       assert.equal(p.lastScan, '2026-10-11');           // an incomplete run still counts
-      assert.deepEqual(p.r.map((r) => r[0]), [1]);
+      assert.deepEqual(p.r.map((r) => r[0]), [1, 3]);
       const [, bIdx, mIdx, name, img, fs, cat, H] = p.r[0];
       assert.equal(p.b[bIdx], '유니클로');
       assert.equal(p.m[mIdx], 'seller');
@@ -297,7 +297,8 @@ describe('Visualizer Data Extraction', () => {
       assert.equal(fs, '2026-10-10');
       assert.equal(typeof cat, 'string');
       assert.deepEqual(H, [['2026-10-10', 100000, 50000, null], ['2026-10-11', 90000, 45000, null]]);
-      assert.equal(p.r[0].length, 8);
+      assert.equal(p.r[0].length, 9);
+      assert.equal(p.r.find(r=>r[0]===3)?.[8].status,'STOPPED');
       store.close();
     });
 
@@ -305,7 +306,7 @@ describe('Visualizer Data Extraction', () => {
       const store = fixture();
       store.db.prepare("UPDATE liked_goods SET status = 'UNLIKED' WHERE sno = 2").run();
       const p = buildScan4910Payload(store.db);
-      assert.deepEqual(p.r.map((r) => r[0]), [1, 2]);
+      assert.deepEqual(p.r.map((r) => r[0]), [1, 2, 3]);
       const r2 = p.r[1];
       assert.equal(p.b[r2[1]], 'GU');
       assert.equal(r2[2], p.r[0][2]);
@@ -317,7 +318,7 @@ describe('Visualizer Data Extraction', () => {
       const store = fixture();
       store.db.exec('DROP TABLE liked_goods');
       const p = buildScan4910Payload(store.db);
-      assert.deepEqual(p.r.map((r) => r[0]), [1, 2]);
+      assert.deepEqual(p.r.map((r) => r[0]), [1, 2, 3]);
       store.close();
     });
 
@@ -337,7 +338,7 @@ describe('Visualizer Data Extraction', () => {
       const idx = buildScan4910Index(store.db);
       assert.equal(idx.v, 2);
       assert.equal(idx.lastScan, '2026-10-10');
-      assert.deepEqual(idx.brands, [[2421, '유니클로', 2], [13647, 'GU', 2]]);
+      assert.deepEqual(idx.brands, [[2421, '유니클로', 2], [13647, 'GU', 2], [500, 'GU', 1]]);
       // The chip count is exactly what the brand file holds.
       for (const [sno, , count] of idx.brands) {
         assert.equal(buildScan4910Payload(store.db, { brandSno: sno }).r.length, count);
@@ -352,8 +353,9 @@ describe('Visualizer Data Extraction', () => {
       const p = buildScan4910Payload(store.db, { brandSno: 2421 });
       assert.equal(p.v, 1);
       assert.equal(p.brandSno, 2421);
-      assert.deepEqual(p.r.map((r) => r[0]), [1]);   // GU's listing 2 stays in its own file
-      assert.equal(p.r[0].length, 8);
+      assert.deepEqual(p.r.map((r) => r[0]), [1, 3]);   // GU's listing 2 stays in its own file
+      assert.equal(p.r[0].length, 9);
+      assert.equal(p.r.find(r=>r[0]===3)?.[8].status,'STOPPED');
       assert.equal(p.r[0][7].at(-1)[3], null);
       store.close();
     });
@@ -398,8 +400,8 @@ describe('Visualizer Data Extraction', () => {
       const store = fixture();
       store.db.exec('ALTER TABLE goods DROP COLUMN coupon_price');
       const p = buildScan4910Payload(store.db, { brandSno: 2421 });
-      assert.deepEqual(p.r.map((r) => [r[0], r[7].at(-1)[3]]), [[1, null]]);
-      assert.deepEqual(buildScan4910Index(store.db).brands, [[2421, '유니클로', 1]]);
+      assert.deepEqual(p.r.map((r) => [r[0], r[7].at(-1)[3]]), [[1, null], [3, null]]);
+      assert.deepEqual(buildScan4910Index(store.db).brands, [[2421, '유니클로', 2]]);
       store.close();
     });
 
@@ -484,13 +486,14 @@ function scanValidationFixture(t) {
   return {db, observations};
 }
 
-test('scan validation reads match the selected active non-liked goods', t => {
+test('scan validation reads match selected active and historical non-liked goods', t => {
   const {db, observations} = scanValidationFixture(t);
   const payload = buildScan4910Payload(db, {brandSno: 10, snoFrom: 1, snoTo: 100000});
-  assert.deepEqual(payload.r.map(r => r[0]), [1, 100000]);
-  assert.deepEqual(observations.map(row => row.sno).sort((a,b) => a-b), [1, 100000]);
+  assert.deepEqual(payload.r.map(r => r[0]), [1, 60000, 100000]);
+  assert.deepEqual(observations.map(row => row.sno).sort((a,b) => a-b), [1, 60000, 100000]);
   assert.ok(observations.every(row => !Object.hasOwn(row, 'evidence_json')));
   assert.deepEqual(payload.r.map(r => r[7]), [
+    [['2026-10-24', 90000, 75900, 72110]],
     [['2026-10-24', 90000, 75900, 72110]],
     [['2026-10-24', 90000, 75900, 72110]],
   ]);

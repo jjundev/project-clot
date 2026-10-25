@@ -88,7 +88,7 @@ export async function track4910({
   const diffs = brandList.map((brand, i) => {
     const rows = [...scans[i].rows.values()].filter((r) => qualified.has(Number(r.market_sno)));
     brandCounts[i].qualifiedRows = rows.length;
-    return store.applyScan(date, rows, { completeBrands: scans[i].complete ? [brand.sno] : [] });
+    return store.applyScan(date, rows, { completeBrands: scans[i].complete ? [brand.sno] : [], observedAt: new Date(started).toISOString() });
   });
   const diff = mergeDiffs(diffs, initial);
 

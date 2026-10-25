@@ -7,10 +7,12 @@ import {
   unpackIndex,
   createDashboardQueryEngine,
 } from "../src/dashboard-index.js";
+import {freshTracking} from './helpers/dashboard-fixture.js';
 const model = createDashboardModel();
 const items = Array.from({ length: 121 }, (_, n) =>
   model.summarize({
     n,
+    tracking:freshTracking(n===0?0:n%7?8000+n:null,null),
     src: n % 2 ? "4910" : "musinsa",
     b: n % 3 ? "나이키" : "Adidas",
     g: "상품 " + n,
@@ -72,7 +74,7 @@ test("page boundary and stale result", async () => {
     rows: unpackIndex(packIndex(items, { revision: "r", id: "p" })),
     loadCards: async (keys) => keys.map((k) => items.find((x) => x.k === k)),
   });
-  const a = await engine.query({}, 1),
+  const a = await engine.query({includeHistory:true}, 1),
     last = await engine.page(a.resultId, 120);
   assert.equal(a.items.length, 120);
   assert.equal(last.items.length, 1);
@@ -89,13 +91,13 @@ test('brand aliases survive compact indexes and older rows remain searchable',()
  const packed=packIndex([item],{revision:'r',id:'alias'}),restored=unpackIndex(packed)[0];
  assert.deepEqual(item.searchAliases,['kimuir']);
  assert.deepEqual(restored.searchAliases,['kimuir']);
- assert.equal(model.queryCatalog([restored],{q:'kimuir 캐시미어'}).total,1);
- assert.equal(packed.rows[0][24][0],'kimuir');assert.deepEqual(packed.rows[0].slice(25),[230830,17370,'ELIGIBLE','2026-10-24T09:00:00Z',.07]);
+ assert.equal(model.queryCatalog([restored],{q:'kimuir 캐시미어',includeHistory:true}).total,1);
+ assert.equal(packed.rows[0][24][0],'kimuir');assert.deepEqual(packed.rows[0].slice(25,30),[230830,17370,'ELIGIBLE','2026-10-24T09:00:00Z',.07]);
  for(const length of [24,25]){
   const old=structuredClone(packed);old.rows=old.rows.map(row=>row.slice(0,length));
   const x=unpackIndex(old)[0];assert.deepEqual(x.searchAliases,length===24?[]:['kimuir']);
   for(const key of ['pointEstimate','pointDiscount','pointState','pointCheckedAt','pointMaxUseRate'])assert.equal(x[key],null);
-  assert.equal(model.queryCatalog([x],{q:'코트 키뮤어'}).total,1);
+  assert.equal(model.queryCatalog([x],{q:'코트 키뮤어',includeHistory:true}).total,1);
  }
  for(const searchAliases of [null,undefined,'kimuir',[]])assert.deepEqual(model.summarize({src:'4910',n:1,L:[],searchAliases}).searchAliases,[]);
 });

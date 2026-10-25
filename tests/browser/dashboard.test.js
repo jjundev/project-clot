@@ -181,12 +181,12 @@ test('a delayed deep link closes the brand dialog and transfers focus to the pro
  assert.equal(await page.locator('#closeBtn').evaluate(e=>e===document.activeElement),true);
 });
 
-test('wide product prices show direct/estimated labels, API warning and lazy histories on HTTP and file',async t=>{
+test('explicit watched prices take precedence and wide estimates retain lazy histories on HTTP and file',async t=>{
  const {page,dir,url}=await fixture(t,{wide:true});
  for(const location of [url,pathToFileURL(path.join(dir,'index.html')).href]){
  await page.goto(location);await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='6');
  assert.match(await page.locator('#musinsaNotice').textContent(),/354317/);
- assert.match(await page.locator('.card[data-k="musinsa:1"]').textContent(),/직접 확인 가격/);
+ assert.match(await page.locator('.card[data-k="musinsa:1"]').textContent(),/100원/);
  assert.match(await page.locator('.card[data-k="musinsa:77"]').textContent(),/추정가/);
  assert.equal(await page.locator('.card[data-k="musinsa:77"] .price-source').evaluate(e=>getComputedStyle(e).textDecorationLine),'none');
  await page.locator('.card[data-k="musinsa:77"]').click();
@@ -379,7 +379,7 @@ test('query failure marks counts unknown and labels previous cards',async t=>{
 test('estimated drop exclusion has an explanation',async t=>{
  const {page,url}=await fixture(t,{search:true});await page.goto(url);await page.locator('#q').fill('키뮤어 캐시미어');await page.locator(coatSelector).waitFor();
  await page.locator('.chip[data-filter="drop"]').click();await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready'&&document.querySelector('#shownN').textContent==='0');
- assert.equal(await page.locator('.card').count(),0);await page.getByText('하락·최저가 필터는 직접 확인된 가격을 기준으로 합니다',{exact:true}).waitFor();
+ assert.equal(await page.locator('.card').count(),0);await page.getByText('최저가는 최근 48시간 내 확인한 가격, 하락은 최근 48시간 내 관측한 변동을 기준으로 합니다',{exact:true}).waitFor();
  await page.getByText('현재 조건에 맞는 상품이 없습니다',{exact:true}).waitFor();
 });
 test('normalized search variants find the same coat over HTTP and file',async t=>{
@@ -428,7 +428,7 @@ test('일반 검색의 적립금 병기와 쿠폰가 정렬 보존 HTTP/file',as
  const {page,dir,url}=await fixture(t,{pointScenario:'ELIGIBLE'});
  for(const location of [url,pathToFileURL(path.join(dir,'index.html')).href]){
   await page.goto(location);await page.locator('#q').fill('kimuir 캐시미어');await page.locator(coatSelector).waitFor();
-  const card=await page.locator(coatSelector).textContent();assert.match(card,/248,200원/);assert.match(card,/230,830원/);assert.match(card,/적립금 17,370원 이상 보유 가정 · 등급·카드 할인 제외/);assert.match(card,/2026[.\-] ?10[.\-] ?24.*18:00.*KST/);
+  const card=await page.locator(coatSelector).textContent();assert.match(card,/248,200원/);assert.match(card,/230,830원/);assert.match(card,/적립금 17,370원 이상 보유 가정 · 등급·카드 할인 제외/);assert.match(card,/확인 \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} KST/);
   await page.locator('#sortSel').selectOption('priceAsc');await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready');
   assert.deepEqual(await page.locator('.card').evaluateAll(xs=>xs.map(x=>x.dataset.k)),['musinsa:2156295','musinsa:2156296']);
  }
@@ -441,7 +441,7 @@ test('독립 상품 조회의 적립금 병기, 필터 보존과 상세 재열�
   for(const q of ['2156295','https://www.musinsa.com/products/2156295']){
    await page.locator('#q').fill(q);await page.locator(coatSelector).waitFor();assert.match(await page.locator(coatSelector).textContent(),/230,830원/);
    for(let i=0;i<2;i++){
-    await page.locator(coatSelector).click();await page.locator('#scrim.open').waitFor();await page.locator('#mRows').filter({hasText:'2026-10-24'}).waitFor();
+    await page.locator(coatSelector).click();await page.locator('#scrim.open').waitFor();await page.locator('#mRows').filter({hasText:new Date().toISOString().slice(0,10)}).waitFor();
     assert.match(await page.locator('#mPrice').textContent(),/248,200원/);assert.match(await page.locator('#mFacts').textContent(),/230,830원.*적립금 17,370원 이상 보유 가정/);
     assert.equal(await page.locator('#prevBtn').isEnabled(),false);assert.equal(await page.locator('#nextBtn').isEnabled(),false);await page.locator('#closeBtn').click();
    }
@@ -455,9 +455,22 @@ for(const [scenario,enabled,message] of [['RESTRICTED',true,'적립금 사용 �
   for(const location of [url,pathToFileURL(path.join(dir,'index.html')).href]){
    await page.goto(location);await page.locator('#q').fill('2156295');await page.locator(coatSelector).waitFor();
    const text=await page.locator(coatSelector).textContent();if(message)assert.ok(text.includes(message));else assert.ok(!text.includes('적립금'));
-   assert.ok(!text.includes('230,830원'));await page.locator(coatSelector).click();await page.locator('#mRows').filter({hasText:'2026-10-24'}).waitFor();
+   assert.ok(!text.includes('230,830원'));await page.locator(coatSelector).click();await page.locator('#mRows').filter({hasText:new Date().toISOString().slice(0,10)}).waitFor();
    const detail=await page.locator('#mFacts').textContent();if(message)assert.ok(detail.includes(message));else assert.ok(!detail.includes('적립금'));
    await page.locator('#closeBtn').click();
   }
  });
 }
+
+test('prices expire in an open tab and historical records remain explicitly accessible',async t=>{
+ const {page,url}=await fixture(t);
+ await page.clock.install();await page.goto(url);
+ await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='5');
+ await page.clock.fastForward(49*3600000);
+ await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='0');
+ await page.getByRole('checkbox',{name:'과거 기록 포함',exact:true}).check();
+ await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='5');
+ assert.equal(await page.locator('#cLowest').textContent(),'0');assert.equal(await page.locator('#cDrop').textContent(),'0');
+ await page.locator('.card').first().click();
+ assert.match(await page.locator('#mFacts').textContent(),/갱신 지연/);
+});

@@ -16,6 +16,11 @@ test('deploy observes the validation helper and runs its regression tests', () =
   assert.match(push, /^      - src\/site4910\/price-validation\.js$/m);
   assert.match(namedStep('Validate dashboard model and build'), /run: node --test .*tests\/site4910-price-validation\.test\.js/);
 });
+test('freshness policy changes rebuild the dashboard and run observation regressions',()=>{
+  const push=workflow.slice(workflow.indexOf('  push:'),workflow.indexOf('  workflow_run:'));
+  assert.match(push,/^      - src\/price-observation\.js$/m);
+  assert.match(namedStep('Validate dashboard model and build'),/tests\/tracking-freshness\.test\.js/);
+});
 
 test('build and verification keep separate measured failure boundaries', () => {
   const build = namedStep('Build dashboard from watched and wide snapshots');

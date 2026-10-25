@@ -405,7 +405,7 @@ describe('Parallel Collector & Circuit Breaker', () => {
       getItem: () => discoveryItem,
       getLatestPrice: () => ({
         goods_no: 301,
-        date: '2026-09-04',
+        date: new Date(Date.now()-86400000).toISOString().slice(0,10),
         sale_price: 60000,
         coupon_price: 55000,
         estimated_my_price: 49616,

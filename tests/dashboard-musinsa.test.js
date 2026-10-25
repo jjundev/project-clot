@@ -1,4 +1,5 @@
 import './setup-env.js';
+import {freshTracking} from './helpers/dashboard-fixture.js';
 import {createDashboardScope} from "../src/dashboard-scope.js";
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,6 +15,7 @@ store.db.prepare("INSERT INTO price_changes(goods_no,date,sale_price,normal_pric
 store.db.prepare('INSERT INTO coupon_price_changes VALUES(?,?,?,?,?)').run(n,'2026-10-15',90,50,'DIRECT');
 }
 store.db.prepare('INSERT INTO scan_runs(date,complete,completed_at,category_counts_json,coupon_metrics_json) VALUES(?,?,?,?,?)').run('2026-10-16',1,'2026-10-16T04:50:00Z','[]',JSON.stringify({pricing:{exceptionCoupons:[354317]}}));
+for(const g of store.db.prepare('SELECT goods_no,coupon_price,coupon_price_source FROM goods').all())store.db.prepare('UPDATE goods SET observation_json=? WHERE goods_no=?').run(JSON.stringify(freshTracking(g.coupon_price,g.coupon_price_source)),g.goods_no);
 return {dir,store};}
 test('wide catalog exports current prices, dated source and separate private-free history shards',t=>{
 const {dir,store}=fixture(t);const p=buildMusinsaCatalog(store.db,{outDir:dir,revision:'rev'});
@@ -71,7 +73,7 @@ test('public brand code survives adapter, builder, card and compact search',asyn
 import {makePointStoreFixture,pointPolicy,validPointScanRun,AS_OF} from './helpers/musinsa-point-fixtures.js';
 import {refreshPointEstimates} from '../src/musinsaWide/point-pricing.js';
 test('별도 예상가는 기본 가격 판정을 바꾸지 않는다 / read-only build와 만료',t=>{
- const {dir,db,points,addGoods}=makePointStoreFixture(t);addGoods();points.savePolicy(pointPolicy());validPointScanRun(db);
+ const {dir,db,points,addGoods}=makePointStoreFixture(t);addGoods({observation_json:JSON.stringify(freshTracking(248200,'ESTIMATED',{at:AS_OF}))});points.savePolicy(pointPolicy());validPointScanRun(db);
  refreshPointEstimates({db,asOfMs:AS_OF,enabled:true});
  const build=options=>{let item;const p=buildMusinsaCatalog(db,{outDir:dir,revision:'point',asOfMs:AS_OF,sink:{add(x){item=x;}},...options});return {item,p};};
  const old=build({pointEstimatesEnabled:false}).item,before=db.prepare('SELECT * FROM point_price_changes').all();
@@ -82,8 +84,8 @@ test('별도 예상가는 기본 가격 판정을 바꾸지 않는다 / read-onl
  assert.equal(build({pointEstimatesEnabled:true,asOfMs:AS_OF+604800000}).item.pointEstimate,null);
 });
 test('summary 전달 경로 일치: card asset·preview·route',async t=>{
- const {dir,db,points,addGoods}=makePointStoreFixture(t);addGoods();points.savePolicy(pointPolicy());validPointScanRun(db);refreshPointEstimates({db,asOfMs:AS_OF,enabled:true});
- const {createDashboardBuilder}=await import('../src/dashboard-builder.js');const builder=createDashboardBuilder({outDir:dir,revision:'points'});
+ const {dir,db,points,addGoods}=makePointStoreFixture(t);addGoods({observation_json:JSON.stringify(freshTracking(248200,'ESTIMATED',{at:AS_OF}))});points.savePolicy(pointPolicy());validPointScanRun(db);refreshPointEstimates({db,asOfMs:AS_OF,enabled:true});
+ const {createDashboardBuilder}=await import('../src/dashboard-builder.js');const builder=createDashboardBuilder({outDir:dir,revision:'points',asOfMs:AS_OF});
  buildMusinsaCatalog(db,{outDir:dir,revision:'points',sink:builder,pointEstimatesEnabled:true,asOfMs:AS_OF});
  const data=builder.finish({scanState:'complete'}),read=ref=>{const ctx={};vm.runInNewContext(fs.readFileSync(path.join(dir,ref.path),'utf8'),ctx);return JSON.parse(JSON.stringify(ctx.__CLOT_ASSETS__[ref.id]));};
  const index=createDashboardIndex(createDashboardModel()),indexed=data.catalog.indexParts.flatMap(ref=>index.unpackIndex(read(ref)))[0];

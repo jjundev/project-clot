@@ -1,6 +1,7 @@
+import {createObservationStore, priceSignalEligibility} from '../price-observation.js';
 // Musinsa wide listings in their own SQLite file (data/musinsa-wide.db), shipped through a GitHub Release like 4910.db.
-// ~30k listings a day over 5 top-level categories, so history is change-only: price_changes gets a row only for
-// NEW, PRICE and REVIVED, and a goods row is rewritten only when something in it changed.
+// Daily selection covers 300k listings over 5 roots. Price history remains change-only
+// (NEW, PRICE, REVIVED); observation_json is refreshed independently on actual sightings.
 // Member coupon checks (pickSample) are a sample; each goods keeps its own coupon list and the date/price it was last
 // checked at.
 // The coupon registry (coupons, coupon_empty_numbers, coupon_goods, coupon_observations, meta) lists every coupon
@@ -113,6 +114,7 @@ export class MusinsaWideStore {
       CREATE INDEX IF NOT EXISTS idx_goods_status_coupon_checked ON goods (status, coupon_checked_date);
       CREATE INDEX IF NOT EXISTS idx_coupons_state ON coupons (state);
     `);
+    this.observations=createObservationStore(this.db,{key:'goods_no'});
     this.#addMissingColumns('goods', [['review_count', 'INTEGER']]);
     this.#addMissingColumns('goods', [['coupon_price_source', 'TEXT']]);
     this.#addMissingColumns('coupon_price_changes', [['source', 'TEXT']]);
@@ -139,7 +141,7 @@ export class MusinsaWideStore {
    * category never pushes listings toward OUT_OF_SCOPE. The coupon columns are never touched here, except that a goods
    * leaving scope drops its coupon_price (the published DB must not keep a price nothing refreshes).
    */
-  applyScan(date, scanRows, { cat, complete = false } = {}) {
+  applyScan(date, scanRows, { cat, complete = false, observedAt = `${date}T00:00:00.000Z` } = {}) {
     // The listing can show a goods twice (it moves between pages while paging); the last sighting wins.
     const rows = [...new Map(scanRows.map((r) => [r.goods_no, r])).values()];
     const diff = { added: [], priceChanged: 0, drops: [], revived: [], outOfScope: 0 };
@@ -182,10 +184,12 @@ export class MusinsaWideStore {
           insert.run(r.goods_no, r.cat ?? cat, r.brand ?? null, r.brand_name ?? null, r.name, r.url, r.image_url ?? null,
             r.sale_price ?? null, r.normal_price ?? null, extra, soldOut, r.review_count ?? null, r.sale_price ?? null, r.sale_price == null ? null : date, date);
           logChange.run(r.goods_no, date, r.sale_price ?? null, r.normal_price ?? null, 'NEW');
+          this.observations.seen(r.goods_no,{at:observedAt,date,price:scanned.sale_price,hasPrice:scanned.sale_price!=null});
           diff.added.push(r);
           continue;
         }
 
+        this.observations.seen(r.goods_no,{at:observedAt,date,price:scanned.sale_price,hasPrice:scanned.sale_price!=null,reset:prev.status!=='ACTIVE'||prev.misses>0});
         const next = { ...r, cat: r.cat ?? cat, extra_discount: extra, is_sold_out: soldOut };
         const isNewLowest = r.sale_price != null && (prev.lowest_price == null || r.sale_price < prev.lowest_price);
         const unchanged =
@@ -205,9 +209,12 @@ export class MusinsaWideStore {
 
         logChange.run(r.goods_no, date, r.sale_price ?? null, r.normal_price ?? null, 'PRICE');
         diff.priceChanged++;
-        const rate = prev.sale_price > 0 ? (prev.sale_price - r.sale_price) / prev.sale_price : 0;
-        if (rate >= DROP_ALERT_RATE) {
-          diff.drops.push({ row: r, prevPrice: prev.sale_price, currentPrice: r.sale_price, dropRate: Math.round(rate * 100) });
+        const observation=this.observations.get(r.goods_no);
+        const signal=priceSignalEligibility({...observation,status:'ACTIVE',samples:observation.saleSamples},{asOfMs:Date.parse(observedAt),price:r.sale_price,basis:'SALE'});
+        const baselinePrice=r.sale_price+signal.dropAmt;
+        const rate=baselinePrice>0?signal.dropAmt/baselinePrice:0;
+        if (rate >= DROP_ALERT_RATE && signal.dropAmt>0) {
+          diff.drops.push({ row: r, prevPrice: baselinePrice, currentPrice: r.sale_price, dropRate: Math.round(rate * 100) });
         }
       }
       diff.drops.sort((a, b) => b.dropRate - a.dropRate);
@@ -238,13 +245,14 @@ export class MusinsaWideStore {
   }
 
   // `coupons` is stored as opaque JSON; sale_price/extra_discount are the values the check was made at.
-  putGoodsCoupons(goodsNo, date, coupons, { sale_price, extra_discount }) {
+  putGoodsCoupons(goodsNo, date, coupons, { sale_price, extra_discount, observedAt = new Date().toISOString() }) {
     this.db
       .prepare(`
         UPDATE goods SET coupons_json = ?, coupon_checked_date = ?, coupon_checked_sale_price = ?, coupon_checked_extra = ?
         WHERE goods_no = ?
       `)
       .run(JSON.stringify(coupons ?? []), date, sale_price ?? null, extra_discount ?? 0, Number(goodsNo));
+    this.observations.checked(goodsNo,observedAt);
   }
 
   // Only the columns the coupon price needs. coupons is null for a goods never checked.
@@ -256,11 +264,17 @@ export class MusinsaWideStore {
   }
 
   // One transaction: ~30k writes would otherwise each be their own commit.
-  setCouponPrices(prices, sources = new Map()) {
+  setCouponPrices(prices, sources = new Map(), {date, observedAt = new Date().toISOString()} = {}) {
     this.db.exec('BEGIN');
     try {
       const set = this.db.prepare('UPDATE goods SET coupon_price = ?, coupon_price_source = ? WHERE goods_no = ?');
-      for (const [goodsNo, price] of prices) set.run(Number.isFinite(price) && price >= 0 ? price : null, Number.isFinite(price) && price >= 0 ? sources.get(goodsNo) ?? null : null, Number(goodsNo));
+      for (const [goodsNo, price] of prices) {
+        set.run(Number.isFinite(price) && price >= 0 ? price : null, Number.isFinite(price) && price >= 0 ? sources.get(goodsNo) ?? null : null, Number(goodsNo));
+        if(date) {
+          const observation=this.observations.get(goodsNo),basis=sources.get(goodsNo);
+          if(basis!=='DIRECT'||observation.checkedAt)this.observations.price(goodsNo,{date,at:observedAt,price,basis,verifiedAt:basis==='DIRECT'?observation.checkedAt:null});
+        }
+      }
       this.db.exec('COMMIT');
     } catch (e) {
       this.db.exec('ROLLBACK');

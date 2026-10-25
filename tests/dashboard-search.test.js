@@ -8,14 +8,14 @@ const raw={src:'musinsa',n:2156295,b:'키뮤어',g:'[Drape Wool] 캐시미어블
 const coat=model.summarize(raw);
 test('multi-term search ignores order, spaces and punctuation without joining fields',()=>{
  for(const q of ['키뮤어 캐시미어','캐시미어 키뮤어','캐시미어 블렌드','발마칸 코트 블랙','Ｄｒａｐｅ']) {
-  assert.deepEqual(model.queryCatalog([coat],{q}).items.map(x=>x.k),['musinsa:2156295']);
+  assert.deepEqual(model.queryCatalog([coat],{q,includeHistory:true}).items.map(x=>x.k),['musinsa:2156295']);
   assert.equal(model.matchesSearch(coat,model.parseSearchInput(q).tokens),true);
  }
- assert.equal(model.queryCatalog([coat],{q:'키뮤어 존재하지않는단어'}).total,0);
- assert.equal(model.queryCatalog([model.summarize({src:'musinsa',n:1,b:'ab',g:'cd',L:[]})],{q:'bc'}).total,0);
- assert.equal(model.queryCatalog([coat],{q:'---'}).total,0);
- const before=JSON.stringify(coat);model.queryCatalog([coat],{q:'발마칸 블랙'});assert.equal(JSON.stringify(coat),before);
- assert.equal(model.queryCatalog([{...coat,_searchFields:undefined}],{q:'블랙 코트'}).total,1);
+ assert.equal(model.queryCatalog([coat],{includeHistory:true,q:'키뮤어 존재하지않는단어'}).total,0);
+ assert.equal(model.queryCatalog([model.summarize({src:'musinsa',n:1,b:'ab',g:'cd',L:[]})],{includeHistory:true,q:'bc'}).total,0);
+ assert.equal(model.queryCatalog([coat],{includeHistory:true,q:'---'}).total,0);
+ const before=JSON.stringify(coat);model.queryCatalog([coat],{includeHistory:true,q:'발마칸 블랙'});assert.equal(JSON.stringify(coat),before);
+ assert.equal(model.queryCatalog([{...coat,_searchFields:undefined}],{includeHistory:true,q:'블랙 코트'}).total,1);
 });
 test('product URL parsing is strict and ignores long tracking data',()=>{
  const parse=model.parseSearchInput;
@@ -35,10 +35,10 @@ test('search normalization does not merge brand identity',()=>{
  assert.notEqual(model.brandKey('A-B'),model.brandKey('AB'));
  assert.equal(model.normalizeSearchText('Ａ-Ｂ'),'ab');
  const items=['A-B','AB'].map((b,i)=>model.summarize({...raw,b,n:i+1}));
- assert.equal(model.queryCatalog(items,{q:'ab',brandKeys:['A-B']}).total,1);
+ assert.equal(model.queryCatalog(items,{includeHistory:true,q:'ab',brandKeys:['A-B']}).total,1);
 });
 test('serialized factory preserves parsing and token search without imports',()=>{
  const m=vm.runInNewContext('('+createDashboardModel.toString()+')()', {URL});
  assert.equal(m.parseSearchInput('2156295').key,'musinsa:2156295');
- assert.equal(m.queryCatalog([m.summarize(raw)],{q:'블랙 키뮤어'}).total,1);
+ assert.equal(m.queryCatalog([m.summarize(raw)],{includeHistory:true,q:'블랙 키뮤어'}).total,1);
 });
