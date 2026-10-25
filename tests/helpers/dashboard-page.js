@@ -1,3 +1,4 @@
+import {createDashboardNavigation} from '../../src/dashboard-navigation.js';
 import {createDashboardScope} from "../../src/dashboard-scope.js";
 import {createDashboardBuilder} from '../../src/dashboard-builder.js';import {createDashboardIndex} from '../../src/dashboard-index.js';import {createHistoryLoader} from '../../src/dashboard-history.js';import {createDashboardTransport,runDashboardWorker} from '../../src/dashboard-worker.js';
 import fs from 'node:fs';
@@ -82,7 +83,8 @@ export function writeFixture(dir,{scale=false,scaleCount=439501,scanScenario=nul
  const payload={generatedAt:'2026-10-16',lastRun:null,...packaged};
  let html=fs.readFileSync(new URL('../../src/dashboard.template.html',import.meta.url),'utf8');
  html=html.replace(/\/\*\s*__CLOT_DATA_PLACEHOLDER__\s*\*\/[\s\S]*?;\s*[\r\n]*/,()=> 'window.__CLOT_DATA__ = '+JSON.stringify(payload).replace(/<\/script/gi,'<\\/script')+';\n');
- html=html.replace('/* __CLOT_MODEL__ */',()=> 'window.__CLOT_MODEL__ = ('+createDashboardModel.toString()+')();');
+ html = html.replace('/* __CLOT_NAVIGATION__ */',()=> 'window.__CLOT_NAVIGATION_FACTORY__ = ('+createDashboardNavigation.toString()+');');
+html=html.replace('/* __CLOT_MODEL__ */',()=> 'window.__CLOT_MODEL__ = ('+createDashboardModel.toString()+')();');
  html=html.replace('/* __CLOT_RUNTIME__ */',()=> 'window.__CLOT_SCOPE_FACTORY__ = ('+createDashboardScope.toString()+');window.__CLOT_TRANSPORT_FACTORY__ = ('+createDashboardTransport.toString()+');window.__CLOT_INDEX_FACTORY__ = ('+createDashboardIndex.toString()+');window.__CLOT_HISTORY_FACTORY__ = ('+createHistoryLoader.toString()+');window.__CLOT_RUNTIME_FACTORY__ = ('+createDashboardRuntime.toString()+');');
  fs.writeFileSync(path.join(dir,'dashboard-worker.js'),'const model=('+createDashboardModel.toString()+')();const index=('+createDashboardIndex.toString()+')(model);('+runDashboardWorker.toString()+')({model,index,scope:('+createDashboardScope.toString()+')(),transport:('+createDashboardTransport.toString()+')});');
  fs.writeFileSync(path.join(dir,'index.html'),html);

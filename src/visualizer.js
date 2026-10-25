@@ -1,3 +1,4 @@
+import {createDashboardNavigation} from './dashboard-navigation.js';
 import {publicTracking} from './price-observation.js';
 import {createDashboardScope} from "./dashboard-scope.js";
 import { effective4910Price, readPriceValidations } from './site4910/price-validation.js';
@@ -536,7 +537,8 @@ export function generateDashboardHtml({
     );
   }
 
-  rendered = rendered.replace('/* __CLOT_MODEL__ */', () => 'window.__CLOT_MODEL__ = ('+createDashboardModel.toString()+')();');
+  rendered = rendered.replace('/* __CLOT_NAVIGATION__ */',()=> 'window.__CLOT_NAVIGATION_FACTORY__ = ('+createDashboardNavigation.toString()+');');
+rendered = rendered.replace('/* __CLOT_MODEL__ */', () => 'window.__CLOT_MODEL__ = ('+createDashboardModel.toString()+')();');
   rendered = rendered.replace('/* __CLOT_RUNTIME__ */', () => 'window.__CLOT_SCOPE_FACTORY__ = ('+createDashboardScope.toString()+');window.__CLOT_TRANSPORT_FACTORY__ = ('+createDashboardTransport.toString()+');window.__CLOT_INDEX_FACTORY__ = ('+createDashboardIndex.toString()+');window.__CLOT_HISTORY_FACTORY__ = ('+createHistoryLoader.toString()+');window.__CLOT_RUNTIME_FACTORY__ = ('+createDashboardRuntime.toString()+');');
   fs.writeFileSync(path.join(outDir,'dashboard-worker.js'),'const model=('+createDashboardModel.toString()+')();const index=('+createDashboardIndex.toString()+')(model);('+runDashboardWorker.toString()+')({model,index,scope:('+createDashboardScope.toString()+')(),transport:('+createDashboardTransport.toString()+')});');
   fs.writeFileSync(outputPath, rendered, 'utf-8');

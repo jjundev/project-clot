@@ -331,3 +331,18 @@ describe('Visualizer HTML Generation', () => {
   });
 });
 
+
+// Exercise both standalone generator paths, without running DOM-bound UI code.
+test('normal and scale HTML expose executable navigation factories',async()=>{
+ const {writeFixture}=await import('./helpers/dashboard-page.js');
+ for(const options of [{},{scale:true,scaleCount:5}]){
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'clot-nav-html-'));
+  try{
+   writeFixture(dir,options);const html=fs.readFileSync(path.join(dir,'index.html'),'utf8');
+   const start=html.indexOf('window.__CLOT_NAVIGATION_FACTORY__ = '),end=html.indexOf('window.__CLOT_MODEL__',start);
+   assert.ok(start>0);const context={window:{},URL};vm.runInNewContext(html.slice(start,end),context);
+   const routes=[];const nav=context.window.__CLOT_NAVIGATION_FACTORY__({window:{location:{href:'https://example.test/?goods=1'},history:{},addEventListener(){}},model:{parseSearchInput:()=>({type:'product',key:'musinsa:1'})},onRoute:r=>routes.push(r)});
+   nav.start();assert.equal(routes[0].key,'musinsa:1');
+  }finally{fs.rmSync(dir,{recursive:true,force:true});}
+ }
+});
