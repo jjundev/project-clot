@@ -475,3 +475,15 @@ test('prices expire in an open tab and historical records remain explicitly acce
  await page.locator('.card').first().click();
  assert.match(await page.locator('#mFacts').textContent(),/갱신 지연/);
 });
+
+test('first visit and reset use dropAmt while saved sorts survive',async t=>{
+ const {page,url}=await fixture(t);await page.goto(url);
+ await page.locator('#shownN').filter({hasText:/^5$/}).waitFor();
+ assert.equal(await page.locator('.card').first().getAttribute('data-k'),'musinsa:2');
+ assert.equal(await page.locator('#sortSel').inputValue(),'dropAmt');
+ await page.locator('#sortSel').selectOption('priceDesc');await page.reload();
+ assert.equal(await page.locator('#sortSel').inputValue(),'priceDesc');
+ await page.locator('[data-src=musinsa]').click();
+ await page.locator('#resetBtn').click();
+ assert.equal(await page.locator('#sortSel').inputValue(),'dropAmt');
+});

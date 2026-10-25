@@ -88,7 +88,7 @@ export function createDashboardModel() {
  function restoreState(saved={}) {
  const src=saved.src==='4910all'?'4910':saved.src;
  const sort=({coupon:'priceAsc',couponRate:'rate'})[saved.sort]||saved.sort;
- return {q:String(saved.q||''),src:['all','musinsa','4910'].includes(src)?src:'all',cat:['all','top','outer','bottom','shoes','bag','etc'].includes(saved.cat)?saved.cat:'all',brandKeys:Array.isArray(saved.brandKeys)?saved.brandKeys.map(brandKey):[],includeHistory:saved.includeHistory===true,filter:['all','lowest','drop','onsale','out'].includes(saved.filter)?saved.filter:'all',sort:['category','rate','priceAsc','priceDesc','dropAmt','brand','new'].includes(sort)?sort:'rate'};
+ return {q:String(saved.q||''),src:['all','musinsa','4910'].includes(src)?src:'all',cat:['all','top','outer','bottom','shoes','bag','etc'].includes(saved.cat)?saved.cat:'all',brandKeys:Array.isArray(saved.brandKeys)?saved.brandKeys.map(brandKey):[],includeHistory:saved.includeHistory===true,filter:['all','lowest','drop','onsale','out'].includes(saved.filter)?saved.filter:'all',sort:['category','rate','priceAsc','priceDesc','dropAmt','brand','new'].includes(sort)?sort:'dropAmt'};
  }
  const quickMatch=(x,f)=>f==='all'||(f==='lowest'?x.isLow:f==='drop'?x.dropAmt>0:f==='out'?x.isOut:!x.isOut);
  function queryCatalog(items,input,{asOfMs=Date.now()}={}) {

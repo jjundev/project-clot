@@ -49,7 +49,7 @@ test('price bases, no history, zero and brand normalization survive summaries',(
 });
 test('legacy state and serialized factory work without free variables',()=>{
  assert.equal(m.restoreState({src:'4910all',sort:'coupon'}).src,'4910');
- assert.equal(m.restoreState({src:'invalid',sort:'invalid'}).sort,'rate');
+ assert.equal(m.restoreState({src:'invalid',sort:'invalid'}).sort,'dropAmt');
  const factory=vm.runInNewContext('('+createDashboardModel.toString()+')()');
  assert.equal(factory.resolveKey('3'),'musinsa:3');
 });
@@ -67,4 +67,14 @@ test('sorts order actual prices, categories and ties without mutating input',()=
  assert.equal(JSON.stringify(items),before);
  const missing=m.summarize({...fixtureRaw()[0],n:99,L:[]});
  for(const sort of ['priceAsc','priceDesc'])assert.equal(m.queryCatalog([...items,missing],{...defaultState,sort,includeHistory:true}).items.at(-1).k,'musinsa:99');
+});
+
+test('dropAmt defaults preserve saved and legacy sorts',()=>{
+ const state=m.restoreState();
+ assert.equal(state.src,'all');assert.equal(state.filter,'all');
+ assert.deepEqual(m.queryCatalog(items,state).items.map(x=>x.k),['musinsa:2','4910:1','4910:4','musinsa:1','4910:3']);
+ for(const sort of ['rate','priceAsc','priceDesc','brand','new','category','dropAmt'])assert.equal(m.restoreState({sort}).sort,sort);
+ assert.equal(m.restoreState({sort:'coupon'}).sort,'priceAsc');
+ assert.equal(m.restoreState({sort:'couponRate'}).sort,'rate');
+ assert.equal(m.restoreState({src:'4910all'}).src,'4910');
 });

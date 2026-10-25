@@ -8,7 +8,7 @@ export function fixtureRaw() {
  item(3,'4910all','나이키','top',[row(120)]),
  item(4,'4910','GU','outer',[row(80,undefined,undefined,1)])];
 }
-export const defaultState={q:'',src:'all',cat:'all',brandKeys:[],filter:'all',sort:'rate'};
+export const defaultState={q:'',src:'all',cat:'all',brandKeys:[],filter:'all',sort:'dropAmt'};
 
 // Old change-only history can coexist with a recent, unchanged actual observation.
 export function freshTracking(price,basis='회원가',{previous=price,at=Date.now(),status='ACTIVE'}={}) {
