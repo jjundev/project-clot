@@ -8,11 +8,11 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
 <style>
 /* Musinsa's restrained storefront, adapted for price research. */ :root {
-  --bg:#f4f4f4;
+  --bg:#fbfbfa;
   --fg:#111;
   --surface:#fff;
   --muted:#626262;
-  --border:#dedede;
+  --border:#eaeaea;
   --accent:#1768cf;
   --surface-2:#ebebeb;
   --hover:#e8e8e8;
@@ -28,7 +28,7 @@
   --up-soft:#faefee;
   --r:3px;
   --font:"Pretendard Variable",Pretendard,system-ui,-apple-system,"Segoe UI","Helvetica Neue",Arial,sans-serif;
-  --shadow:0 3px 12px rgb(0 0 0 / .08);
+  --shadow:0 2px 8px rgb(0 0 0 / .04);
   --shadow-lg:0 16px 48px rgb(0 0 0 / .2)
 }
 [data-theme="dark"] {
@@ -123,10 +123,6 @@ input {
   letter-spacing:-.04em;
   line-height:1
 }
-.wordmark span {
-  font-size:12px;
-  color:#c5c5c9
-}
 .meta {
   font-size:12px;
   color:#c5c5c9
@@ -162,24 +158,6 @@ input {
   margin:auto;
   padding:0 28px 96px
 }
-.catalog-heading {
-  padding:30px 0 20px;
-  display:flex;
-  align-items:baseline;
-  gap:18px;
-  flex-wrap:wrap
-}
-.catalog-heading h1 {
-  font-size:24px;
-  letter-spacing:-.035em;
-  margin:0;
-  font-weight:800
-}
-.catalog-heading p {
-  font-size:13px;
-  color:var(--muted);
-  margin:0
-}
 .price-tabs {
   display:flex;
   gap:28px;
@@ -203,11 +181,6 @@ input {
   background:none;
   color:var(--fg);
   border-bottom-color:var(--fg)
-}
-.price-tabs .chip .c,.price-tabs .chip[aria-pressed="true"] .c {
-  color:var(--muted);
-  opacity:1;
-  font-size:12px
 }
 .toolbar {
   padding:20px 0 18px;
@@ -249,19 +222,6 @@ input {
   outline:2px solid var(--accent);
   outline-offset:1px
 }
-.search kbd {
-  position:absolute;
-  right:14px;
-  top:50%;
-  transform:translateY(-50%);
-  color:var(--muted);
-  border:1px solid var(--border);
-  padding:0 7px;
-  font:12px/24px var(--font)
-}
-.search input:focus~kbd {
-  display:none
-}
 .cat-bar {
   display:flex;
   align-items:center;
@@ -290,10 +250,6 @@ input {
 .cat-chip[aria-pressed="true"] {
   color:var(--fg);
   font-weight:800
-}
-.cat-chip .c {
-  font-size:11px;
-  color:var(--muted)
 }
 .chips {
   display:flex;
@@ -326,13 +282,6 @@ input {
   background:var(--fg);
   border-color:var(--fg);
   color:var(--fg-invert)
-}
-.chip .c {
-  color:var(--muted);
-  font-size:11px
-}
-.chip[aria-pressed="true"] .c {
-  color:inherit
 }
 .history-control {
   border:0;
@@ -488,20 +437,6 @@ input {
   font-weight:800;
   letter-spacing:-.025em
 }
-.rate {
-  font-size:13px;
-  font-weight:700;
-  color:var(--up)
-}
-.was {
-  font-size:11px;
-  color:var(--muted);
-  text-decoration:line-through
-}
-.was.nb {
-  font-size:11px;
-  text-decoration:none
-}
 .price-source {
   font-size:11px;
   line-height:1.55;
@@ -541,15 +476,12 @@ input {
   margin-top:5px;
   order:1
 }
-.cat-tag,.tag {
+.cat-tag {
   display:inline-block;
   padding:2px 5px;
   background:var(--surface-2);
   font-size:10px;
   color:var(--muted)
-}
-.tag {
-  margin-top:4px
 }
 .soldout-veil {
   position:absolute;
@@ -561,7 +493,7 @@ input {
   font-size:13px;
   font-weight:700
 }
-.card.out .mine,.card.out .rate {
+.card.out .mine {
   color:var(--muted)
 }
 .waitprice {
@@ -591,25 +523,12 @@ input {
   font-size:13px;
   font-weight:600
 }
-#priceFilterHelp,#catalogNotice,#musinsaNotice {
+#catalogNotice {
   font-size:12px;
   line-height:1.7;
   color:var(--muted);
   overflow-wrap:anywhere;
   margin:12px 0
-}
-#musinsaNotice {
-  border-top:1px solid var(--border);
-  padding:12px 0
-}
-#musinsaNotice summary {
-  cursor:pointer;
-  font-weight:600;
-  color:var(--fg)
-}
-#musinsaNotice p {
-  max-width:90ch;
-  margin:8px 0
 }
 .sheet-brand {
   font-size:13px;
@@ -1011,26 +930,12 @@ td.mine-c {
   .wordmark b {
     font-size:26px
   }
-  .wordmark span {
-    font-size:10px
-  }
   .icon-btn {
     width:44px;
     height:44px
   }
   .shell {
     padding:0 16px 64px
-  }
-  .catalog-heading {
-    padding:24px 0 16px;
-    gap:4px
-  }
-  .catalog-heading h1 {
-    font-size:21px
-  }
-  .catalog-heading p {
-    width:100%;
-    font-size:12px
   }
   .price-tabs {
     gap:20px
@@ -1050,9 +955,6 @@ td.mine-c {
   .search svg {
     left:10px;
     width:17px
-  }
-  .search kbd {
-    display:none
   }
   .cat-bar {
     gap:16px
@@ -1115,42 +1017,33 @@ td.mine-c {
     transition-duration:.01ms!important
   }
 }
-#catalogView>.search {
-  margin:20px 0 0
-}
-#catalogFilters>summary {
-  display:none
-}
-#catalogFilters>summary span {
-  color:var(--muted);
-  font-size:12px;
-  margin-left:12px
-}
-@media(max-width:639px) {
-  #catalogFilters {
-    margin-top:12px
-  }
-  #catalogFilters>summary {
-    display:list-item;
-    cursor:pointer;
-    padding:10px 0;
-    font-size:13px;
-    border-bottom:1px solid var(--border)
-  }
-  .brand-controls {
-    flex:1 1 160px
-  }
-  .catalog-heading p {
-    display:none
-  }
-  .resultbar {
-    padding:12px 0
-  }
-  #musinsaNotice {
-    margin:0 0 12px;
-    padding:8px 0
-  }
-}
+/* Compact catalog; secondary controls stay available behind native disclosure. */
+.sr-only {position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+#catalogView>.search {margin:24px 0 12px}
+#catalogFilters {border-bottom:1px solid var(--border);margin-bottom:20px}
+#catalogFilters .toolbar {border:0;padding-top:0}
+.filter-toggle {display:inline-flex;align-items:center;gap:5px;min-height:44px;padding:0 8px;border:0;background:none;font-size:12px;font-weight:600}
+#filterCount {color:var(--muted);font-weight:400}
+#activeFilters {font-size:12px;color:var(--muted);margin:0 0 16px;overflow-wrap:anywhere}
+.brand-controls {flex:1 1 160px}
+.resultbar {min-height:56px;padding:8px 0 16px;gap:12px}
+.resultbar>span:first-child {margin-right:auto}
+.resultbar .sort {margin-left:0}
+.resultbar .sort select {border:0;background:transparent;padding-right:0;font-size:12px;color:var(--fg)}
+.disclosure {border-top:1px solid var(--border);font-size:12px;color:var(--muted)}
+.disclosure>summary {display:flex;align-items:center;min-height:44px;cursor:pointer;list-style:none;color:var(--fg);font-weight:600}
+.disclosure>summary::-webkit-details-marker {display:none}
+.disclosure>summary::after {content:'+';margin-left:auto;font-size:18px;font-weight:400;color:var(--muted)}
+.disclosure[open]>summary::after {content:'−'}
+.disclosure p {max-width:70ch;margin:12px 0;overflow-wrap:anywhere}
+#priceDetails {margin:16px 0 24px}
+#priceDetails .fact {display:block;padding:4px 0;border:0;font-size:12px}
+.point-estimate {line-height:1.6}
+.compare-control {display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);min-height:44px}
+.compare-control input {width:16px;height:16px;accent-color:var(--fg)}
+.detail-history .sheet-bar {display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+@media(max-width:899px) {.meta {display:block;font-size:11px}}
+@media(max-width:639px) {.topbar-in {gap:12px}.meta {font-size:10px}.meta b {display:block}.resultbar {padding-bottom:12px}}
 
 .detail-page {padding-top:20px;min-height:70vh}
 .detail-nav {display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--border)}
@@ -1210,19 +1103,12 @@ td.mine-c {
 <header class="topbar" data-od-id="topbar">
   <div class="topbar-in">
     <div class="wordmark" data-od-id="wordmark">
-      <b>CLOT</b><span>PRICE TRACKER</span>
+      <b>CLOT</b>
     </div>
     <div class="meta" data-od-id="last-run">
-      마지막 수집 <b id="lastRun">—</b>
+      수집 <b id="lastRun">—</b>
     </div>
     <div class="topbar-actions">
-      <button class="icon-btn" id="reloadBtn" type="button" data-od-id="reload-button"
-              aria-label="데이터 다시 불러오기" title="데이터 다시 불러오기">
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M13.67 4.76A6.4 6.4 0 1 1 7.30 4.20"/>
-          <path d="M5.44 6.85L7.30 4.20L4.07 3.92"/>
-        </svg>
-      </button>
       <button class="icon-btn" id="themeBtn" type="button" data-od-id="theme-toggle"
               aria-label="다크 모드 전환" title="다크 모드 전환">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
@@ -1235,52 +1121,26 @@ td.mine-c {
 
 <main class="shell" id="catalogView">
 
-  <div class="catalog-heading"><h1>상품 가격 추적</h1><p>오늘 가격과 수집 이력을 한눈에 확인하세요.</p></div>
-  <div class="price-tabs" role="group" aria-label="가격 필터">
-    <button class="chip" type="button" data-filter="all" aria-pressed="true">전체 상품 <span class="c num" id="cAll">—</span></button>
-    <button class="chip" type="button" data-filter="drop" aria-pressed="false">가격 하락 <span class="c num" id="cDrop">—</span></button>
-    <button class="chip" type="button" data-filter="lowest" aria-pressed="false">수집 이력 최저가 <span class="c num" id="cLowest">—</span></button>
-  </div>
-
-    <div class="search">
+  <h1 class="sr-only">상품 가격 추적</h1>
+  <div class="search">
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
         <circle cx="9" cy="9" r="5.5"/><path d="m13.2 13.2 3.3 3.3"/>
       </svg>
-      <input id="q" type="search" placeholder="브랜드 · 상품명 · 상품번호 · URL 검색" autocomplete="off" aria-label="브랜드, 상품명, 상품번호 또는 URL 검색" data-od-id="search-input">
-      <kbd>/</kbd>
+      <input id="q" type="search" placeholder="상품 검색" autocomplete="off" aria-label="브랜드, 상품명, 상품번호 또는 URL 검색" data-od-id="search-input">
     </div>
 
-  <details id="catalogFilters" open><summary><b>필터</b><span>출처 · 카테고리 · 브랜드</span></summary>
-  <section class="toolbar" data-od-id="toolbar" aria-label="검색 및 필터">
-    <div class="cat-bar" role="group" aria-label="카테고리 필터" data-od-id="category-bar">
-      <button class="cat-chip" type="button" data-cat="all" aria-pressed="true" data-od-id="cat-all">전체 <span class="c num" id="cntAll">—</span></button>
-      <button class="cat-chip" type="button" data-cat="top" aria-pressed="false" data-od-id="cat-top">상의 <span class="c num" id="cntTop">—</span></button>
-      <button class="cat-chip" type="button" data-cat="outer" aria-pressed="false" data-od-id="cat-outer">아우터 <span class="c num" id="cntOuter">—</span></button>
-      <button class="cat-chip" type="button" data-cat="bottom" aria-pressed="false" data-od-id="cat-bottom">바지 <span class="c num" id="cntBottom">—</span></button>
-      <button class="cat-chip" type="button" data-cat="shoes" aria-pressed="false" data-od-id="cat-shoes">신발 <span class="c num" id="cntShoes">—</span></button>
-      <button class="cat-chip" type="button" data-cat="bag" aria-pressed="false" data-od-id="cat-bag">가방·잡화 <span class="c num" id="cntBag">—</span></button>
-      <button class="cat-chip" type="button" data-cat="etc" aria-pressed="false" hidden>기타 <span class="c num">0</span></button>
-    </div>
+  <div class="price-tabs" role="group" aria-label="가격 필터">
+    <button class="chip" type="button" data-filter="all" aria-pressed="true">전체</button>
+    <button class="chip" type="button" data-filter="drop" aria-pressed="false">가격 하락</button>
+    <button class="chip" type="button" data-filter="lowest" aria-pressed="false">수집 최저가</button>
+  </div>
 
-    <div class="chips" role="group" aria-label="출처 필터" data-od-id="source-chips"><span class="group-label">출처</span>
-      <button class="chip" type="button" data-src="all" aria-pressed="true" data-od-id="src-all">전체 <span class="c num" id="sAll">—</span></button>
-      <button class="chip" type="button" data-src="musinsa" aria-pressed="false" data-od-id="src-musinsa">무신사 <span class="c num" id="sMusinsa">—</span></button>
-      <button class="chip" type="button" data-src="4910" aria-pressed="false" data-od-id="src-4910">4910 <span class="c num" id="s4910">—</span></button>
-    </div>
-
-
-    <div class="chips" role="group" aria-label="판매 상태 필터"><span class="group-label">판매 상태</span>
-      <button class="chip" type="button" data-filter="onsale" aria-pressed="false">판매중 <span class="c num" id="cOnsale">—</span></button>
-      <button class="chip" type="button" data-filter="out" aria-pressed="false">품절 <span class="c num" id="cOut">—</span></button>
-    </div>
-
-    <label class="chip history-control"><input type="checkbox" id="includeHistory"> 과거 기록 포함</label>
-    <div class="brand-controls">
-      <button class="chip" id="brandTrigger" type="button" aria-haspopup="dialog">브랜드 선택</button>
-      <span id="brandSummary" class="brand-summary" aria-label="선택한 브랜드"></span>
-    </div>
+  <div class="resultbar" data-od-id="result-count">
+    <span><b id="shownN">—</b>개</span>
+    <button class="filter-toggle" id="filterToggle" type="button" aria-controls="catalogFilters" aria-expanded="false">필터 <span id="filterCount" class="num" hidden></span></button>
+    <button class="linkbtn" id="resetBtn" type="button" hidden>초기화</button>
     <div class="sort" data-od-id="sort-control">
-      <label for="sortSel">정렬</label>
+      <label for="sortSel" class="sr-only">정렬</label>
       <select id="sortSel" data-od-id="sort-select">
         <option value="category">카테고리순 (착장순)</option>
         <option value="rate">할인율 높은 순</option>
@@ -1291,19 +1151,43 @@ td.mine-c {
         <option value="new">최근 추가 순</option>
       </select>
     </div>
-  </section>
-
-  </details>
-
-  <div class="resultbar" data-od-id="result-count">
-    <span>조건에 맞는 상품 <b id="shownN">—</b>개 · 현재 <b id="renderedN">0</b>개 표시</span>
-    <span id="activeFilters"></span>
-    <button class="linkbtn" id="clearFiltersBtn" type="button" hidden>필터 해제</button>
-    <button class="linkbtn" id="resetBtn" type="button" hidden>초기화</button>
   </div>
 
-  <p id="priceFilterHelp" role="status" hidden>수집 이력 최저가는 최근 48시간 내 확인한 가격, 하락은 최근 48시간 내 관측한 변동을 기준으로 합니다</p>
-  <details id="musinsaNotice" hidden><summary>무신사 가격 수집 안내</summary><p id="musinsaExplanation"></p></details>
+  <p id="activeFilters" hidden></p>
+  <section id="catalogFilters" hidden aria-label="세부 필터">
+  <div class="toolbar" data-od-id="toolbar" aria-label="검색 및 필터">
+    <div class="cat-bar" role="group" aria-label="카테고리 필터" data-od-id="category-bar">
+      <button class="cat-chip" type="button" data-cat="all" aria-pressed="true" data-od-id="cat-all">전체</button>
+      <button class="cat-chip" type="button" data-cat="top" aria-pressed="false" data-od-id="cat-top">상의</button>
+      <button class="cat-chip" type="button" data-cat="outer" aria-pressed="false" data-od-id="cat-outer">아우터</button>
+      <button class="cat-chip" type="button" data-cat="bottom" aria-pressed="false" data-od-id="cat-bottom">바지</button>
+      <button class="cat-chip" type="button" data-cat="shoes" aria-pressed="false" data-od-id="cat-shoes">신발</button>
+      <button class="cat-chip" type="button" data-cat="bag" aria-pressed="false" data-od-id="cat-bag">가방·잡화</button>
+      <button class="cat-chip" type="button" data-cat="etc" aria-pressed="false" hidden>기타</button>
+    </div>
+
+    <div class="chips" role="group" aria-label="출처 필터" data-od-id="source-chips"><span class="group-label">출처</span>
+      <button class="chip" type="button" data-src="all" aria-pressed="true" data-od-id="src-all">전체</button>
+      <button class="chip" type="button" data-src="musinsa" aria-pressed="false" data-od-id="src-musinsa">무신사</button>
+      <button class="chip" type="button" data-src="4910" aria-pressed="false" data-od-id="src-4910">4910</button>
+    </div>
+
+
+    <div class="chips" role="group" aria-label="판매 상태 필터"><span class="group-label">판매 상태</span>
+      <button class="chip" type="button" data-filter="onsale" aria-pressed="false">판매중</button>
+      <button class="chip" type="button" data-filter="out" aria-pressed="false">품절</button>
+    </div>
+
+    <label class="chip history-control"><input type="checkbox" id="includeHistory"> 과거 기록 포함</label>
+    <div class="brand-controls">
+      <button class="chip" id="brandTrigger" type="button" aria-haspopup="dialog">브랜드 선택</button>
+      <span id="brandSummary" class="brand-summary" aria-label="선택한 브랜드"></span>
+    </div>
+
+  </div>
+  </section>
+
+
   <p id="catalogNotice" role="status" hidden></p>
   <section class="grid" id="grid" data-od-id="product-grid" aria-label="추적 상품 목록"></section>
   <button class="more" id="gridMore" type="button" hidden data-od-id="grid-more"></button>
@@ -1312,7 +1196,6 @@ td.mine-c {
 
 <dialog id="brandDialog" class="brand-dialog" aria-labelledby="brandTitle">
   <div class="brand-dialog-head"><h2 id="brandTitle">브랜드 선택</h2><button class="chip" id="brandClose" type="button">닫기</button></div>
-  <p style="color:var(--muted);font-size:13px">여러 브랜드를 선택할 수 있습니다. 선택하면 바로 반영됩니다.</p>
   <div class="search"><input id="brandSearch" type="search" aria-label="브랜드 찾기" placeholder="브랜드 찾기" autocomplete="off"></div>
   <div class="brand-options" id="brandOptions"></div>
 </dialog>
@@ -1334,12 +1217,15 @@ td.mine-c {
     <div class="detail-summary">
       <div class="sheet-brand" id="mBrand"></div>
       <h1 class="sheet-name" id="mName" tabindex="-1"></h1>
-      <div class="sheet-no" id="mNo"></div>
       <p class="price-caption">현재 혜택 적용 가격</p>
       <div class="sheet-price" id="mPrice"></div>
       <div class="sheet-facts" id="mFacts"></div>
+      <details id="priceDetails" class="disclosure"><summary>가격 기준</summary>
+        <div id="mPriceDetails"></div><div class="sheet-no" id="mNo"></div>
+        <p id="musinsaExplanation" hidden></p>
+        <p>수집 최저가는 기록된 가격 중 최저가입니다. 가격 하락은 최근 48시간 안에 같은 기준으로 확인한 변동입니다.</p>
+      </details>
       <a class="cta" id="mLink" href="#" target="_blank" rel="noopener noreferrer">무신사에서 보기 ↗</a>
-      <a id="mLinkMobile" hidden href="#" target="_blank" rel="noopener noreferrer">무신사에서 보기 ↗</a>
     </div>
     <section class="detail-history" aria-label="가격 이력">
       <h2>가격 추이</h2><div class="sheet-bar">
@@ -1350,19 +1236,20 @@ td.mine-c {
         <button type="button" data-range="14" aria-pressed="false">14일</button>
         <button type="button" data-range="7" aria-pressed="false">7일</button>
       </div>
+      <label class="compare-control"><input type="checkbox" id="comparePrices"> 다른 가격 비교</label>
       </div>
       <div class="chart-wrap">
         <div class="chart-box"><canvas id="chart"></canvas></div>
         <div class="chart-fallback" id="chartFallback">차트를 불러오지 못했습니다</div>
         <div class="legend">
-          <span class="l-normal"><i></i>정상가</span>
-          <span class="l-sale"><i></i>판매가</span>
+          <span class="l-normal" hidden><i></i>정상가</span>
+          <span class="l-sale" hidden><i></i>판매가</span>
           <span class="l-mine"><i></i>혜택 적용 가격</span>
-          <span class="l-nb"><i></i>쿠폰적용가(신규회원 기준)</span>
+          <span class="l-nb" hidden><i></i>신규회원가</span>
         </div>
       </div>
+      <details id="historyDisclosure" class="disclosure"><summary>가격 기록</summary>
       <div class="tbl-wrap">
-        <div class="tbl-title">가격 변동 기록</div>
         <table data-od-id="history-table">
           <thead><tr>
             <th scope="col">일자</th><th scope="col">혜택 적용 가격</th><th scope="col">직전 관측 대비</th>
@@ -1371,6 +1258,7 @@ td.mine-c {
           <tbody id="mRows"></tbody>
         </table>
       </div>
+      </details>
     </section>
   </div>
 </main>
@@ -1425,7 +1313,6 @@ td.mine-c {
   var view = [], shown = 0, PAGE = 120, lastQuery = null, brandCountsKnown = false;
   var grid = document.getElementById('grid'), qEl = document.getElementById('q'), sortSel = document.getElementById('sortSel');
   sortSel.value = state.sort;
-  if(window.matchMedia('(max-width:639px)').matches)document.getElementById('catalogFilters').open=false;
   var historyToggle=document.getElementById('includeHistory');historyToggle.checked=state.includeHistory;
   historyToggle.addEventListener('change',function(){state.includeHistory=historyToggle.checked;store('includeHistory',String(state.includeHistory));render();});
   function loadDataScript(src) {
@@ -1459,6 +1346,8 @@ td.mine-c {
   var runtime = window.__CLOT_RUNTIME_FACTORY__({model:model,baseItems:D.items,inlineHistories:D.inlineHistories,manifest:D.catalog,loadScript:loadDataScript,loadAsset:loadAsset,createWorker:isV2&&location.protocol!=='file:'?function(file){return new Worker(file+'?v='+encodeURIComponent(D.catalog.revision));}:null,onChange:function(data){if(detailActive){catalogDirty=true;return;}if(searchMode==='product'||searchMode==='invalid')return;if(!isV2)render();else if(data.status==='error'){grid.dataset.searchStatus='error';showStatus(data,true);}}});
   var topSpacer=document.createElement('div');topSpacer.id='gridTopSpacer';grid.before(topSpacer);
 
+  var catalogFilters=document.getElementById('catalogFilters'),filterToggle=document.getElementById('filterToggle');
+  filterToggle.addEventListener('click',function(){catalogFilters.hidden=!catalogFilters.hidden;filterToggle.setAttribute('aria-expanded',String(!catalogFilters.hidden));updateFilterSummary();});
   var brandDialog=document.getElementById('brandDialog'),brandTrigger=document.getElementById('brandTrigger');
   var brandSearch=document.getElementById('brandSearch'),brandOptions=document.getElementById('brandOptions'),brandOptionKeys='';
   function closeBrand(){if(brandDialog.open)brandDialog.close();}
@@ -1490,7 +1379,7 @@ td.mine-c {
       var label=known.get(k)||k;
       return '<button class="chip" type="button" data-remove-brand="'+esc(k)+'" aria-label="'+esc(label)+' 선택 해제">'+esc(label)+' ×</button>';
     }).join('')+(selected.length>2?'<span>외 '+fmt(selected.length-2)+'개</span>':'')+
-      (!selected.length?'<span class="group-label">모든 브랜드</span>':'');
+      '';
     if(!brandDialog.open)return;
     var data=runtime.getCatalog();
     if(!isV2&&(state.src!=='musinsa'||D.catalog.musinsaCount>0)&&data.status!=='ready'){
@@ -1518,11 +1407,6 @@ td.mine-c {
     });
   }
 
-  var FILTER_CAPTION = {
-    all: '', lowest: '· 수집 이력 최저가만', drop: '· 직전 관측 대비 하락한 상품만',
-    onsale: '· 판매중만', out: '· 품절만'
-  };
-
   function trackingLabel(it) {
     return {CURRENT:'추적 중',RETAINED:'이번 목록 미포함',STALE:'갱신 지연',STOPPED:'추적 종료',UNKNOWN:'확인 필요'}[it.trackingState]||'확인 필요';
   }
@@ -1549,32 +1433,18 @@ td.mine-c {
   function cardHtml(it) {
     model.refresh(it);
     var pins = '';
-    if(!it.fresh)pins+='<span class="pin wait">'+esc(trackingLabel(it))+'</span>';
-    if (!it.tracked) pins += '<span class="pin wait">관측 대기</span>';
-    else {
-      if (it.isLow) pins += '<span class="pin low">수집 이력 최저가</span>';
-      if (it.dropAmt > 0) pins += '<span class="pin drop">−' + it.dropAmt.toLocaleString('ko-KR') + '원</span>';
-    }
+    if(!it.fresh)pins='<span class="pin wait">'+esc(trackingLabel(it))+'</span>';
+    else if(it.isLow)pins='<span class="pin low">수집 최저가</span>';
     var body;
-    if (!it.tracked) {
-      body = '<div class="waitprice">가격 관측 전</div>';
-    } else {
-      body = '<div class="priceline">' +
-        (it.rate > 0 ? '<span class="rate num" title="정상가 대비 할인율">' + it.rate + '%</span>' : '') +
-        '<span class="mine num">' + won(it.my) + '</span></div>' +
-        (it.normal && it.normal !== it.my ? '<div class="was num">' + won(it.normal) + '</div>' : '') +
-        (it.newbie != null && it.newbie !== it.my ? '<div class="was nb num">쿠폰적용가(신규회원 기준) ' + won(it.newbie) + '</div>' : '') +
-        (it.coupon > 0 ? '<span class="tag">' + esc(it.couponName || '쿠폰') + ' −' + it.coupon.toLocaleString('ko-KR') + '원</span>' : '');
-    }
+    if(!it.tracked)body='<div class="waitprice">가격 관측 전</div>';
+    else body='<div class="priceline"><span class="mine num">'+won(it.my)+'</span>'+
+      (it.dropAmt>0?'<span class="pin drop">−'+won(it.dropAmt)+'</span>':'')+'</div>';
     body+=(pins?'<div class="pins">'+pins+'</div>':'');
-    body+='<div class="price-source">'+esc(priceKind(it.kind==='wide'?it.priceSource:it.tracked?'DIRECT':'UNKNOWN'))+' · '+esc(observationDate(it))+' 기준'+(it.retained?' · 이번 목록 미포함':'')+'</div>';
-    if(!it.fresh)body+='<div class="price-source">마지막 확인 가격 · '+esc(observationDate(it))+'</div>';
-    body+=pointHtml(it);
+    if(it.kind==='wide'&&it.priceSource!=='DIRECT')body+='<div class="price-source">'+(it.priceSource==='ESTIMATED'?'추정가':'가격 기준 미확인')+'</div>';
+    if(!it.fresh&&it.tracked)body+='<div class="price-source">마지막 확인 '+esc(observationDate(it))+'</div>';
     if (is4910(it) && it.my == null && it.tracked) body = '<div class="waitprice">가격 재검증 필요</div>';
-    if (is4910(it) && it.vd) body += '<div class="was">' + (it.my == null ? '검토일 ' : '검증일 ') + esc(new Date(it.vd).toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })) + '</div>';
     if (it.vs === 'corrected') body += '<div class="was">가격 교정됨</div>';
-    var tags = (it.c ? '<span class="cat-tag">' + esc(CAT_NAMES[it.c] || it.c) + '</span>' : '') +
-      (is4910(it) ? '<span class="cat-tag">4910</span>' : '');
+    var tags = is4910(it)?'<span class="cat-tag">4910</span>':'';
     return '<button class="card' + (it.isOut ? ' out' : '') + '" type="button" data-k="' + esc(it.k) +
       '" data-od-id="product-card-' + esc(it.k) + '" aria-label="' + esc(it.b + ' ' + it.g) + ' 가격 추이 보기">' +
       '<div class="thumb">' + thumbHtml(it) +
@@ -1598,9 +1468,8 @@ td.mine-c {
   function setSearchMode(mode) {
     searchMode=mode;
     var special=mode==='product'||mode==='invalid';
-    document.querySelectorAll('.price-tabs,#catalogFilters,.cat-bar,.toolbar>.chips,.history-control,.brand-controls,.sort,.resultbar').forEach(function(el){el.hidden=special;});
-    document.getElementById('musinsaNotice').hidden=special||!D.musinsa;
-    document.getElementById('priceFilterHelp').hidden=special||!['drop','lowest'].includes(state.filter);
+    document.querySelectorAll('.price-tabs,.resultbar').forEach(function(el){el.hidden=special;});
+    if(special){catalogFilters.hidden=true;filterToggle.setAttribute('aria-expanded','false');document.getElementById('activeFilters').hidden=true;}
   }
   function paintProduct(item,status,message) {
     lastQuery=null;brandCountsKnown=false;view=item?[item]:[];shown=view.length;
@@ -1641,32 +1510,24 @@ td.mine-c {
     var data=runtime.getCatalog(), waiting=(state.src!=='musinsa'||D.catalog.musinsaCount>0)&&data.status!=='ready';
     var query=model.queryCatalog(data.items,state);paint(query,data,waiting);
   }
+  function emptyCatalog(){
+    var hint=['drop','lowest'].includes(state.filter)?'최근 48시간 안에 같은 기준으로 확인한 가격만 포함합니다.':'검색 조건을 바꾸거나 필터에서 과거 기록을 포함해 보세요.';
+    return '<div class="empty"><b>현재 조건에 맞는 상품이 없습니다</b>'+hint+'</div>';
+  }
   function paint(query,data,waiting){
     updateFilterSummary();
     lastQuery=query;brandCountsKnown=!waiting;firstOffset=0;topHeight=0;topSpacer.style.height="0px";pageBusy=false;
     view=query.items;
     document.getElementById('shownN').textContent=waiting?'—':fmt(query.total);
-    document.getElementById('resetBtn').hidden=state.filter==='all'&&state.cat==='all'&&state.src==='all'&&!state.q&&!state.brandKeys.length&&!state.includeHistory;
-    ['all','lowest','drop','onsale','out'].forEach(function(k){
-      document.getElementById('c'+k.charAt(0).toUpperCase()+k.slice(1)).textContent=waiting?'—':fmt(query.quick[k]);
-    });
-    
     document.querySelectorAll('[data-cat]').forEach(function(b){
       b.setAttribute('aria-pressed',String(b.dataset.cat===state.cat));
-      b.querySelector('.c').textContent=waiting?'—':fmt(Object.hasOwn(query.categories,b.dataset.cat)?query.categories[b.dataset.cat]:0);
       if(b.dataset.cat==='etc')b.hidden=(query.categories.etc===0||!Object.hasOwn(query.categories,'etc'))&&state.cat!=='etc';
-    });
-    [['sAll','all'],['sMusinsa','musinsa'],['s4910','4910']].forEach(function(p){
-      document.getElementById(p[0]).textContent=waiting?'—':fmt(query.sources[p[1]]);
     });
     document.querySelectorAll('[data-src]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.src===state.src));});
     document.querySelectorAll('[data-filter]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.filter===state.filter));});
-    var wideNotice=document.getElementById('musinsaNotice'), wm=D.musinsa;
-    wideNotice.hidden=!wm;
-    if(wm)document.getElementById('musinsaExplanation').textContent='무신사 '+wm.date+' 기준 · 조사 '+fmt(wm.selected)+'개 · 제공 '+fmt(wm.active)+'개(이전 회차 잔류 '+fmt(wm.retained||0)+'개 포함) · 직접 확인 '+fmt(wm.direct)+'개 · 추정 '+fmt(wm.estimated)+'개'+(wm.unknown?' · 출처 미확인 '+fmt(wm.unknown)+'개':'')+'. '+(wm.exceptionCoupons.length?'쿠폰 '+wm.exceptionCoupons.length+'종의 적용 상품 목록을 확인하지 못했습니다 ('+wm.exceptionCoupons.join(', ')+'). 추정가는 확인된 혜택 기준이며 실제 결제 가격이 더 낮을 수 있습니다.':'추정가는 확인된 혜택 기준이며 실제 결제 가격과 다를 수 있습니다.');
     showStatus(data,waiting);
     shown=0;renderBrandBar();
-    grid.innerHTML=view.length?'':waiting||data.preview?'<div class="empty"><b>검색 준비 중 · 기본 상품 미리보기</b></div>':'<div class="empty"><b>현재 조건에 맞는 상품이 없습니다</b>검색 조건을 바꾸거나 ‘과거 기록 포함’을 선택해 보세요.</div>';
+    grid.innerHTML=view.length?'':waiting||data.preview?'<div class="empty"><b>검색 준비 중 · 기본 상품 미리보기</b></div>':emptyCatalog();
     renderMore();
     if(moreIo){moreIo.unobserve(moreBtn);moreIo.observe(moreBtn);}
     if(modalItem)updateStepper(view.findIndex(function(x){return x.k===modalItem.k;}));
@@ -1674,17 +1535,17 @@ td.mine-c {
 
   function updateFilterSummary() {
     var labels=[];
-    if(state.includeHistory)labels.push('과거 기록 포함');
     if(state.src!=='all')labels.push(state.src==='musinsa'?'무신사':'4910');
     if(state.cat!=='all')labels.push(CAT_NAMES[state.cat]||'기타');
-    if(state.brandKeys.length)labels.push('브랜드 '+state.brandKeys.length+'개');
-    if(state.filter!=='all')labels.push({drop:'하락',lowest:'최저가',onsale:'판매중',out:'품절'}[state.filter]);
-    document.getElementById('activeFilters').textContent=labels.length?'적용 조건: '+labels.join(' · '):'';
-    document.getElementById('clearFiltersBtn').hidden=!labels.length;
+    if(state.brandKeys.length)labels.push('브랜드 '+state.brandKeys.length);
+    if(['onsale','out'].includes(state.filter))labels.push(state.filter==='out'?'품절':'판매중');
+    if(state.includeHistory)labels.push('과거 기록 포함');
+    var active=document.getElementById('activeFilters');active.textContent=labels.join(' · ');active.hidden=!labels.length||!catalogFilters.hidden;
+    var count=document.getElementById('filterCount');count.hidden=!labels.length;count.textContent=labels.length;
+    document.getElementById('resetBtn').hidden=!labels.length&&state.filter==='all';
   }
   function unknownCounts() {
     document.getElementById('shownN').textContent='—';
-    document.querySelectorAll('.price-tabs .c,.cat-bar .c,.toolbar>.chips .c').forEach(function(el){el.textContent='—';});
     brandCountsKnown=false;brandOptionKeys='';renderBrandBar();
   }
   function showStatus(data,waiting) {
@@ -1707,14 +1568,13 @@ td.mine-c {
           if(view.length>360&&!grid.contains(document.activeElement)){var oldTop=grid.getBoundingClientRect().height;Array.from(grid.querySelectorAll('.card')).slice(0,120).forEach(function(c){c.remove();});var removed=oldTop-grid.getBoundingClientRect().height;topHeight+=removed;topSpacer.style.height=topHeight+'px';view=view.slice(120);firstOffset+=120;shown=view.length;}
         }catch(error){if(token===queryToken&&error.code!=='STALE_RESULT'){moreBtn.textContent='목록을 불러오지 못했습니다 · 다시 시도';return;}}finally{if(token===queryToken)pageBusy=false;}
       }
-      document.getElementById('renderedN').textContent=fmt(grid.querySelectorAll('.card').length);moreBtn.hidden=lastQuery.nextOffset==null||!view.length;moreBtn.textContent='더 보기 (남은 '+fmt(Math.max(0,lastQuery.total-firstOffset-view.length))+'개)';return;
+      moreBtn.hidden=lastQuery.nextOffset==null||!view.length;moreBtn.textContent='더 보기 (남은 '+fmt(Math.max(0,lastQuery.total-firstOffset-view.length))+'개)';return;
     }
     var loading = (state.src !== 'musinsa'||D.catalog.musinsaCount>0) && runtime.getCatalog().status !== 'ready';
     if (!loading && shown < view.length) {
       grid.insertAdjacentHTML('beforeend', view.slice(shown, shown + PAGE).map(cardHtml).join(''));
       shown = Math.min(shown + PAGE, view.length);
     }
-    document.getElementById('renderedN').textContent = fmt(shown);
     var left = loading ? 0 : view.length - shown;
     moreBtn.hidden = left <= 0;
     moreBtn.textContent = '더 보기 (남은 ' + left.toLocaleString('ko-KR') + '개)';
@@ -1738,12 +1598,6 @@ td.mine-c {
   qEl.addEventListener('compositionstart',function(){composing=true;clearTimeout(deb);});
   qEl.addEventListener('compositionend',function(){composing=false;scheduleSearch();});
   qEl.addEventListener('input',function(e){clearTimeout(deb);if(!composing&&!e.isComposing)scheduleSearch();});
-  document.getElementById('clearFiltersBtn').addEventListener('click',function(){
-    clearTimeout(deb);closeBrand();state.q=qEl.value.trim();
-    state.src='all';state.cat='all';state.filter='all';state.brandKeys=[];brandSearch.value='';brandOptionKeys='';
-    store('src','all');store('cat','all');store('filter','all');
-    if(!isV2)runtime.ensureCatalog();render();
-  });
   document.querySelectorAll('[data-src]').forEach(function (b) {
     b.addEventListener('click', function () {
       closeBrand();
@@ -1771,10 +1625,11 @@ td.mine-c {
     state.sort = sortSel.value; store('sort', state.sort); render();
   });
   document.getElementById('resetBtn').addEventListener('click', function () {
-    clearTimeout(deb);composing=false;brandSearch.value='';
-    state.filter = 'all'; state.cat = 'all'; state.src = 'all'; state.q = ''; state.brandKeys = []; qEl.value = '';
-    state.includeHistory=false;historyToggle.checked=false;store('includeHistory','false');
-    state.sort='dropAmt';sortSel.value='dropAmt';store('sort','dropAmt');store('filter', 'all'); store('cat', 'all'); store('src', 'all'); if(!isV2&&(state.src!=='musinsa'||D.catalog.musinsaCount>0))runtime.ensureCatalog(); render();
+    clearTimeout(deb);closeBrand();brandSearch.value='';brandOptionKeys='';
+    state.q=qEl.value.trim();state.filter='all';state.cat='all';state.src='all';state.brandKeys=[];
+    state.includeHistory=false;historyToggle.checked=false;
+    store('includeHistory','false');store('filter','all');store('cat','all');store('src','all');
+    if(!isV2)runtime.ensureCatalog();render();
   });
 
   /* ── 테마 ───────────────────────────────────────────────── */
@@ -1789,12 +1644,6 @@ td.mine-c {
     store('theme', t);
     if (chart && modalItem) drawChart(modalItem);
   }
-  /* 파일이 daily 실행으로 다시 생성되면 리로드가 곧 최신 데이터다.
-     테마·필터·정렬은 localStorage, 열려 있던 상품은 ?goods= 로 복원된다. */
-  document.getElementById('reloadBtn').addEventListener('click', function () {
-    location.reload();
-  });
-
   themeBtn.addEventListener('click', function () {
     applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
   });
@@ -1803,6 +1652,13 @@ td.mine-c {
   var detailView=document.getElementById('detailView'),catalogView=document.getElementById('catalogView');
   var detailContent=document.getElementById('detailContent'),detailStatus=document.getElementById('detailStatus');
   var modalItem=null,chart=null,range=90,detailToken=0,routeKey=null,catalogSnapshot=null;
+  var historyDisclosure=document.getElementById('historyDisclosure'),historyAutoOpened=false,comparePrices=document.getElementById('comparePrices');
+  historyDisclosure.querySelector('summary').addEventListener('click',function(){historyAutoOpened=false;});
+  function exposeHistory(fallback){
+    if(fallback&&!historyDisclosure.open){historyDisclosure.open=true;historyAutoOpened=true;}
+    else if(!fallback&&historyAutoOpened){historyDisclosure.open=false;historyAutoOpened=false;}
+  }
+  comparePrices.addEventListener('change',function(){if(modalItem)drawChart(modalItem);});
   var catalogTitle=document.title;
   try{history.scrollRestoration='manual';}catch(e){}
   var navigation=window.__CLOT_NAVIGATION_FACTORY__({window:window,model:model,onRoute:applyRoute});
@@ -1866,8 +1722,8 @@ td.mine-c {
         paint(Object.assign({},query,{items:items,nextOffset:null}),runtime.getState(),false);
         view=items;shown=items.length;firstOffset=target;topHeight=target?(snapshot?.height||0):0;topSpacer.style.height=topHeight+'px';
         lastQuery=query;lastQuery.nextOffset=target+items.length<query.total?target+items.length:null;
-        grid.innerHTML=items.length?items.map(cardHtml).join(''):'<div class="empty"><b>현재 조건에 맞는 상품이 없습니다</b>검색 조건을 바꾸거나 ‘과거 기록 포함’을 선택해 보세요.</div>';
-        document.getElementById('renderedN').textContent=fmt(items.length);grid.dataset.searchStatus='ready';
+        grid.innerHTML=items.length?items.map(cardHtml).join(''):emptyCatalog();
+  grid.dataset.searchStatus='ready';
         moreBtn.hidden=lastQuery.nextOffset==null;moreBtn.textContent='더 보기 (남은 '+fmt(Math.max(0,query.total-target-items.length))+'개)';
       }catch(error){if(token===queryToken&&!detailActive){grid.dataset.searchStatus='error';showStatus({...runtime.getState(),status:'error',error:error.message},true);}}
       finally{if(token===queryToken)catalogRestoring=false;}
@@ -1877,7 +1733,8 @@ td.mine-c {
   }
   async function showDetail(key,brand){
     var token=++detailToken;
-    modalItem=null;detailContent.hidden=true;detailStatus.hidden=false;detailStatus.textContent='상품 조회 중…';detailStatus.focus({preventScroll:true});
+    modalItem=null;detailContent.hidden=true;detailStatus.hidden=false;detailStatus.textContent='상품 조회 중…';
+    historyDisclosure.open=false;historyAutoOpened=false;document.getElementById('priceDetails').open=false;comparePrices.checked=false;detailStatus.focus({preventScroll:true});
     document.getElementById('prevBtn').disabled=true;document.getElementById('nextBtn').disabled=true;
     if(chart){chart.destroy();chart=null;}
     var it;
@@ -1903,7 +1760,7 @@ td.mine-c {
     }catch(error){
       if(token!==detailToken||!detailActive||!modalItem)return;
       document.getElementById('mRows').innerHTML='<tr><td colspan="7">가격 이력을 불러오지 못했습니다 <button type="button" id="retryHistory">이력 다시 시도</button></td></tr>';
-      document.getElementById('retryHistory').onclick=function(){isV2?loadRange():showDetail(key,brand);};
+      exposeHistory(true);document.getElementById('retryHistory').onclick=function(){isV2?loadRange():showDetail(key,brand);};
     }
   }
   detailStatus.addEventListener('click',function(e){if(e.target.closest('[data-retry-detail]')&&routeKey)showDetail(routeKey);});
@@ -1949,7 +1806,7 @@ td.mine-c {
     if(!modalItem)return;var token=++detailToken,key=modalItem.k,wanted=range;
     document.getElementById('mRows').innerHTML='<tr><td colspan="7">価格 이력 불러오는 중…</td></tr>'.replace('価格','가격');
     try{var history=await runtime.getHistory(key,{days:wanted});if(token!==detailToken||!modalItem||modalItem.k!==key)return;modalItem={...modalItem,L:history.rows,anchor:history.anchor,historyLoaded:true};fillModal(modalItem);}
-    catch(error){if(token!==detailToken)return;document.getElementById('mRows').innerHTML='<tr><td colspan="7">가격 이력을 불러오지 못했습니다 <button type="button" id="retryHistory">이력 다시 시도</button></td></tr>';document.getElementById('retryHistory').onclick=loadRange;}
+    catch(error){if(token!==detailToken)return;document.getElementById('mRows').innerHTML='<tr><td colspan="7">가격 이력을 불러오지 못했습니다 <button type="button" id="retryHistory">이력 다시 시도</button></td></tr>';exposeHistory(true);document.getElementById('retryHistory').onclick=loadRange;}
   }
   window.addEventListener('scroll',async function(){
     if(detailActive||catalogRestoring||!isV2||!firstOffset||pageBusy||grid.contains(document.activeElement)||!lastQuery?.resultId||window.scrollY>topSpacer.offsetTop+topHeight+100)return;
@@ -1984,10 +1841,12 @@ td.mine-c {
     var sourceUrl=it.u||(on4910?'https://4910.kr/goods/':'https://www.musinsa.com/products/')+it.n;
     document.getElementById('mLink').href = sourceUrl;
     document.getElementById('mLink').textContent = linkTxt;
-    document.getElementById('mLinkMobile').href = sourceUrl;
-    document.getElementById('mLinkMobile').textContent = linkTxt;
 
-    var pr = document.getElementById('mPrice'), fx = document.getElementById('mFacts');
+    var pr = document.getElementById('mPrice'), fx = document.getElementById('mFacts'), basis=document.getElementById('mPriceDetails');
+    basis.innerHTML='';
+    var wm=D.musinsa,explanation=document.getElementById('musinsaExplanation');
+    explanation.hidden=it.kind!=='wide'||!wm;
+    explanation.textContent=wm?'추정가는 확인된 혜택 기준이며 실제 결제 가격과 다를 수 있습니다.'+(wm.exceptionCoupons?.length?' 적용 상품을 확인하지 못한 쿠폰: '+wm.exceptionCoupons.join(', '):''):'';
     if (!it.tracked) {
       pr.innerHTML = '<span class="now" style="font-size:19px;color:var(--muted)">가격 관측 전</span>';
       fx.innerHTML = '<span class="fact">다음 수집 회차부터 기록이 시작됩니다</span>';
@@ -1995,20 +1854,21 @@ td.mine-c {
       pr.innerHTML = (it.rate > 0 ? '<span class="off num">' + it.rate + '%</span>' : '') +
         '<span class="now num">' + won(it.my) + '</span>' +
         (it.normal !== it.my ? '<span class="base num">' + won(it.normal) + '</span>' : '');
-      var f = [];
-      f.push('<span class="fact">'+esc(trackingLabel(it))+' · 마지막 가격 확인 '+esc(observationDate(it))+'</span>');
-      if(it.kind==='wide')f.push('<span class="fact">'+esc(priceKind(it.priceSource))+' · '+esc(observationDate(it))+' 기준'+(it.retained?' · 이번 목록 미포함':'')+'</span>');
+      var f = [], b = [];
+      b.push('<span class="fact">마지막 가격 확인 '+esc(observationDate(it))+'</span>');
+      if(!it.fresh)f.push('<span class="fact">'+esc(trackingLabel(it))+'</span>');
+      if(it.kind==='wide'){b.push('<span class="fact">'+esc(priceKind(it.priceSource))+(it.retained?' · 이번 목록 미포함':'')+'</span>');if(it.priceSource!=='DIRECT')f.push('<span class="fact">'+(it.priceSource==='ESTIMATED'?'추정가':'가격 기준 미확인')+'</span>');}
       if (on4910 && it.my == null) f.push('<span class="fact">가격 재검증 필요</span>');
-      if (on4910 && it.vd) f.push('<span class="fact">' + (it.my == null ? '검토일 ' : '검증일 ') + esc(new Date(it.vd).toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })) + '</span>');
+      if (on4910 && it.vd) b.push('<span class="fact">' + (it.my == null ? '검토일 ' : '검증일 ') + esc(new Date(it.vd).toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })) + '</span>');
       if(it.kind!=='wide'||it.lowEligible)f.push('<span class="fact' + (it.isLow ? ' low' : '') + '">수집 이력 최저가 <b class="num">' + won(it.lowMy) +
         '</b> · ' + md(it.lowDate) + '</span>');
       if(it.dropAmt>0)f.push('<span class="fact low">직전 관측 대비 <b>−'+won(it.dropAmt)+'</b></span>');
-      f.push('<span class="fact">' + (on4910 ? '4910 표시가' : '무신사 판매가') + ' <b class="num">' + won(it.sale) + '</b></span>');
-      if (it.newbie != null) f.push('<span class="fact">쿠폰적용가(신규회원 기준) <b class="num">' + won(it.newbie) + '</b></span>');
-      if (it.coupon > 0) f.push('<span class="fact">' + esc(it.couponName || '쿠폰') + ' <b class="num">−' + won(it.coupon) + '</b></span>');
+      b.push('<span class="fact">' + (on4910 ? '4910 표시가' : '무신사 판매가') + ' <b class="num">' + won(it.sale) + '</b></span>');
+      if (it.newbie != null) b.push('<span class="fact">쿠폰적용가(신규회원 기준) <b class="num">' + won(it.newbie) + '</b></span>');
+      if (it.coupon > 0) b.push('<span class="fact">' + esc(it.couponName || '쿠폰') + ' <b class="num">−' + won(it.coupon) + '</b></span>');
       if (it.isOut) f.push('<span class="fact out">품절</span>');
-      if(it.anchor)f.push('<span class="fact">기간 이전 이월 기준 '+esc(it.anchor[0])+' · '+won(it.anchor[3])+'</span>');
-      fx.innerHTML = f.join('')+pointHtml(it);
+      if(it.anchor)b.push('<span class="fact">기간 이전 이월 기준 '+esc(it.anchor[0])+' · '+won(it.anchor[3])+'</span>');
+      fx.innerHTML=f.join('');basis.innerHTML=b.join('')+pointHtml(it);
     }
     updateStepper(view.findIndex(function(x){return x.k===it.k;}));
     if(it.L.length || !it.tracked || it.historyLoaded){ setupRanges(it);drawChart(it);fillTable(it); }
@@ -2067,16 +1927,18 @@ td.mine-c {
 
     if (!it || !rows.length || typeof Chart === 'undefined') {
       cv.parentNode.style.display = 'none';
-      fb.style.display = 'block';
+      fb.style.display = 'block';exposeHistory(true);
       fb.textContent = !it.tracked ? '아직 가격 관측 기록이 없습니다'
         : (typeof Chart === 'undefined' ? '차트를 불러오지 못했습니다' : '선택한 기간에 관측치가 없습니다');
       return;
     }
     cv.parentNode.style.display = '';
-    fb.style.display = 'none';
+    fb.style.display = 'none';exposeHistory(false);
+    var comparing=comparePrices.checked;
+    document.querySelector('.legend .l-normal').hidden=!comparing;document.querySelector('.legend .l-sale').hidden=!comparing;document.querySelector('.legend .l-nb').hidden=!comparing||it.kind!=='liked';
 
     var cMuted = cssVar('--muted'), cAcc = cssVar('--accent'), cDown = cssVar('--down'),
-        cBorder = cssVar('--border'), cBg = cssVar('--bg'), cFg = cssVar('--fg'), cSurf = cssVar('--surface');
+        cBorder = cssVar('--border'), cBg = cssVar('--bg'), cFg = cssVar('--fg');
 
     var labels = rows.map(function (r) { return md(r[0]); });
     var normals = rows.map(function (r) { return r[1]; });
@@ -2089,11 +1951,10 @@ td.mine-c {
     var okMine = mines.filter(function (v) { return v != null; });
     var okNorm = normals.filter(function (v) { return v != null; });
     if (!okMine.length) { cv.parentNode.style.display = 'none'; fb.style.display = 'block';
-      fb.textContent = '선택한 기간에 관측치가 없습니다'; return; }
-    var minMine = Math.min.apply(null, okMine);
+      fb.textContent = '선택한 기간에 관측치가 없습니다';exposeHistory(true);return; }
     var okNb = newbies.filter(function (v) { return v != null; });
-    var minAll = okNb.length ? Math.min(minMine, Math.min.apply(null, okNb)) : minMine;
-    var maxNorm = okNorm.length ? Math.max.apply(null, okNorm) : minMine;
+    var visibleValues=comparing?okMine.concat(okNorm,sales.filter(function(v){return v!=null;}),okNb):okMine;
+    var minAll=Math.min.apply(null,visibleValues),maxNorm=Math.max.apply(null,visibleValues);
     var lowIdx = it.lowEligible ? rows.findIndex(function(r){return r[3]===it.lowMy&&((!on4910&&it.kind!=='wide')||r[5]===it.couponName);}) : -1;
 
     /* U9 — 0원 시작이 아닌 동적 스케일링 */
@@ -2101,9 +1962,9 @@ td.mine-c {
     var yMax = Math.ceil(maxNorm * 1.05 / 1000) * 1000;
 
     var datasets = [
-      { label: '정상가', data: normals, borderColor: cMuted, borderWidth: 1.5, borderDash: [5, 4],
+      { label: '정상가', hidden:!comparing, data: normals, borderColor: cMuted, borderWidth: 1.5, borderDash: [5, 4],
         pointRadius: 0, pointHoverRadius: 0, tension: 0, fill: false },
-      { label: on4910 ? '4910 표시가' : '무신사 판매가', data: sales, borderColor: cAcc, borderWidth: 2,
+      { label: on4910 ? '4910 표시가' : '무신사 판매가', hidden:!comparing, data: sales, borderColor: cAcc, borderWidth: 2,
         pointRadius: 3, pointBackgroundColor: cAcc, pointBorderColor: cBg, pointBorderWidth: 1.5,
         pointHoverRadius: 5, tension: 0.1, fill: false },
       { label: '혜택 적용 가격', data: mines, borderColor: cDown, borderWidth: 3,
@@ -2117,7 +1978,7 @@ td.mine-c {
         pointHoverRadius: 7 }
     ];
     if (it.kind === 'liked') {
-      datasets.push({ label: '쿠폰적용가(신규회원)', data: newbies, borderColor: cMuted, borderWidth: 1.5,
+      datasets.push({ label: '쿠폰적용가(신규회원)', hidden:!comparing, data: newbies, borderColor: cMuted, borderWidth: 1.5,
         pointRadius: 2, pointBackgroundColor: cMuted, pointBorderWidth: 0,
         pointHoverRadius: 4, tension: 0.1, fill: false });
     }

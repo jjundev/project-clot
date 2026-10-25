@@ -1,0 +1,50 @@
+{
+  "samples": [
+    {
+      "width": 390,
+      "overflow": false,
+      "firstPriceBottom": 633.578125,
+      "columns": 2,
+      "filtersOpen": false
+    },
+    {
+      "width": 390,
+      "detail": true,
+      "overflow": false,
+      "visibleSeries": 1,
+      "recordsOpen": false,
+      "basisOpen": false
+    },
+    {
+      "width": 768,
+      "overflow": false,
+      "firstPriceBottom": 700.5625,
+      "columns": 3,
+      "filtersOpen": false
+    },
+    {
+      "width": 768,
+      "detail": true,
+      "overflow": false,
+      "visibleSeries": 1,
+      "recordsOpen": false,
+      "basisOpen": false
+    },
+    {
+      "width": 1440,
+      "overflow": false,
+      "firstPriceBottom": 690.15625,
+      "columns": 6,
+      "filtersOpen": false
+    },
+    {
+      "width": 1440,
+      "detail": true,
+      "overflow": false,
+      "visibleSeries": 1,
+      "recordsOpen": false,
+      "basisOpen": false
+    }
+  ],
+  "errors": []
+}
