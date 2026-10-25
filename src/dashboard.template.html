@@ -1809,7 +1809,7 @@ td.mine-c {
   });
   function captureCatalog(){
     var focus=document.activeElement,card=focus&&focus.closest('.card');
-    catalogSnapshot={scrollY:window.scrollY,focus:focus,key:card&&card.dataset.k,anchorY:card&&card.getBoundingClientRect().top,offset:firstOffset,height:topHeight,length:view.length};
+    catalogSnapshot={index:card?Array.from(grid.querySelectorAll('.card')).indexOf(card):0,scrollY:window.scrollY,focus:focus,key:card&&card.dataset.k,anchorY:card&&card.getBoundingClientRect().top,offset:firstOffset,height:topHeight,length:view.length};
   }
   function applyRoute(route){
     if(route.type==='catalog'){returnToCatalog();return;}
@@ -1831,7 +1831,7 @@ td.mine-c {
     var cards=Array.from(grid.querySelectorAll('.card'));
     var card=snapshot&&cards.find(function(el){return el.dataset.k===snapshot.key;});
     var focus=card||(snapshot&&snapshot.focus&&snapshot.focus.isConnected&&!snapshot.focus.closest('#detailView')?snapshot.focus:null);
-    if(!focus||focus.offsetParent===null)focus=cards[0]||qEl;
+    if(!focus||focus.offsetParent===null)focus=cards[Math.min(snapshot?.index||0,cards.length-1)]||qEl;
     focus.focus({preventScroll:true});
     var y=snapshot?snapshot.scrollY:0;
     if(changed&&card&&snapshot.anchorY!=null)y=window.scrollY+card.getBoundingClientRect().top-snapshot.anchorY;

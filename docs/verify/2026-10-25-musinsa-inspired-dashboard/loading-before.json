@@ -1,0 +1,162 @@
+{
+  "url": "http://127.0.0.1:52190/project-clot/",
+  "time": "2026-10-25T14:46:59.598Z",
+  "conditions": {
+    "runs": 3,
+    "scenarios": [
+      {
+        "name": "musinsa-top",
+        "state": {
+          "src": "musinsa",
+          "cat": "top"
+        }
+      }
+    ],
+    "isolateExternal": true,
+    "viewport": "1440x1000",
+    "headless": true,
+    "network": "unthrottled",
+    "cpu": "unthrottled",
+    "note": "Heap is main-thread instantaneous Chrome JS heap; Worker memory is not included. Search readiness includes a debounced no-match query."
+  },
+  "results": [
+    {
+      "revision": "fixture",
+      "total": 440129,
+      "v": 2,
+      "firstCardsMs": 56.60000002384186,
+      "heap": {
+        "used": 10000000,
+        "total": 10000000
+      },
+      "longTasks": [],
+      "resources": [],
+      "network": [
+        {
+          "name": "assets/index-004605.js",
+          "encoded": 98529,
+          "transfer": 98686
+        },
+        {
+          "name": "assets/cards-000003.js",
+          "encoded": 253201,
+          "transfer": 253359
+        },
+        {
+          "name": "assets/cards-000001.js",
+          "encoded": 253613,
+          "transfer": 253771
+        },
+        {
+          "name": "assets/cards-000005.js",
+          "encoded": 253199,
+          "transfer": 253357
+        }
+      ],
+      "scenario": "musinsa-top",
+      "state": {
+        "src": "musinsa",
+        "cat": "top"
+      },
+      "indexParts": [
+        "assets/index-004605.js"
+      ],
+      "indexEncodedBytes": 98529,
+      "searchReadyMs": 285.8000000715256,
+      "elapsedMs": 499,
+      "errors": []
+    },
+    {
+      "revision": "fixture",
+      "total": 440129,
+      "v": 2,
+      "firstCardsMs": 43.10000002384186,
+      "heap": {
+        "used": 10000000,
+        "total": 10000000
+      },
+      "longTasks": [],
+      "resources": [],
+      "network": [
+        {
+          "name": "assets/index-004605.js",
+          "encoded": 98529,
+          "transfer": 98686
+        },
+        {
+          "name": "assets/cards-000003.js",
+          "encoded": 253201,
+          "transfer": 253359
+        },
+        {
+          "name": "assets/cards-000001.js",
+          "encoded": 253613,
+          "transfer": 253771
+        },
+        {
+          "name": "assets/cards-000005.js",
+          "encoded": 253199,
+          "transfer": 253357
+        }
+      ],
+      "scenario": "musinsa-top",
+      "state": {
+        "src": "musinsa",
+        "cat": "top"
+      },
+      "indexParts": [
+        "assets/index-004605.js"
+      ],
+      "indexEncodedBytes": 98529,
+      "searchReadyMs": 255.39999997615814,
+      "elapsedMs": 470,
+      "errors": []
+    },
+    {
+      "revision": "fixture",
+      "total": 440129,
+      "v": 2,
+      "firstCardsMs": 44.800000071525574,
+      "heap": {
+        "used": 10000000,
+        "total": 10000000
+      },
+      "longTasks": [],
+      "resources": [],
+      "network": [
+        {
+          "name": "assets/index-004605.js",
+          "encoded": 98529,
+          "transfer": 98686
+        },
+        {
+          "name": "assets/cards-000003.js",
+          "encoded": 253201,
+          "transfer": 253359
+        },
+        {
+          "name": "assets/cards-000001.js",
+          "encoded": 253613,
+          "transfer": 253771
+        },
+        {
+          "name": "assets/cards-000005.js",
+          "encoded": 253199,
+          "transfer": 253357
+        }
+      ],
+      "scenario": "musinsa-top",
+      "state": {
+        "src": "musinsa",
+        "cat": "top"
+      },
+      "indexParts": [
+        "assets/index-004605.js"
+      ],
+      "indexEncodedBytes": 98529,
+      "searchReadyMs": 260.7000000476837,
+      "elapsedMs": 470,
+      "errors": []
+    }
+  ]
+}

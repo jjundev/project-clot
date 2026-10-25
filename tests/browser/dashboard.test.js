@@ -582,3 +582,65 @@ test('invalid direct goods has a local return and no product lookup',async t=>{
  const {page,url}=await fixture(t);let lookups=0;page.on('request',r=>{if(/assets\/routes-/.test(r.url()))lookups++;});await page.goto(url+'?goods=bad&keep=1');
  await page.locator('#detailStatus').filter({hasText:'상품번호'}).waitFor();assert.equal(lookups,0);await page.locator('#detailBack').click();await page.locator('#catalogView').waitFor({state:'visible'});await page.locator('#catalogView').waitFor({state:'visible'});assert.equal(new URL(page.url()).searchParams.get('keep'),'1');
 });
+
+for(const filtered of [false,true])test('virtual catalog detail round trip preserves window scroll focus and history budget'+(filtered?' with filters and freshness refresh':''),async t=>{
+ const {page,url}=await fixture(t,{scale:true,...(filtered?{scaleCount:1500}:{})});
+ await page.addInitScript(()=>{window.IntersectionObserver=class{observe(){}unobserve(){}};});
+ if(filtered)await page.clock.install();
+ let historyRequests=0;page.on('request',r=>{if(/\/assets\/history-/.test(r.url()))historyRequests++;});
+ await page.goto(url);await page.waitForFunction(total=>document.querySelector('#shownN').textContent===total,filtered?'2,128':'440,129');
+ assert.equal(await page.locator('.card').count(),120);assert.equal(historyRequests,0);
+ if(filtered){
+  await page.locator('[data-src="4910"]').click();await page.locator('#grid[data-search-status=ready]').waitFor();await page.locator('#brandTrigger').click();await page.getByRole('checkbox',{name:/^나이키 /}).check();await page.keyboard.press('Escape');await page.locator('#q').fill('나이키 상품');await page.clock.fastForward(200);await page.locator('#grid[data-search-status=ready]').waitFor();await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='1,500');
+ }
+ const initialKey=await page.locator('.card').first().getAttribute('data-k');
+ for(let i=0;i<4;i++){
+  const before=await page.locator('.card').last().getAttribute('data-k');await page.locator('#gridMore').click();
+  await page.waitForFunction(k=>document.querySelector('.card:last-child').dataset.k!==k,before);assert.ok(await page.locator('.card').count()<=360);
+ }
+ assert.notEqual(await page.locator('.card').first().getAttribute('data-k'),initialKey);assert.equal(historyRequests,0);
+ const card=page.locator('.card').nth(30);await card.scrollIntoViewIfNeeded();
+ const key=await card.getAttribute('data-k'),keys=await page.locator('.card').evaluateAll(xs=>xs.map(x=>x.dataset.k)),scrollY=await page.evaluate(()=>scrollY),sort=await page.locator('#sortSel').inputValue();
+ await card.click();await page.locator('#detailContent').waitFor({state:'visible'});
+ await page.locator('#nextBtn').click();await page.waitForFunction(k=>new URLSearchParams(location.search).get('goods')!==k,key);
+ if(filtered)await page.clock.fastForward(60000);
+ await page.goBack();await page.locator('#catalogView').waitFor({state:'visible'});
+ if(filtered)await page.locator('#grid[data-search-status=ready]').waitFor();
+ await page.waitForFunction(k=>document.activeElement.dataset.k===k,key);
+ assert.deepEqual(await page.locator('.card').evaluateAll(xs=>xs.map(x=>x.dataset.k)),keys);assert.equal(await page.locator('#sortSel').inputValue(),sort);
+ assert.ok(Math.abs(await page.evaluate(()=>scrollY)-scrollY)<=2);assert.ok(await page.locator('.card').count()<=360);
+ if(filtered){assert.equal(await page.locator('#q').inputValue(),'나이키 상품');assert.equal(await page.locator('[data-src="4910"]').getAttribute('aria-pressed'),'true');assert.match(await page.locator('#brandSummary').textContent(),/나이키/);}
+});
+test('late catalog page cannot mutate hidden detail or expand the restored window',async t=>{
+ const {page,url,dir}=await fixture(t,{scale:true,scaleCount:1500});
+ await page.addInitScript(()=>{window.IntersectionObserver=class{observe(){}unobserve(){}};});
+ const script=fs.readFileSync(path.join(dir,'dashboard-worker.js'),'utf8');await page.route('**/dashboard-worker.js*',r=>r.fulfill({contentType:'text/javascript',body:script+';const original=onmessage;onmessage=e=>{if(e.data.method==="page"&&e.data.args[1]>=360)setTimeout(()=>original(e),400);else original(e);};'}));
+ await page.goto(url);await page.locator('#grid[data-search-status=ready]').waitFor();
+ for(const n of [240,360]){await page.locator('#gridMore').click();await page.waitForFunction(n=>document.querySelectorAll('.card').length===n,n);}
+ await page.locator('#gridMore').click();const card=page.locator('.card').nth(30);await card.scrollIntoViewIfNeeded();const key=await card.getAttribute('data-k'),keys=await page.locator('.card').evaluateAll(xs=>xs.map(x=>x.dataset.k));
+ await card.click();await page.locator('#detailContent').waitFor({state:'visible'});await page.waitForTimeout(500);assert.deepEqual(await page.locator('.card').evaluateAll(xs=>xs.map(x=>x.dataset.k)),keys);
+ await page.locator('#detailBack').click();await page.locator('#catalogView').waitFor({state:'visible'});await page.waitForFunction(k=>document.activeElement.dataset.k===k,key);
+ assert.deepEqual(await page.locator('.card').evaluateAll(xs=>xs.map(x=>x.dataset.k)),keys);assert.ok(await page.locator('.card').count()<=360);
+});
+test('expired entry returns focus to an adjacent surviving product',async t=>{
+ const {page,url,dir}=await fixture(t);const file=path.join(dir,'index.html'),html=fs.readFileSync(file,'utf8');
+ const data=JSON.parse(html.match(/window\.__CLOT_DATA__ = ([^\n]+);/)[1]);
+ const old=data.items.find(x=>x.k==='4910:4').tracking,next=structuredClone(old),at=Date.now()-47*3600000;
+ next.seenAt=next.saleAt=new Date(at).toISOString();next.samples.forEach((sample,i)=>{sample.at=new Date(at-(next.samples.length-1-i)*24*3600000).toISOString();sample.date=sample.at.slice(0,10);});
+ const before=JSON.stringify(old),after=JSON.stringify(next);assert.equal(Buffer.byteLength(before),Buffer.byteLength(after));
+ // Fixed-width timestamps keep the fixture's asset byte contract valid.
+ for(const f of [file,...fs.readdirSync(path.join(dir,'assets')).map(name=>path.join(dir,'assets',name))])fs.writeFileSync(f,fs.readFileSync(f,'utf8').replaceAll(before,after));
+ await page.clock.install();await page.goto(url);await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='5');
+ assert.deepEqual(await page.locator('.card').evaluateAll(xs=>xs.map(x=>x.dataset.k)),['musinsa:2','4910:1','4910:4','musinsa:1','4910:3']);
+ await page.locator('.card[data-k="4910:4"]').click();await page.locator('#detailContent').waitFor({state:'visible'});await page.clock.fastForward(2*3600000);
+ await page.locator('#detailBack').click();await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='4');
+ assert.equal(await page.evaluate(()=>document.activeElement.dataset.k),'musinsa:1');
+});
+test('denied browser storage and history keep detail return usable',async t=>{
+ const {page,url}=await fixture(t);await page.addInitScript(()=>{Object.defineProperty(window,'localStorage',{get(){throw Error('denied');}});for(const name of ['pushState','replaceState'])history[name]=()=>{throw Error('denied');};});
+ await page.goto(url);await page.locator('.card[data-k="musinsa:2"]').click();await page.locator('#detailContent').waitFor({state:'visible'});await page.locator('#detailBack').click();await page.locator('#catalogView').waitFor({state:'visible'});assert.equal(await page.locator('#detailView').isVisible(),false);
+});
+test('legacy targetGoodsNo opens without adding a foreign back destination',async t=>{
+ const {page,url,dir}=await fixture(t),file=path.join(dir,'index.html');let html=fs.readFileSync(file,'utf8');const data=JSON.parse(html.match(/window\.__CLOT_DATA__ = ([^\n]+);/)[1]);data.targetGoodsNo=1;fs.writeFileSync(file,html.replace(/window\.__CLOT_DATA__ = [^\n]+;/,()=> 'window.__CLOT_DATA__ = '+JSON.stringify(data)+';'));
+ await page.goto(url+'?keep=1');await page.locator('#mName').filter({hasText:'나이키 상품 1'}).waitFor();await page.locator('#detailBack').click();await page.locator('#catalogView').waitFor({state:'visible'});assert.equal(new URL(page.url()).searchParams.get('keep'),'1');assert.equal(new URL(page.url()).searchParams.has('goods'),false);
+});
