@@ -7,6 +7,7 @@ on:
       - data/prices.db
       - src/dashboard.template.html
       - src/visualizer.js
+      - src/site4910/price-validation.js
       - src/dashboard-*.js
       - src/musinsaWide/point-*.js
       - scripts/verify-dashboard-build.js
@@ -50,7 +51,7 @@ jobs:
 
       - run: npm ci
       - name: Validate dashboard model and build
-        run: node --test tests/dashboard-*.test.js tests/visualizer-data.test.js tests/visualizer-html.test.js tests/cli-visualize.test.js
+        run: node --test tests/dashboard-*.test.js tests/site4910-price-validation.test.js tests/visualizer-data.test.js tests/visualizer-html.test.js tests/cli-visualize.test.js
       - run: npx playwright install --with-deps chromium
       - run: npm run test:dashboard:browser
 
@@ -72,11 +73,13 @@ jobs:
           CLOT_MUSINSA_POINTS_ENABLED: ${{ vars.CLOT_MUSINSA_POINTS_ENABLED }}
         run: |
           mkdir _site
-          CLOT_DASHBOARD_PATH=_site/index.html node src/cli.js visualize --no-open
+          CLOT_DASHBOARD_PATH=_site/index.html /usr/bin/time -v node --max-old-space-size=4096 src/cli.js visualize --no-open
           printf 'User-agent: *\nDisallow: /\n' > _site/robots.txt
           test -s _site/index.html
           test -s _site/dashboard-worker.js
-          node scripts/verify-dashboard-build.js _site/index.html
+
+      - name: Verify generated dashboard
+        run: /usr/bin/time -v node --max-old-space-size=4096 scripts/verify-dashboard-build.js _site/index.html
 
       - uses: actions/configure-pages@v5
 
