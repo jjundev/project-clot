@@ -20,40 +20,54 @@ export function effective4910Price({ raw, validation }) {
 export function readPriceValidations(
   db,
   kind,
-  { brandSno = null, sno = null, snoFrom = null, snoTo = null } = {},
+  {
+    brandSno = null, sno = null, snoFrom = null, snoTo = null,
+    snos = null, includeEvidence = true,
+  } = {},
 ) {
-  if (
-    !db
-      .prepare(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='price_validations'",
-      )
-      .get()
-  )
-    return new Map();
-  if (sno != null)
-    return new Map(
-      db
-        .prepare("SELECT * FROM price_validations WHERE kind=? AND sno=?")
-        .all(kind, sno)
-        .map((r) => [`${r.sno}:${r.date}`, r]),
-    );
-  if (snoFrom != null)
-    return new Map(
-      db
-        .prepare(
-          "SELECT * FROM price_validations WHERE kind=? AND sno>=? AND sno<=?",
-        )
-        .all(kind, snoFrom, snoTo)
-        .map((r) => [`${r.sno}:${r.date}`, r]),
-    );
-  const sql =
-    brandSno == null
-      ? "SELECT * FROM price_validations WHERE kind=?"
-      : `SELECT * FROM price_validations WHERE kind=? AND sno IN (SELECT sno FROM goods WHERE brand_sno=?)`;
-  return new Map(
-    db
-      .prepare(sql)
-      .all(...(brandSno == null ? [kind] : [kind, Number(brandSno)]))
-      .map((r) => [`${r.sno}:${r.date}`, r]),
-  );
+  if ((snoFrom == null) !== (snoTo == null) ||
+      (snoFrom != null && snoFrom > snoTo))
+    throw new RangeError("Both bounds of an ordered sno range are required");
+  if (snos !== null && (!Array.isArray(snos) ||
+      snos.some(id => !Number.isSafeInteger(id) || id <= 0)))
+    throw new TypeError("snos must be an array of positive safe integers");
+
+  const result = new Map();
+  if (snos?.length === 0) return result;
+  if (!db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='price_validations'",
+  ).get()) return result;
+
+  const conditions = ["kind=?"];
+  const params = [kind];
+  if (brandSno != null) {
+    conditions.push("sno IN (SELECT sno FROM goods WHERE brand_sno=?)");
+    params.push(Number(brandSno));
+  }
+  if (sno != null) {
+    conditions.push("sno=?");
+    params.push(sno);
+  }
+  if (snoFrom != null) {
+    conditions.push("sno>=? AND sno<=?");
+    params.push(snoFrom, snoTo);
+  }
+  const columns = includeEvidence
+    ? "*"
+    : "kind,sno,date,status,corrected_json,reason,checked_at";
+  const sql = `SELECT ${columns} FROM price_validations WHERE ${conditions.join(" AND ")}`;
+  const read = (query, bindings) => {
+    for (const row of db.prepare(query).iterate(...bindings))
+      result.set(`${row.sno}:${row.date}`, row);
+  };
+  if (snos === null) {
+    read(sql, params);
+  } else {
+    const ids = [...new Set(snos)];
+    for (let offset = 0; offset < ids.length; offset += 200) {
+      const batch = ids.slice(offset, offset + 200);
+      read(`${sql} AND sno IN (${batch.map(() => "?").join(",")})`, [...params, ...batch]);
+    }
+  }
+  return result;
 }
