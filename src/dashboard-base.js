@@ -1,4 +1,5 @@
 import { classifyCategory } from "./classifier.js";
+import {trackingFromLogs} from './price-observation.js';
 import {
   effective4910Price,
   readPriceValidations,
@@ -20,7 +21,7 @@ export function exportDashboardBase(
     .all()
     .some((x) => x.name === "category");
   const logs = db.prepare(
-    `SELECT date,normal_price,sale_price,my_price,${cols.has("estimated_my_price") ? "estimated_my_price" : "NULL AS estimated_my_price"},is_sold_out,coupon_name,coupon_discount FROM price_logs WHERE goods_no=? ORDER BY date,id`,
+    `SELECT date,normal_price,sale_price,my_price,${cols.has("estimated_my_price") ? "estimated_my_price" : "NULL AS estimated_my_price"},is_sold_out,coupon_name,coupon_discount,${cols.has('created_at')?'created_at':'NULL AS created_at'},${cols.has('my_observed_at')?'my_observed_at':'NULL AS my_observed_at'},${cols.has('estimated_observed_at')?'estimated_observed_at':'NULL AS estimated_observed_at'} FROM price_logs WHERE goods_no=? ORDER BY date,id`,
   );
   let maxChecked = "",
     lastRun = null;
@@ -28,13 +29,15 @@ export function exportDashboardBase(
   let total4910Base = 0;
   for (const g of db
     .prepare(
-      "SELECT * FROM items WHERE status IN ('ACTIVE','SOLDOUT') ORDER BY goods_no",
+      "SELECT * FROM items ORDER BY goods_no",
     )
     .iterate()) {
     if (g.last_checked_at > maxChecked) maxChecked = g.last_checked_at;
-    if (skipMusinsa.has(g.goods_no)) continue;
+    const explicit=['like','manual'].includes(g.source)&&['ACTIVE','SOLDOUT'].includes(g.status);
+    if (skipMusinsa.has(g.goods_no)&&!explicit) continue;
     const L = [];
-    for (const r of logs.iterate(g.goods_no))
+    const observations=[...logs.iterate(g.goods_no)];
+    for (const r of observations)
       L.push([
         r.date,
         r.normal_price ?? null,
@@ -47,6 +50,9 @@ export function exportDashboardBase(
       ]);
     sink.add({
       n: Number(g.goods_no),
+      kind:explicit?'musinsa':'archive',
+      priceBasis:observations.at(-1)?.my_price!=null?'MUSINSA_MY':'MUSINSA_ESTIMATED',
+      tracking:trackingFromLogs(observations.map(r=>({...r,created_at:(r.my_price!=null?r.my_observed_at:r.estimated_observed_at)||r.created_at})),{status:explicit?'ACTIVE':'STOPPED',priceOf:r=>r.my_price??r.estimated_my_price,basisOf:r=>r.my_price!=null?'MUSINSA_MY':'MUSINSA_ESTIMATED'}),
       src: "musinsa",
       b: g.brand_name || "-",
       g: g.goods_name || "상품",
@@ -67,14 +73,16 @@ export function exportDashboardBase(
       )
       .get().n === 2
   ) {
+    const scanStatus=db4910.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='goods'").get()?db4910.prepare('SELECT status FROM goods WHERE sno=?'):null;
     const stmt = db4910.prepare(
       "SELECT date,list_price,original_price,coupon_price,member_price,is_soldout FROM liked_price_logs WHERE sno=? ORDER BY date,id",
     );
     for (const g of db4910
-      .prepare("SELECT * FROM liked_goods WHERE status='ACTIVE' ORDER BY sno")
+      .prepare("SELECT * FROM liked_goods ORDER BY sno")
       .iterate()) {
+      if(g.status!=='ACTIVE'&&scanStatus?.get(g.sno)?.status==='ACTIVE')continue;
       const validations = readPriceValidations(db4910, "liked", { sno: g.sno }),
-        L = [];
+        L = [], confirmed=[];
       for (const r of stmt.iterate(g.sno)) {
         const v = validations.get(g.sno + ":" + r.date),
           my = effective4910Price({ raw: r, validation: v }),
@@ -101,10 +109,12 @@ export function exportDashboardBase(
           base != null && my != null ? Math.max(base - my, 0) : 0,
           null,
         ]);
+        if(my!=null)confirmed.push({...r,checked_at:v?.checked_at,price:my});
       }
       const v = validations.get(g.sno + ":" + L.at(-1)?.[0]);
       sink.add({
         n: Number(g.sno),
+        tracking:trackingFromLogs(confirmed,{status:g.status==='ACTIVE'?'ACTIVE':'STOPPED',priceOf:r=>r.price,basisOf:()=> '4910 검증가'}),
         src: "4910",
         vd: v?.checked_at ?? null,
         vs: v?.status ?? "unverified",

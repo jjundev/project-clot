@@ -6,7 +6,7 @@ import { createDashboardModel } from "./dashboard-model.js";
 import { createDashboardScope } from "./dashboard-scope.js";
 import { packIndex } from "./dashboard-index.js";
 /** Build-time sink: retains current summaries, never the whole archive. */
-export function createDashboardBuilder({ outDir, revision }) {
+export function createDashboardBuilder({ outDir, revision, asOfMs=Date.now() }) {
   const writer = createAssetWriter({ outDir, revision }),
     history = createHistoryExporter({ writer }),
     model = createDashboardModel(),
@@ -58,7 +58,7 @@ export function createDashboardBuilder({ outDir, revision }) {
     },
     add(raw, options) {
       const detail = history.add(model.itemKey(raw.src, raw.n), raw.L || []),
-        x = model.summarize(raw, { ...options, detail });
+        x = model.summarize(raw, { ...options, detail, asOfMs });
       const bytes = Buffer.byteLength(JSON.stringify(x)) + 1;
       if (cards.length && size + bytes > 230000) flush();
       cards.push(x);
@@ -96,7 +96,7 @@ export function createDashboardBuilder({ outDir, revision }) {
             });
         }
       const state = model.restoreState({}),
-        q = model.queryCatalog(summaries, state),
+        q = model.queryCatalog(summaries, state,{asOfMs}),
         { items, ...facets } = q;
       const previews = {},
         previewCards = new Map(),
@@ -105,7 +105,7 @@ export function createDashboardBuilder({ outDir, revision }) {
         scope = createDashboardScope();
       for (const src of ["all", "musinsa", "4910"]) {
         const state = model.restoreState({ src }),
-          { items, ...facets } = model.queryCatalog(summaries, state);
+          { items, ...facets } = model.queryCatalog(summaries, state,{asOfMs});
         const first = items.slice(0, 120);
         previews[src] = { state, keys: first.map((x) => x.k), facets };
         for (const { card, ...x } of first) previewCards.set(x.k, x);
@@ -123,6 +123,7 @@ export function createDashboardBuilder({ outDir, revision }) {
       return {
         catalog: {
           v: 2,
+          asOfMs,
           revision,
           scanState,
           notice,

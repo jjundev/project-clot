@@ -9,6 +9,12 @@ import { DatabaseSync } from 'node:sqlite';
 import { generateDashboardHtml } from '../src/visualizer.js';
 import { Store4910 } from '../src/site4910/store.js';
 
+function assetCards(file) {
+ const dir=path.dirname(file),cards=[];
+ for(const name of fs.readdirSync(path.join(dir,'assets')).filter(n=>n.startsWith('cards-'))){const ctx={};vm.runInNewContext(fs.readFileSync(path.join(dir,'assets',name),'utf8'),ctx);for(const p of Object.values(ctx.__CLOT_ASSETS__))cards.push(...p.items);}
+ return cards;
+}
+
 describe('Visualizer HTML Generation', () => {
   const tempFiles = [];
 
@@ -100,8 +106,8 @@ describe('Visualizer HTML Generation', () => {
     assert.ok(!content.includes('<span class="smark"'), 'Must not include SAMPLE badge');
     assert.ok(content.includes('window.__CLOT_DATA__ ='), 'Must inject window.__CLOT_DATA__');
     assert.ok(content.includes('"targetGoodsNo":777'), 'Must inject targetGoodsNo in payload');
-    assert.ok(content.includes('"n":777'));
-    assert.ok(content.includes('테스트 모자 $pecial'), 'Must safely preserve dollar signs without replace corruption');
+    assert.ok(assetCards(tempOutput).some(x=>x.n===777));
+    assert.ok(assetCards(tempOutput).some(x=>x.g==='테스트 모자 $pecial'), 'Must safely preserve dollar signs without replace corruption');
   });
 
   test('generateDashboardHtml throws error when template file does not exist', () => {
@@ -156,8 +162,8 @@ describe('Visualizer HTML Generation', () => {
     const res = generateDashboardHtml({ db: createTestDb(), outputPath: tempOutput, openBrowser: false, db4910Path });
     assert.equal(res.totalItems, 2);
     const content = fs.readFileSync(tempOutput, 'utf-8');
-    assert.ok(content.includes('"k":"4910:71863924"'));
-    assert.ok(content.includes('"k":"musinsa:777"'));
+    assert.ok(assetCards(tempOutput).some(x=>x.k==='4910:71863924'));
+    assert.ok(assetCards(tempOutput).some(x=>x.k==='musinsa:777'));
   });
 
   test('generateDashboardHtml without a 4910.db still renders', () => {
@@ -228,8 +234,8 @@ describe('Visualizer HTML Generation', () => {
     assert.equal(fs.existsSync(path.join(dir, '4910-all.js')), false);
     const htmlData=JSON.parse(fs.readFileSync(tempOutput,'utf8').match(/window\.__CLOT_DATA__ = ([^\n]+);/)[1]);
     assert.equal(htmlData.catalog.v,2);assert.ok(fs.existsSync(path.join(dir,'assets')));
-    assert.equal(htmlData.catalog.bootstrap.items.find(x=>x.n===71863924).my,18000);
-    assert.equal(htmlData.catalog.bootstrap.items.find(x=>x.n===71863925).my,null);
+    assert.equal(assetCards(tempOutput).find(x=>x.n===71863924).my,18000);
+    assert.equal(assetCards(tempOutput).find(x=>x.n===71863925).my,null);
     assert.equal(res.total4910All, 3);
     const html = fs.readFileSync(tempOutput, 'utf-8');
     assert.ok(html.includes('"has4910All":true'));
@@ -281,7 +287,7 @@ describe('Visualizer HTML Generation', () => {
     assert.equal(res.total4910All, 0);
     assert.equal(fs.existsSync(path.join(dir, '4910')), false);
     const html = fs.readFileSync(tempOutput, 'utf-8');
-    assert.ok(html.includes('"k":"4910:71863924"'));
+    assert.ok(assetCards(tempOutput).some(x=>x.k==='4910:71863924'));
     assert.ok(html.includes('"has4910All":false'));
   });
 

@@ -66,5 +66,5 @@ test('sorts order actual prices, categories and ties without mutating input',()=
  for(const [sort,keys] of Object.entries(want))assert.deepEqual(m.queryCatalog(items,{...defaultState,sort}).items.map(x=>x.k),keys);
  assert.equal(JSON.stringify(items),before);
  const missing=m.summarize({...fixtureRaw()[0],n:99,L:[]});
- for(const sort of ['priceAsc','priceDesc'])assert.equal(m.queryCatalog([...items,missing],{...defaultState,sort}).items.at(-1).k,'musinsa:99');
+ for(const sort of ['priceAsc','priceDesc'])assert.equal(m.queryCatalog([...items,missing],{...defaultState,sort,includeHistory:true}).items.at(-1).k,'musinsa:99');
 });

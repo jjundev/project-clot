@@ -7,6 +7,7 @@ on:
       - data/prices.db
       - src/dashboard.template.html
       - src/visualizer.js
+      - src/price-observation.js
       - src/site4910/price-validation.js
       - src/dashboard-*.js
       - src/musinsaWide/point-*.js
@@ -51,7 +52,7 @@ jobs:
 
       - run: npm ci
       - name: Validate dashboard model and build
-        run: node --test tests/dashboard-*.test.js tests/site4910-price-validation.test.js tests/visualizer-data.test.js tests/visualizer-html.test.js tests/cli-visualize.test.js
+        run: node --test tests/dashboard-*.test.js tests/tracking-freshness.test.js tests/site4910-price-validation.test.js tests/visualizer-data.test.js tests/visualizer-html.test.js tests/cli-visualize.test.js
       - run: npx playwright install --with-deps chromium
       - run: npm run test:dashboard:browser
 

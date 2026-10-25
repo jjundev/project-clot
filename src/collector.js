@@ -1,3 +1,4 @@
+import {trackingFromLogs,priceSignalEligibility} from './price-observation.js';
 import { db } from './db.js';
 import { execSync } from 'node:child_process';
 import { getExecOptions } from './env.js';
@@ -497,7 +498,10 @@ export async function collectPricesForActiveItems({
       }
 
       // Check for price drop: compare like-for-like
-      if (baselinePriceLog) {
+      const comparisonKey=item.source==='discovery'?'estimated_my_price':priceInfo.myPrice&&baselinePriceLog?.my_price?'my_price':'sale_price';
+      const currentComparison={date:today,created_at:new Date().toISOString(),[comparisonKey]:comparisonKey==='my_price'?priceInfo.myPrice:comparisonKey==='sale_price'?priceInfo.salePrice:priceInfo.estimatedMyPrice};
+      const comparison=trackingFromLogs(baselinePriceLog?[{...baselinePriceLog,created_at:baselinePriceLog[comparisonKey==='my_price'?'my_observed_at':comparisonKey==='sale_price'?'sale_observed_at':'estimated_observed_at']||baselinePriceLog.created_at},currentComparison]:[],{priceOf:r=>r[comparisonKey],basisOf:()=>comparisonKey});
+      if (baselinePriceLog&&priceSignalEligibility(comparison,{price:currentComparison[comparisonKey],basis:comparisonKey}).dropAmt>0) {
         if (item.source === 'discovery') {
           // Like-for-like comparison for estimated prices
           const prevEst = baselinePriceLog.estimated_my_price;

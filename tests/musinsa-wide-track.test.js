@@ -80,7 +80,7 @@ const session = () => Object.assign(async () => COOKIE, { absorb: () => null });
 const quiet = [];
 const log = (m) => quiet.push(m);
 
-const run = (overrides) => trackMusinsa({ store, date: DAY1, categories: CATS, log, now: () => clock.t, ...overrides });
+const run = (overrides) => trackMusinsa({ store, date: DAY1, categories: CATS, log, now: () => Date.parse((overrides?.date||DAY1)+'T09:00:00Z')+clock.t, ...overrides });
 
 // The registry after a finished backfill: enumeration goes on from frontier + 1, numbers below enum_floor are old.
 const makeReady = ({ frontier = 1000, floor = 900 } = {}) => {
@@ -460,7 +460,7 @@ const goodsRow = (goods_no) => ({
   sale_price: 10000, normal_price: 10000, extra_discount: 0, is_sold_out: 0,
 });
 const addGoods = (...nos) => store.applyScan(DAY0, nos.map(goodsRow), { cat: '001', complete: true });
-const backfill = (overrides) => backfillMusinsaCoupons({ store, date: DAY1, log, now: () => clock.t, ...overrides });
+const backfill = (overrides) => backfillMusinsaCoupons({ store, date: DAY1, log, now: () => Date.parse((overrides?.date||DAY1)+'T09:00:00Z')+clock.t, ...overrides });
 const backfillMeta = () => Object.fromEntries(['enum_floor', 'enum_cursor', 'backfill_done'].map((k) => [k, store.getMeta(k)]));
 
 test('backfill budgets are 160 and 130 minutes; the cursor is saved every 1000 numbers', () => {

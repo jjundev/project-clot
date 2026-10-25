@@ -27,3 +27,10 @@ test('coupon endpoint 404 stays pending while only detail 404 proves deletion',a
 test('a proof for a different goods detail is rejected',async()=>{const shards=await Promise.all([run(0),run(1)]);shards[0].results[0].detail.sno=999;const s=store();assert.throws(()=>mergeVerification({store:s,targets,meta,shards}));s.close();});
 test('archived proofs survive a same-day collector reset only when wallet, date, base and identity still match',async()=>{const old=await run(1);const ts=targets.map(t=>t.sno===3?{...t,base:12000}:t);const restored=reusableProofs({existing:new Map(),candidates:old.results,targets:ts,date,fingerprint});assert.equal(restored.size,1);assert.ok(restored.has(1));assert.equal(reusableProofs({existing:new Map(),candidates:old.results,targets,date,fingerprint:'new'}).size,0);assert.equal(reusableProofs({existing:new Map(),candidates:old.results,targets,date:'2026-10-17',fingerprint}).size,0);});
 test('archived cache never replaces a newer observation or accepts a foreign detail',async()=>{const old=(await run(1)).results[0],newer={...old,checkedAt:new Date(Date.parse(old.checkedAt)+1000).toISOString()};const m=reusableProofs({existing:new Map([[old.sno,newer]]),candidates:[old],targets,date,fingerprint});assert.equal(m.get(old.sno).checkedAt,newer.checkedAt);assert.equal(reusableProofs({existing:new Map(),candidates:[{...old,detail:{...old.detail,sno:99}}],targets,date,fingerprint}).size,0);});
+
+test('full verification records actual scan-price evidence without a listing price change',async()=>{
+ const s=store(),shards=await Promise.all([run(0),run(1)]);mergeVerification({store:s,targets,meta,shards});
+ const o=s.observations.get(2),proof=shards.flatMap(s=>s.results).find(r=>r.sno===2);
+ assert.equal(o.saleAt,proof.checkedAt);assert.equal(o.samples.at(-1).price,7800);assert.equal(o.samples.at(-1).basis,'4910 검증가');
+ assert.equal(s.getChanges(2).length,1);s.close();
+});

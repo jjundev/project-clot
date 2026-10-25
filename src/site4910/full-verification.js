@@ -92,6 +92,10 @@ export function mergeVerification({store,targets,meta,shards}){
    if(t.scan){
     store.putPriceValidation({kind:'scan',sno,date:meta.date,status,reason:resolved.reason,corrected:price==null?null:{sale_price:r.detail.listPrice,coupon_price:price},evidence,checkedAt:r.checkedAt});
     set.run(price,sno);
+    if(Number.isFinite(r.detail.listPrice)){
+      store.observations.seen(sno,{at:r.checkedAt,date:meta.date,price:r.detail.listPrice,hasPrice:true});
+      if(price!=null)store.observations.price(sno,{date:meta.date,at:r.checkedAt,price,basis:'4910 검증가',verifiedAt:r.checkedAt});
+    }
     if(Number.isFinite(r.detail.listPrice)&&r.detail.listPrice>0)history.run(sno,meta.date,r.detail.listPrice,price);
    }
    if(t.liked){

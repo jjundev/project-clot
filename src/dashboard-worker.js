@@ -228,7 +228,7 @@ export async function createDashboardTransport({
           job.reject(stale());
         }
       },
-      async query(state, requestId) {
+      async query(state, requestId, asOfMs=Date.now()) {
         const own = ++generation;
         current = null;
         cancelCurrent?.();
@@ -262,7 +262,7 @@ export async function createDashboardTransport({
             state,
           );
           const result = await Promise.race([
-            engine.query(state, requestId),
+            engine.query(state, requestId,asOfMs),
             superseded,
           ]);
           if (own !== generation) throw stale();
@@ -285,8 +285,8 @@ export async function createDashboardTransport({
         requireCurrent(id);
         return r;
       },
-      async lookup(key) {
-        if (preview.has(key)) return preview.get(key);
+      async lookup(key,asOfMs=Date.now()) {
+        if (preview.has(key)) return index.refresh(preview.get(key),{asOfMs});
         const bucket = scope.routeBucket(key);
         if (!routes.has(bucket)) {
           const map = new Map();
@@ -303,7 +303,7 @@ export async function createDashboardTransport({
           routes.set(bucket, map);
         }
         const row = routes.get(bucket).get(key);
-        return row ? (await loadCards([key], new Map([[key, row]])))[0] : null;
+        return row ? index.refresh((await loadCards([key], new Map([[key, row]])))[0],{asOfMs}) : null;
       },
     };
   }

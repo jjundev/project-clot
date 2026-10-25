@@ -591,6 +591,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       <button class="chip" type="button" data-filter="out" aria-pressed="false" data-od-id="chip-out">품절 <span class="c num" id="cOut">—</span></button>
     </div>
 
+    <label class="chip history-control"><input type="checkbox" id="includeHistory"> 과거 기록 포함</label>
     <div class="brand-controls">
       <button class="chip" id="brandTrigger" type="button" aria-haspopup="dialog">브랜드 선택</button>
       <span id="brandSummary" class="brand-summary" aria-label="선택한 브랜드"></span>
@@ -616,7 +617,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     <button class="linkbtn" id="resetBtn" type="button" hidden>초기화</button>
   </div>
 
-  <p id="priceFilterHelp" role="status" hidden>하락·최저가 필터는 직접 확인된 가격을 기준으로 합니다</p>
+  <p id="priceFilterHelp" role="status" hidden>최저가는 최근 48시간 내 확인한 가격, 하락은 최근 48시간 내 관측한 변동을 기준으로 합니다</p>
   <p id="musinsaNotice" role="status" hidden></p>
   <p id="catalogNotice" role="status" hidden></p>
   <section class="grid" id="grid" data-od-id="product-grid" aria-label="추적 상품 목록"></section>
@@ -742,10 +743,12 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   var CAT_ORDER = { top: 1, outer: 2, bottom: 3, shoes: 4, bag: 5, etc: 6 };
 
   /* ── 상태 ───────────────────────────────────────────────── */
-  var state = model.restoreState({src:store('src'),cat:store('cat'),filter:store('filter'),sort:store('sort')});
+  var state = model.restoreState({src:store('src'),cat:store('cat'),filter:store('filter'),sort:store('sort'),includeHistory:store('includeHistory')==='true'});
   var view = [], shown = 0, PAGE = 120, lastQuery = null, brandCountsKnown = false;
   var grid = document.getElementById('grid'), qEl = document.getElementById('q'), sortSel = document.getElementById('sortSel');
   sortSel.value = state.sort;
+  var historyToggle=document.getElementById('includeHistory');historyToggle.checked=state.includeHistory;
+  historyToggle.addEventListener('change',function(){state.includeHistory=historyToggle.checked;store('includeHistory',String(state.includeHistory));render();});
   function loadDataScript(src) {
     return new Promise(function(resolve,reject) {
       var tag = document.createElement('script'), done = false;
@@ -841,6 +844,13 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     onsale: '· 판매중만', out: '· 품절만'
   };
 
+  function trackingLabel(it) {
+    return {CURRENT:'추적 중',RETAINED:'이번 목록 미포함',STALE:'갱신 지연',STOPPED:'추적 종료',UNKNOWN:'확인 필요'}[it.trackingState]||'확인 필요';
+  }
+  function observationDate(it) {
+    var at=it.tracking&&it.tracking.samples&&it.tracking.samples.at(-1)?.at;
+    return at?new Date(at).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'확인 기록 없음';
+  }
   function thumbHtml(it, cls) {
     var u = imgUrl(it.i);
     if (!u) return '<div class="ph">' + esc(it._init) + '</div>';
@@ -858,7 +868,9 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     return '<div class="point-estimate price-source">'+text+'</div>';
   }
   function cardHtml(it) {
+    model.refresh(it);
     var pins = '';
+    if(!it.fresh)pins+='<span class="pin wait">'+esc(trackingLabel(it))+'</span>';
     if (!it.tracked) pins += '<span class="pin wait">관측 대기</span>';
     else {
       if (it.isLow) pins += '<span class="pin low">역대 최저가</span>';
@@ -875,7 +887,8 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         (it.newbie != null && it.newbie !== it.my ? '<div class="was nb num">쿠폰적용가(신규회원 기준) ' + won(it.newbie) + '</div>' : '') +
         (it.coupon > 0 ? '<span class="tag">' + esc(it.couponName || '쿠폰') + ' −' + it.coupon.toLocaleString('ko-KR') + '원</span>' : '');
     }
-    if(it.kind==='wide')body+='<div class="price-source">'+esc(priceKind(it.priceSource))+' · '+esc(it.observedDate||'')+' 기준'+(it.retained?' · 이번 목록 미포함':'')+'</div>';
+    if(it.kind==='wide')body+='<div class="price-source">'+esc(priceKind(it.priceSource))+' · '+esc(observationDate(it))+' 기준'+(it.retained?' · 이번 목록 미포함':'')+'</div>';
+    if(!it.fresh)body+='<div class="price-source">마지막 확인 가격 · '+esc(observationDate(it))+'</div>';
     body+=pointHtml(it);
     if (is4910(it) && it.my == null && it.tracked) body = '<div class="waitprice">가격 재검증 필요</div>';
     if (is4910(it) && it.vd) body += '<div class="was">' + (it.my == null ? '검토일 ' : '검증일 ') + esc(new Date(it.vd).toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })) + '</div>';
@@ -900,12 +913,12 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     var p=D.catalog.previews&&D.catalog.previews[state.src],map=new Map((D.catalog.previewItems||D.items).map(function(x){return [x.k,x];}));
     var query=p?Object.assign({},p.facets,{items:p.keys.map(function(k){return map.get(k);})}):D.catalog.bootstrap;
     previewSource=state.src;
-    return query;
+    return model.queryCatalog(query.items,state);
   }
   function setSearchMode(mode) {
     searchMode=mode;
     var special=mode==='product'||mode==='invalid';
-    document.querySelectorAll('.kpi,.cat-bar,.toolbar>.chips,.brand-controls,.sort,.resultbar').forEach(function(el){el.hidden=special;});
+    document.querySelectorAll('.kpi,.cat-bar,.toolbar>.chips,.history-control,.brand-controls,.sort,.resultbar').forEach(function(el){el.hidden=special;});
     document.getElementById('musinsaNotice').hidden=special||!D.musinsa;
     document.getElementById('priceFilterHelp').hidden=special||!['drop','lowest'].includes(state.filter);
   }
@@ -915,7 +928,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     grid.dataset.searchStatus=status;
     grid.innerHTML=item?cardHtml(item):'<div class="empty"><b>'+esc(message||'상품 조회 중')+'</b></div>';
     var notice=document.getElementById('catalogNotice');notice.hidden=false;
-    notice.innerHTML=status==='error'?'상품을 조회하지 못했습니다 · <button type="button" data-retry-catalog>다시 시도</button>':status==='invalid'?esc(message):'상품번호 조회 · 일반 검색 필터와 관계없이 표시합니다';
+    notice.innerHTML=status==='error'?'상품을 조회하지 못했습니다 · <button type="button" data-retry-catalog>다시 시도</button>':status==='invalid'?esc(message):'상품번호 조회 · 과거 기록을 포함하며 일반 검색 필터와 관계없이 표시합니다';
     if(modalItem)updateStepper(-1);
   }
   function renderProduct(parsed,token) {
@@ -935,7 +948,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
       var keep=lastQuery&&lastQuery.resultId&&previewSource===state.src;
       var preview=keep?lastQuery:showPreview(data);
       previousCards=!!keep;
-      paint(preview,{...data,status:'loading',preview:true,previous:!!keep},!!keep||!defaults);
+      paint(model.queryCatalog(preview.items,state),{...data,status:'loading',preview:true,previous:!!keep},true);
       grid.dataset.searchStatus='loading';
       runtime.query(state).then(function(q){if(token!==queryToken)return;paint(q,runtime.getState(),false);grid.dataset.searchStatus='ready';}).catch(function(error){
         if(token!==queryToken||error.code==='STALE_RESULT')return;
@@ -950,7 +963,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     lastQuery=query;brandCountsKnown=!waiting;firstOffset=0;topHeight=0;topSpacer.style.height="0px";pageBusy=false;
     view=query.items;
     document.getElementById('shownN').textContent=waiting?'—':fmt(query.total);
-    document.getElementById('resetBtn').hidden=state.filter==='all'&&state.cat==='all'&&state.src==='all'&&!state.q&&!state.brandKeys.length;
+    document.getElementById('resetBtn').hidden=state.filter==='all'&&state.cat==='all'&&state.src==='all'&&!state.q&&!state.brandKeys.length&&!state.includeHistory;
     ['all','lowest','drop','onsale','out'].forEach(function(k){
       document.getElementById('c'+k.charAt(0).toUpperCase()+k.slice(1)).textContent=waiting?'—':fmt(query.quick[k]);
     });
@@ -972,7 +985,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
     if(wm)wideNotice.textContent='무신사 '+wm.date+' 기준 · 조사 '+fmt(wm.selected)+'개 · 제공 '+fmt(wm.active)+'개(이전 회차 잔류 '+fmt(wm.retained||0)+'개 포함) · 직접 확인 '+fmt(wm.direct)+'개 · 추정 '+fmt(wm.estimated)+'개'+(wm.unknown?' · 출처 미확인 '+fmt(wm.unknown)+'개':'')+'. '+(wm.exceptionCoupons.length?'쿠폰 '+wm.exceptionCoupons.length+'종의 적용 상품 목록을 확인하지 못했습니다 ('+wm.exceptionCoupons.join(', ')+'). 추정가는 확인된 혜택 기준이며 실제 결제 가격이 더 낮을 수 있습니다.':'추정가는 확인된 혜택 기준이며 실제 결제 가격과 다를 수 있습니다.');
     showStatus(data,waiting);
     shown=0;renderBrandBar();
-    grid.innerHTML=view.length?'':waiting||data.preview?'<div class="empty"><b>검색 준비 중 · 기본 상품 미리보기</b></div>':'<div class="empty"><b>현재 조건에 맞는 상품이 없습니다</b>검색어를 지우거나 다른 필터를 선택해 보세요.</div>';
+    grid.innerHTML=view.length?'':waiting||data.preview?'<div class="empty"><b>검색 준비 중 · 기본 상품 미리보기</b></div>':'<div class="empty"><b>현재 조건에 맞는 상품이 없습니다</b>검색 조건을 바꾸거나 ‘과거 기록 포함’을 선택해 보세요.</div>';
     renderMore();
     if(moreIo){moreIo.unobserve(moreBtn);moreIo.observe(moreBtn);}
     if(modalItem)updateStepper(view.findIndex(function(x){return x.k===modalItem.k;}));
@@ -980,6 +993,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
 
   function updateFilterSummary() {
     var labels=[];
+    if(state.includeHistory)labels.push('과거 기록 포함');
     if(state.src!=='all')labels.push(state.src==='musinsa'?'무신사':'4910');
     if(state.cat!=='all')labels.push(CAT_NAMES[state.cat]||'기타');
     if(state.brandKeys.length)labels.push('브랜드 '+state.brandKeys.length+'개');
@@ -1077,6 +1091,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   document.getElementById('resetBtn').addEventListener('click', function () {
     clearTimeout(deb);composing=false;brandSearch.value='';
     state.filter = 'all'; state.cat = 'all'; state.src = 'all'; state.q = ''; state.brandKeys = []; qEl.value = '';
+    state.includeHistory=false;historyToggle.checked=false;store('includeHistory','false');
     state.sort='rate';sortSel.value='rate';store('sort','rate');store('filter', 'all'); store('cat', 'all'); store('src', 'all'); if(!isV2&&(state.src!=='musinsa'||D.catalog.musinsaCount>0))runtime.ensureCatalog(); render();
   });
 
@@ -1236,6 +1251,7 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   });
 
   function fillModal(it) {
+    model.refresh(it);
     document.getElementById('mThumb').innerHTML = thumbHtml(it);
     document.getElementById('mBrand').textContent = it.b + (is4910(it) && it.m ? ' · ' + it.m : '');
     document.getElementById('mName').textContent = it.g;
@@ -1258,7 +1274,8 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
         '<span class="now num">' + won(it.my) + '</span>' +
         (it.normal !== it.my ? '<span class="base num">' + won(it.normal) + '</span>' : '');
       var f = [];
-      if(it.kind==='wide')f.push('<span class="fact">'+esc(priceKind(it.priceSource))+' · '+esc(it.observedDate||'')+' 기준'+(it.retained?' · 이번 목록 미포함':'')+'</span>');
+      f.push('<span class="fact">'+esc(trackingLabel(it))+' · 마지막 가격 확인 '+esc(observationDate(it))+'</span>');
+      if(it.kind==='wide')f.push('<span class="fact">'+esc(priceKind(it.priceSource))+' · '+esc(observationDate(it))+' 기준'+(it.retained?' · 이번 목록 미포함':'')+'</span>');
       if (on4910 && it.my == null) f.push('<span class="fact">가격 재검증 필요</span>');
       if (on4910 && it.vd) f.push('<span class="fact">' + (it.my == null ? '검토일 ' : '검증일 ') + esc(new Date(it.vd).toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })) + '</span>');
       if(it.kind!=='wide'||it.lowEligible)f.push('<span class="fact' + (it.isLow ? ' low' : '') + '">역대 최저가 <b class="num">' + won(it.lowMy) +
@@ -1456,6 +1473,14 @@ td.mine-c{font-weight:800;letter-spacing:-0.01em}
   measureHeader();
   if(window.ResizeObserver)new ResizeObserver(measureHeader).observe(document.querySelector('.topbar'));
   else window.addEventListener('resize',measureHeader);
+  function refreshPrices() {
+    if(document.hidden)return;
+    render();
+    if(modalItem)fillModal(modalItem);
+  }
+  document.addEventListener('visibilitychange',refreshPrices);
+  window.addEventListener('pageshow',function(e){if(e.persisted)refreshPrices();});
+  setInterval(refreshPrices,60000);
   render();
   if(!isV2&&(state.src!=='musinsa'||D.catalog.musinsaCount>0))runtime.ensureCatalog();
   var qs=new URLSearchParams(location.search);

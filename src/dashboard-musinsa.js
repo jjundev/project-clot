@@ -1,3 +1,4 @@
+import {publicTracking} from './price-observation.js';
 /** Read-only adapter: only public product fields and price provenance leave the DB. */
 import {readPointEstimateViews} from "./musinsaWide/point-pricing.js";
 import {PointPolicyStore,quotaDate} from "./musinsaWide/point-store.js";
@@ -27,7 +28,7 @@ function group(rows) {
   }
   return map;
 }
-export function buildMusinsaCatalog(db, { outDir, revision, sink, pointEstimatesEnabled=process.env.CLOT_MUSINSA_POINTS_ENABLED==='1', asOfMs=Date.now() }) {
+export function buildMusinsaCatalog(db, { outDir, revision, sink, pointEstimatesEnabled=process.env.CLOT_MUSINSA_POINTS_ENABLED==='1', asOfMs=Date.now(), excludeGoodsIds=new Set() }) {
   const points=readPointEstimateViews({db,asOfMs,enabled:pointEstimatesEnabled});
   const pointStore=pointEstimatesEnabled?new PointPolicyStore(db):null;
   const run = db
@@ -41,9 +42,10 @@ export function buildMusinsaCatalog(db, { outDir, revision, sink, pointEstimates
       .map((r) => r.date),
   );
   const metrics = JSON.parse(run.coupon_metrics_json || "{}");
+  const observationColumn=db.prepare("PRAGMA table_info(goods)").all().some(c=>c.name==='observation_json')?'observation_json':'NULL AS observation_json';
   const goods = db
     .prepare(
-      "SELECT goods_no,cat,brand_name,brand,name,url,image_url,status,sale_price,normal_price,coupon_price,coupon_price_source,is_sold_out,first_seen_date,misses FROM goods WHERE status='ACTIVE' ORDER BY goods_no",
+      `SELECT goods_no,cat,brand_name,brand,name,url,image_url,status,sale_price,normal_price,coupon_price,coupon_price_source,is_sold_out,first_seen_date,misses,${observationColumn} FROM goods ORDER BY goods_no`,
     )
     .all();
   const priceStmt = db.prepare(
@@ -59,13 +61,14 @@ export function buildMusinsaCatalog(db, { outDir, revision, sink, pointEstimates
       (n, c) => n + c.scanned,
       0,
     ),
-    active: goods.length,
-    direct: 0,
-    estimated: 0,
-    unknown: 0,
+    active: goods.filter(g=>g.status==='ACTIVE').length,
+    exported:goods.filter(g=>!excludeGoodsIds.has(g.goods_no)).length,
+    direct:goods.filter(g=>g.status==='ACTIVE'&&g.coupon_price_source==='DIRECT').length,
+    estimated:goods.filter(g=>g.status==='ACTIVE'&&g.coupon_price_source==='ESTIMATED').length,
+    unknown:goods.filter(g=>g.status==='ACTIVE'&&!['DIRECT','ESTIMATED'].includes(g.coupon_price_source)).length,
     exceptionCoupons: metrics.pricing?.exceptionCoupons || [],
     points: {enabled:pointEstimatesEnabled,...points.counts,attemptedToday:pointStore?.getAttempts(quotaDate(asOfMs))??0,lastStop:pointStore?.getMeta("point_run:last")?.stop??null},
-    retained: goods.filter((g) => g.misses > 0).length,
+    retained: goods.filter((g) => g.status==='ACTIVE'&&g.misses > 0).length,
   };
   const dir = path.join(outDir, "musinsa");
   fs.rmSync(dir, { recursive: true, force: true });
@@ -81,6 +84,7 @@ export function buildMusinsaCatalog(db, { outDir, revision, sink, pointEstimates
       items = [];
     for (const g of goods.slice(offset, offset + 2000)) {
       goodsIds.add(g.goods_no);
+      if(excludeGoodsIds.has(g.goods_no))continue;
       const P = [...priceStmt.iterate(g.goods_no)],
         C = [...couponStmt.iterate(g.goods_no)];
       const dates = [
@@ -128,6 +132,7 @@ export function buildMusinsaCatalog(db, { outDir, revision, sink, pointEstimates
       const summary = model.summarize(
         {
           n: g.goods_no,
+          tracking:publicTracking(g.observation_json,g.status!=='ACTIVE'?'STOPPED':g.misses>0?'RETAINED':'ACTIVE'),
           pointEstimate:point?.price??null,pointDiscount:point?.discount??null,pointState:pointEstimatesEnabled?(point?.state??"UNKNOWN"):null,pointCheckedAt:point?.checkedAt??null,pointMaxUseRate:point?.maxUseRate??null,
           src: "musinsa",
           kind: "wide",
@@ -144,6 +149,7 @@ export function buildMusinsaCatalog(db, { outDir, revision, sink, pointEstimates
         },
         {
           kind: "wide",
+          asOfMs,
           detail: { type: "musinsa", id: historyId, path: historyPath },
         },
       );
@@ -152,13 +158,6 @@ export function buildMusinsaCatalog(db, { outDir, revision, sink, pointEstimates
         items.push(summary);
         histories[summary.k] = L;
       }
-      metadata[
-        summary.priceSource === "DIRECT"
-          ? "direct"
-          : summary.priceSource === "ESTIMATED"
-            ? "estimated"
-            : "unknown"
-      ]++;
     }
     if (!sink) {
       fs.writeFileSync(

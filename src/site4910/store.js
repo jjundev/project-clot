@@ -1,7 +1,7 @@
-// 4910 listings in their own SQLite file (data/4910.db), committed alongside prices.db.
-// ~16k listings a day, so history is change-only: price_changes gets a row only for NEW, PRICE, DROPPED, REVIVED,
-// and a goods row is rewritten only when something in it changed — an unchanged listing keeps its bytes, so the
-// daily git commit of this file stays a small delta. (No last_seen_date for that reason: misses track absence.)
+import {createObservationStore, priceSignalEligibility} from '../price-observation.js';
+// 4910 listings ship in their own SQLite Release snapshot. Price history stays
+// change-only (NEW, PRICE, DROPPED, REVIVED); actual sightings refresh observation_json
+// independently, including when the listing price is unchanged.
 import { effective4910Price } from './price-validation.js';
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
@@ -94,6 +94,7 @@ export class Store4910 {
       );
     `);
     // CREATE TABLE IF NOT EXISTS leaves a 4910.db from before these columns as it was, so add them in place.
+    this.observations=createObservationStore(this.db,{key:'sno'});
     const goodsCols = new Set(this.db.prepare('PRAGMA table_info(goods)').all().map((c) => c.name));
     for (const col of ['market_type_sno', 'coupon_price']) {
       if (!goodsCols.has(col)) this.db.exec(`ALTER TABLE goods ADD COLUMN ${col} INTEGER`);
@@ -120,7 +121,7 @@ export class Store4910 {
    * most once per date, so a same-day rerun or a half-failed brand never pushes listings toward DROPPED.
    * Only the listings of the scanned brands are loaded; `initial` still means goods was empty before this call.
    */
-  applyScan(date, rows, { completeBrands = [] } = {}) {
+  applyScan(date, rows, { completeBrands = [], observedAt = `${date}T00:00:00.000Z` } = {}) {
     const diff = { initial: false, added: [], priceChanged: 0, drops: [], revived: [], dropped: [] };
     this.db.exec('BEGIN');
     try {
@@ -163,10 +164,12 @@ export class Store4910 {
           insert.run(r.sno, r.brand_sno, r.brand, r.name, r.market_sno, r.market_type_sno ?? null, r.market_name, r.category, r.url, r.image_url,
             r.sale_price, r.original_price, r.discount_rate, r.sale_price, r.sale_price == null ? null : date, date);
           logChange.run(r.sno, date, r.sale_price, r.original_price, 'NEW');
+          this.observations.seen(r.sno,{at:observedAt,date,price:scanned.sale_price,hasPrice:scanned.sale_price!=null});
           diff.added.push(r);
           continue;
         }
 
+        this.observations.seen(r.sno,{at:observedAt,date,price:scanned.sale_price,hasPrice:scanned.sale_price!=null,reset:prev.status!=='ACTIVE'||prev.misses>0});
         const isNewLowest = r.sale_price != null && (prev.lowest_price == null || r.sale_price < prev.lowest_price);
         const unchanged =
           prev.status === 'ACTIVE' && prev.misses === 0 && !isNewLowest &&
@@ -185,9 +188,12 @@ export class Store4910 {
 
         logChange.run(r.sno, date, r.sale_price, r.original_price, 'PRICE');
         diff.priceChanged++;
-        const rate = prev.sale_price > 0 ? (prev.sale_price - r.sale_price) / prev.sale_price : 0;
-        if (rate >= DROP_ALERT_RATE) {
-          diff.drops.push({ row: r, prevPrice: prev.sale_price, currentPrice: r.sale_price, dropRate: Math.round(rate * 100), isNewLowest });
+        const observation=this.observations.get(r.sno);
+        const signal=priceSignalEligibility({...observation,status:'ACTIVE',samples:observation.saleSamples},{asOfMs:Date.parse(observedAt),price:r.sale_price,basis:'SALE'});
+        const baselinePrice=r.sale_price+signal.dropAmt;
+        const rate=baselinePrice>0?signal.dropAmt/baselinePrice:0;
+        if (rate >= DROP_ALERT_RATE && signal.dropAmt>0) {
+          diff.drops.push({ row: r, prevPrice: baselinePrice, currentPrice: r.sale_price, dropRate: Math.round(rate * 100), isNewLowest });
         }
       }
       diff.drops.sort((a, b) => b.dropRate - a.dropRate);
@@ -425,6 +431,8 @@ export class Store4910 {
       for (const { sno, sale_price, coupon_price } of rows) {
         if (sale_price == null) continue;
         const cp = coupon_price ?? null;
+        const validation=this.db.prepare("SELECT checked_at,status FROM price_validations WHERE kind='scan' AND sno=? AND date=?").get(Number(sno),date);
+        if(cp!=null&&['verified','corrected'].includes(validation?.status))this.observations.price(sno,{date,at:validation.checked_at,price:cp,basis:'4910 검증가',verifiedAt:validation.checked_at});
         const p = prev.get(Number(sno), date);
         if (p && p.sale_price === sale_price && p.coupon_price === cp) del.run(Number(sno), date);
         else {
@@ -533,7 +541,7 @@ export class Store4910 {
     if (!raw) return null;
     const validation = this.db.prepare("SELECT * FROM price_validations WHERE kind='liked' AND sno=? AND date=?").get(Number(sno), raw.date);
     const price = effective4910Price({ raw, validation });
-    return price == null ? null : { ...raw, member_price: price, coupon_price: null };
+    return price == null ? null : { ...raw, member_price: price, coupon_price: null, checked_at:validation?.checked_at };
   }
 
   getGoods(sno) {

@@ -109,7 +109,7 @@ export function verifyDashboardBuild(outputPath) {
     if (!Array.isArray(L)) throw Error("missing detail history");
     const derived = model.summarize(
       { ...x, L },
-      { kind: x.kind, detail: x.detail },
+      { kind: x.kind, detail: x.detail,asOfMs:manifest.asOfMs??Date.now() },
     );
     for (const f of [
       "my",
@@ -206,7 +206,7 @@ function verifyV2(D, directory) {
   for (const x of cards.values()) {
     const L = histories.get(x.k) || [];
     L.sort((a, b) => a[0].localeCompare(b[0]));
-    const d = model.summarize({ ...x, L }, { kind: x.kind, detail: x.detail });
+    const d = model.summarize({ ...x, L }, { kind: x.kind, detail: x.detail,asOfMs:m.asOfMs??Date.now() });
     for (const f of [
       "my",
       "sale",
@@ -230,7 +230,7 @@ function verifyV2(D, directory) {
   }
   if (rows.length !== m.totalItems || cards.size !== rows.length)
     throw Error("total count mismatch");
-  const q = model.queryCatalog([...cards.values()], m.bootstrap.state);
+  const q = model.queryCatalog([...cards.values()], m.bootstrap.state,{asOfMs:m.asOfMs??Date.now()});
   for (const f of ["total", "sources", "quick", "categories", "brands"])
     if (!equal(q[f], m.bootstrap[f])) throw Error("bootstrap mismatch " + f);
   if (
@@ -266,6 +266,7 @@ function verifyV2(D, directory) {
         { items, ...facets } = model.queryCatalog(
           [...cards.values()],
           model.restoreState({ src }),
+          {asOfMs:m.asOfMs??Date.now()},
         );
       if (
         !equal(facets, p.facets) ||

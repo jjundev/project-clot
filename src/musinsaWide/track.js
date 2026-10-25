@@ -134,7 +134,7 @@ async function runRegistry({ withClient, store, date, checker, started, runDeadl
         deadline: runDeadline,
         reserve: reserve('sample', SAMPLE_PER_DAY),
         onResult: (goods, coupons) => {
-          store.putGoodsCoupons(goods.goods_no, date, coupons, goods);
+          store.putGoodsCoupons(goods.goods_no, date, coupons, {...goods, observedAt:new Date(now()).toISOString()});
           const { added, revived } = store.upsertMemberCoupons(date, coupons);
           for (const no of added) sampleAdded.push(no);
           for (const no of [...added, ...revived]) sampleFound.add(no);
@@ -227,7 +227,7 @@ export async function trackMusinsa({
   if (dryRun) return { date, categoryCounts, diff: null, coupons: null, registry: null, durationMs: now() - started };
 
   const diffs = categories.map((cat, i) => (
-    store.applyScan(date, [...scans[i].rows.values()], { cat, complete: scans[i].complete && !partial })
+    store.applyScan(date, [...scans[i].rows.values()], { cat, complete: scans[i].complete && !partial, observedAt: new Date(started).toISOString() })
   ));
   const diff = mergeDiffs(diffs, initial);
 
@@ -246,7 +246,7 @@ export async function trackMusinsa({
     log(NOT_READY_LINE);
   }
 
-  const { prices, refreshDeferred, pricing } = refreshCouponPrices({ store,date,ready,registry });
+  const { prices, refreshDeferred, pricing } = refreshCouponPrices({ store,date,ready,registry,asOfMs:now() });
   if (registry) registry.pricing = pricing;
   let { drops } = prices;
   let lateDrops = prices.lateDrops.length;

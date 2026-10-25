@@ -1,4 +1,5 @@
 import './setup-env.js';
+import {freshTracking} from './helpers/dashboard-fixture.js';
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -18,6 +19,7 @@ function fixture(t, count = 260) {
     b.add({
       src: n % 2 ? "4910" : "musinsa",
       n,
+      tracking:freshTracking(n%5?90:0,null),
       b: "Brand " + (n % 3),
       g: "Product " + n,
       c: n % 3 ? "top" : "etc",
@@ -340,6 +342,7 @@ test("partitioned verification compares facet values independently of insertion 
     b.add({
       src: "musinsa",
       n,
+      tracking:freshTracking(n%5?90:0,null),
       b: "Brand",
       g: "긴".repeat(10000),
       c: n < 3 || n === 6 || n >= 9 ? "top" : n < 6 ? "outer" : "etc",
@@ -375,10 +378,11 @@ test("new scope downloads precede the obsolete card backlog", async () => {
     ...model.summarize({
       src: n === 8 ? "4910" : "musinsa",
       n,
+      tracking:freshTracking(n%5?90:0,null),
       b: "b",
       g: "g",
       c: "top",
-      L: [],
+      L: [["2026-10-16",200,100,n%5?90:0,0,null,0]],
     }),
     card: makeRef("cards-" + n, 1),
   }));
@@ -448,7 +452,7 @@ test("direct lookup bypasses the queued whole-catalog index backlog", async () =
         b: "b",
         g: "g",
         c: "top",
-        L: [],
+        L: [["2026-10-16",200,100,n%5?90:0,0,null,0]],
       }),
       card: ref("cards-" + n),
     })),

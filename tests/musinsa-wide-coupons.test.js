@@ -454,11 +454,13 @@ test('today direct coupons override list coupons, floored to 10 won', () => {
   assert.deepEqual([...out.best], [[1, '21'], [2, '22'], [3, '11']]);
 });
 
-test('a drop caused by a coupon first seen today that started earlier goes to lateDrops', () => {
+test('a drop caused by a coupon first seen today that started earlier goes to lateDrops', t => {
+  t.mock.timers.enable({apis:['Date'],now:Date.parse(DAY+'T12:00:00Z')});
   store.applyScan('2026-10-01', [1, 2, 3, 4, 5].map((n) => goodsRow(n, 100000)), { cat: '001', complete: true });
   addCoupon(10, { rate: '5', start: '2026-10-01T00:00:00+09:00' }, '2026-10-01');
   putList(10, [1, 2, 3, 4, 5]);
   for (const n of [1,2,3,4,5]) putDirect(n, '2026-10-13', { id: 10, rate: '5' });
+  store.applyScan('2026-10-13',[1,2,3,4,5].map(n=>goodsRow(n,100000)),{cat:'001',complete:true});
   const first = applyCouponPrices({ store, date: '2026-10-13', ready: true });
   assert.deepEqual(prices(1, 2, 3, 4, 5), [95000, 95000, 95000, 95000, 95000]);
   assert.deepEqual([first.drops, first.lateDrops], [[], []]);
@@ -470,6 +472,7 @@ test('a drop caused by a coupon first seen today that started earlier goes to la
   putList(11, [1]); putList(12, [2]); putList(13, [3]); putList(14, [4]);
   for (const [n,id] of [[1,11],[2,12],[3,13],[4,14]]) putDirect(n, DAY, { id, rate: '30' });
   putDirect(5, DAY, { id: 99, rate: '30', start: '2026-10-01T00:00:00+09:00' }); // not in the registry: never late
+  store.applyScan(DAY,[1,2,3,4,5].map(n=>goodsRow(n,100000)),{cat:'001',complete:true});
   const out = applyCouponPrices({ store, date: DAY, ready: true });
   assert.deepEqual(prices(1, 2, 3, 4, 5), [70000, 70000, 70000, 70000, 70000]);
   assert.deepEqual(out.lateDrops.map((d) => [d.goods_no, d.prevPrice, d.currentPrice]), [[1, 95000, 70000]]);

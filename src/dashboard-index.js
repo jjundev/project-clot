@@ -28,6 +28,7 @@ export function createDashboardIndex(model) {
     "card",
     "searchAliases",
     "pointEstimate", "pointDiscount", "pointState", "pointCheckedAt", "pointMaxUseRate",
+    "tracking", "priceBasis", "lowCandidate", "dropEligible",
   ];
   function packIndex(items, { revision, id }) {
     const dictionaries = {};
@@ -82,7 +83,7 @@ export function createDashboardIndex(model) {
       const r = requireResult(id);
       offset = Math.max(0, offset);
       limit = Math.max(0, Math.min(120, limit));
-      const items = await loadCards(r.keys.slice(offset, offset + limit));
+      const items = (await loadCards(r.keys.slice(offset, offset + limit))).map(x=>model.refresh(x,{asOfMs:r.asOfMs}));
       requireResult(id);
       return {
         ...r.facets,
@@ -95,17 +96,17 @@ export function createDashboardIndex(model) {
       };
     }
     return {
-      async query(state, requestId) {
-        const q = model.queryCatalog(rows, state),
+      async query(state, requestId, asOfMs=Date.now()) {
+        const q = model.queryCatalog(rows, state,{asOfMs}),
           { items, ...facets } = q;
         const resultId = ++serial;
-        current = { resultId, requestId, facets, keys: items.map((x) => x.k) };
+        current = { resultId, requestId, asOfMs, facets, keys: items.map((x) => x.k) };
         return page(resultId, 0);
       },
       page,
-      async lookup(key) {
+      async lookup(key,asOfMs=Date.now()) {
         if (!byKey.has(key)) return null;
-        return (await loadCards([key]))[0] || null;
+        const item=(await loadCards([key]))[0];return item?model.refresh(item,{asOfMs}):null;
       },
       async neighbor(id, key, delta) {
         const r = requireResult(id),
@@ -115,11 +116,11 @@ export function createDashboardIndex(model) {
         if (!target) return null;
         const card = (await loadCards([target]))[0] || null;
         requireResult(id);
-        return card ? { ...card, _position: i + delta } : null;
+        return card ? { ...model.refresh(card), _position: i + delta } : null;
       },
     };
   }
-  return { packIndex, unpackIndex, createDashboardQueryEngine };
+  return { packIndex, unpackIndex, createDashboardQueryEngine, refresh: model.refresh };
 }
 const api = createDashboardIndex(createDashboardModel());
 export const { packIndex, unpackIndex, createDashboardQueryEngine } = api;

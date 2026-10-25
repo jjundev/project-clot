@@ -1,3 +1,4 @@
+import {publicTracking} from './price-observation.js';
 import {createDashboardScope} from "./dashboard-scope.js";
 import { effective4910Price, readPriceValidations } from './site4910/price-validation.js';
 /**
@@ -123,7 +124,7 @@ export function buildScan4910Index(db4910) {
   const rows = db4910
     .prepare(`
       SELECT brand_sno, MAX(brand) AS name, COUNT(*) AS n FROM goods
-      WHERE status = 'ACTIVE' ${likedFilterSql(db4910)}
+      WHERE 1=1 ${likedFilterSql(db4910)}
       GROUP BY brand_sno ORDER BY n DESC, brand_sno ASC
     `)
     .all();
@@ -175,10 +176,11 @@ export function mergeCouponHistory4910({ changes, coupons, okDates, lastScan }) 
  */
 export function buildScan4910Payload(db4910, { brandSno = null, snoFrom = null, snoTo = null, context = null } = {}) {
   const brandFilter = brandSno != null ? 'AND brand_sno = :brand' : '';
-  const where = `status = 'ACTIVE' ${likedFilterSql(db4910)} ${brandFilter} ${snoFrom!=null?'AND sno >= :lo AND sno <= :hi':''}`;
+  const where = `1=1 ${likedFilterSql(db4910)} ${brandFilter} ${snoFrom!=null?'AND sno >= :lo AND sno <= :hi':''}`;
   const params = {...(brandSno != null ? { brand: Number(brandSno) } : {}),...(snoFrom!=null?{lo:snoFrom,hi:snoTo}:{})};
+  const observationColumn=db4910.prepare("PRAGMA table_info(goods)").all().some(c=>c.name==='observation_json')?'observation_json':'NULL AS observation_json';
   const goods = db4910
-    .prepare(`SELECT sno, brand, market_name, name, image_url, first_seen_date FROM goods WHERE ${where} ORDER BY sno ASC`)
+    .prepare(`SELECT sno, brand, market_name, name, image_url, first_seen_date,status,misses,${observationColumn} FROM goods WHERE ${where} ORDER BY sno ASC`)
     .all(params);
   const changes = db4910
     .prepare(`
@@ -278,6 +280,7 @@ export function buildScan4910Payload(db4910, { brandSno = null, snoFrom = null, 
       g.first_seen_date || '',
       classifyCategory(g.name, g.brand),
       historyOf(g.sno),
+      publicTracking(g.observation_json,g.status!=='ACTIVE'?'STOPPED':g.misses>0?'RETAINED':'ACTIVE'),
     ];
   });
 
@@ -462,7 +465,7 @@ export function generateDashboardHtml({
   const gNo = digits.length > 0 ? Number(digits) : undefined;
   let payload, packaged;
   const revision = randomUUID();
-  const sink=createDashboardBuilder({outDir,revision});
+  const sink=createDashboardBuilder({outDir,revision,asOfMs});
   let total4910All = 0;
   let wide = null;
   // Fail the build on a supplied but invalid wide snapshot; never silently publish a subtotal.
@@ -470,7 +473,10 @@ export function generateDashboardHtml({
     const wideDb=new DatabaseSync(dbMusinsaPath,{readOnly:true});
     try {
       if(process.env.CLOT_REQUIRE_MUSINSA_WIDE==='1')verifyDailyCoverage(wideDb.prepare('SELECT * FROM scan_runs ORDER BY date DESC LIMIT 1').get());
-      wide=buildMusinsaCatalog(wideDb,{outDir,revision,sink,pointEstimatesEnabled,asOfMs});
+      const primaryDb=activeDb.db||activeDb;
+      const hasSource=primaryDb.prepare('PRAGMA table_info(items)').all().some(c=>c.name==='source');
+      const explicitIds=new Set(hasSource?primaryDb.prepare("SELECT goods_no FROM items WHERE source IN ('like','manual') AND status IN ('ACTIVE','SOLDOUT')").all().map(g=>g.goods_no):[]);
+      wide=buildMusinsaCatalog(wideDb,{outDir,revision,sink,pointEstimatesEnabled,asOfMs,excludeGoodsIds:explicitIds});
     } finally { wideDb.close(); }
   } else {
     if(process.env.CLOT_REQUIRE_MUSINSA_WIDE==='1')throw Error('Required Musinsa wide snapshot missing');
@@ -488,7 +494,7 @@ export function generateDashboardHtml({
       packaged = buildDashboardCatalog({
         baseItems:payload.items, scanIndex,
         readBrand:brandSno=>buildScan4910Payload(db4910,{brandSno}),
-        iterateBrand:(()=>{const context={};return function*(brandSno){const ids=db4910.prepare("SELECT sno FROM goods WHERE status='ACTIVE' AND brand_sno=? "+likedFilterSql(db4910)+" ORDER BY sno").all(brandSno);for(let i=0;i<ids.length;i+=200)yield buildScan4910Payload(db4910,{brandSno,snoFrom:ids[i].sno,snoTo:ids[Math.min(i+199,ids.length-1)].sno,context});};})(),
+        iterateBrand:(()=>{const context={};return function*(brandSno){const ids=db4910.prepare("SELECT sno FROM goods WHERE brand_sno=? "+likedFilterSql(db4910)+" ORDER BY sno").all(brandSno);for(let i=0;i<ids.length;i+=200)yield buildScan4910Payload(db4910,{brandSno,snoFrom:ids[i].sno,snoTo:ids[Math.min(i+199,ids.length-1)].sno,context});};})(),
         dir4910,revision,scanState,notice,sink,
       });
     } catch(err) {
@@ -505,10 +511,10 @@ export function generateDashboardHtml({
     payload.lastRun=wide.metadata.completedAt;
 
 
-    packaged.catalog.musinsaCount=wide.metadata.active;
+    packaged.catalog.musinsaCount=wide.metadata.exported;
   }
   const base4910=payload.total4910Base;
-  packaged=sink.finish({scanState:packaged.catalog.scanState,notice:packaged.catalog.notice,musinsaCount:wide?.metadata.active||0,scanCount:total4910All+(wide?.metadata.active||0)});
+  packaged=sink.finish({scanState:packaged.catalog.scanState,notice:packaged.catalog.notice,musinsaCount:wide?.metadata.exported||0,scanCount:total4910All+(wide?.metadata.exported||0)});
   payload.dates=payload.dates?.length?[payload.dates[0],payload.dates.at(-1)]:[];payload.runs=payload.runs?.slice(-1)||[];
   Object.assign(payload,packaged,{has4910All:packaged.catalog.scanState==='complete',total4910All});
   const total4910 = base4910 + total4910All;
