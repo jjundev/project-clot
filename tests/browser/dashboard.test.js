@@ -13,7 +13,8 @@ async function fixture(t,options={}) {
  const server=http.createServer((req,res)=>{try{const file=path.join(dir,new URL(req.url,'http://localhost').pathname);res.setHeader('Content-Type',file.endsWith('.html')?'text/html':'text/javascript');res.end(fs.readFileSync(file));}catch{res.statusCode=404;res.end();}});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));
  const browser=await chromium.launch({executablePath:process.env.CLOT_BROWSER_EXECUTABLE||undefined,headless:true});
- const page=await browser.newPage();page.setDefaultTimeout(8000);page.setDefaultNavigationTimeout(8000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const page=await browser.newPage();// Large fixtures include real observation evidence for 440k rows; allow CI to load it.
+ const readinessTimeout=options.scale?30000:8000;page.setDefaultTimeout(readinessTimeout);page.setDefaultNavigationTimeout(8000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.route(/https:\/\//,route=>route.request().url().includes('chart.umd')?route.fulfill({body:'window.Chart=class {constructor(canvas,config){canvas.dataset.chartConfig=JSON.stringify(config);} destroy(){}}',contentType:'text/javascript'}):route.abort());
  t.after(async()=>{await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r));fs.rmSync(dir,{recursive:true,force:true});assert.deepEqual(errors,[]);});
  return {page,dir,url:'http://127.0.0.1:'+server.address().port+'/index.html'};
@@ -108,7 +109,7 @@ test('440129 summaries search the final part while rendering only 120 cards',asy
  const {page,url}=await fixture(t,{scale:true});
  await page.addInitScript(()=>{window.IntersectionObserver=class {observe(){} unobserve(){}};});
  let histories=0;page.on('request',r=>{if(/\/assets\/history-/.test(r.url()))histories++;});
- await page.goto(url);await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='440,129');
+ const readyStart=performance.now();await page.goto(url);await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='440,129');t.diagnostic('scale initial search ready ms: '+Math.round(performance.now()-readyStart));
  assert.equal(await page.locator('#sMusinsa').textContent(),'626');
  assert.equal(await page.locator('#s4910').textContent(),'439,503');
  assert.equal(await page.locator('.card').count(),120);
