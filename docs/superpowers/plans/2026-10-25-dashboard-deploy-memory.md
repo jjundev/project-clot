@@ -244,4 +244,4 @@ git commit -m "ci(dashboard): measure build and verification memory separately"
 
 ## 실행 결과
 
-Native 구현과 로컬 실데이터 생성·검증을 완료했다. 세부 수치와 입력 hash는 `docs/verify/2026-10-25-dashboard-deploy-memory.md`에 기록한다. 최종 독립 리뷰에서 지적사항이 없었다. 원격 배포는 아직 실행하지 않았으며 main 통합·PR·브랜치 보존 중 선택을 사용자에게 인계한다.
+Native 구현과 로컬 실데이터 생성·검증을 완료했다. 세부 수치와 입력 hash는 `docs/verify/2026-10-25-dashboard-deploy-memory.md`에 기록한다. 최종 독립 리뷰에서 지적사항이 없었다. 후속 사용자 승인에 따라 main에 병합·push했고 Pages 실행 40151540535와 공개 URL까지 정상 확인했다.

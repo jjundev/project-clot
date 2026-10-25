@@ -1,6 +1,6 @@
 # 대시보드 배포 OOM 수정 검증 — 2026-10-25
 
-Native 방식으로 조회 함수 → 생산 adapter → Pages 계측을 구현했다. 실제 입력 430,353개 상품의 생성과 전체 asset/history 검증이 각각 4GiB V8 힙 제한에서 종료 코드 0으로 완료됐다. 4910이 포함된 `scanState=complete`이며 전체 상품 key 집합도 독립 SQL 기대값과 일치한다. 원격 Pages 게시와 Ubuntu 러너 실측은 아직 수행하지 않았다.
+Native 방식으로 조회 함수 → 생산 adapter → Pages 계측을 구현했다. 실제 입력 430,353개 상품의 생성과 전체 asset/history 검증이 각각 4GiB V8 힙 제한에서 종료 코드 0으로 완료됐다. 4910이 포함된 `scanState=complete`이며 전체 상품 key 집합도 독립 SQL 기대값과 일치한다. 후속으로 main 병합·push와 Ubuntu Pages 배포까지 완료했으며 아래에 결과를 추가했다.
 
 ## 원인과 변경
 
@@ -12,7 +12,7 @@ Pages는 생성과 검증을 별도 named step으로 분리하고 각각 `/usr/b
 
 - 기준 커밋: `c3ca69af222f37c616797da2f55eaa788a2aebe5`.
 - 작업 브랜치: `codex/dashboard-deploy-memory`.
-- 최종 검증 환경: macOS arm64, Node `v24.17.0`, 기존 Playwright `1.62.1`.
+- 로컬 검증 환경: macOS arm64, Node `v24.17.0`, 기존 Playwright `1.62.1`.
 - 최초 baseline: 기본 PATH의 Node `v26.4.0`에서 1,085/1,085 통과. 환경 차이를 확인한 뒤 최종 전체 테스트·브라우저·실데이터 생성·검증을 Node 24로 다시 실행했다. Node 26 측정값은 아래 최종 수치에 섞지 않았다.
 - Node 24 `npm test`: **1,096/1,096**, 실패·취소·skip 0. `tests/helpers/dashboard-memory-probe.js`는 독립 test로 발견되지 않는다.
 - Node 24 `npm run test:dashboard:browser`: **50/50**, 실패·취소·skip 0. HTTP/file, 440,129개 합성 목록, 상세·검색·브랜드·가격·적립금 UI 회귀를 포함한다.
@@ -97,13 +97,26 @@ CLOT_REQUIRE_MUSINSA_WIDE=1 CLOT_MUSINSA_POINTS_ENABLED=1 \
   scripts/verify-dashboard-build.js "$RUN_DIR/site/index.html"
 ```
 
-Ubuntuでは `/usr/bin/time -v`を使う。Pagesの timeout 20分・取得方針・upload前検証を維持した。ローカル生成＋検証は合計100.22秒で完了したが、Actions全体の20分以内完了は今回未確認。
+Ubuntu에서는 `/usr/bin/time -v`를 사용한다. Pages의 timeout 20분·취득 정책·업로드 전 검증을 유지했다. 로컬 생성과 검증은 합계 100.22초였다. 이후 CI job도 7분 4초로 제한 안에 완료됐다.
 
-作業データ・生ログ・独立比較スクリプトは `/tmp/clot-dashboard-verify.YyWxKf/`に保持している。入力情報 `inputs.json`、期待集合 `expected-keys.json`、比較結果 `key-comparison.json`、前後 hash `hash-comparison.json`、`build.*`、`verify.*`がある。DB本体や巨大な証拠 JSONはgitに追加していない。
+작업 데이터·생로그·독립 비교 스크립트는 `/tmp/clot-dashboard-verify.YyWxKf/`에 보존했다. 입력 정보 `inputs.json`, 기대 집합 `expected-keys.json`, 비교 결과 `key-comparison.json`, 전후 hash `hash-comparison.json`, `build.*`, `verify.*`가 있다. DB 본체와 거대한 증빙 JSON은 git에 추가하지 않았다.
 
-## 公開状態
+## 공개 상태
 
-ローカルでの実装・生成・検証は完了。mainへの統合、push、Pages実行と公開URLの確認はまだ行っていない。ローカル成功を公開成功として扱わない。
+2026-10-25 사용자의 승인에 따라 `e4e52e338db11bc4e8b3a8da53b59c9fb8919b2a`를 main에 fast-forward 병합하고 push했다. 병합된 main에서 Node 24 전체 테스트 1,096개가 통과했다. 기존 미추적 초안 두 개는 임시 디렉터리에 보존한 뒤 추적되는 최신 문서를 병합했고, `data/4910-all.js`는 그대로 유지했다.
+
+[Pages 실행 40151540535](https://github.com/jjundev/project-clot/actions/runs/40151540535/job/121044079790)은 Ubuntu·Node `v24.21.0`에서 성공했다. deploy job은 7분 4초로 20분 제한 안에 완료됐다. 배포 전 모델·빌드 테스트 134개, 브라우저 테스트 50개가 통과했다. 두 Release DB 취득, 생성, 전체 검증, artifact 업로드, Pages 게시가 모두 성공했다.
+
+| Ubuntu 프로세스 | V8 힙 상한 (MiB) | exit | real (초) | 최대 RSS (KiB) | 최대 RSS (GiB) |
+|---|---:|---:|---:|---:|---:|
+| 전체 생성 | 4096 | 0 | 64.13 | 1,809,068 | 1.73 |
+| 전체 검증 | 4096 | 0 | 55.53 | 4,488,424 | 4.28 |
+
+검증 stdout은 `{"totalItems":430353,"total4910":128611,"scanState":"complete"}`였다. 검증 RSS 4.28GiB와 V8 힙 상한 4GiB는 서로 다른 지표다. 힙을 늘리거나 데이터를 제외하지 않고 통과했다. CI가 받은 4910·wide DB 크기는 각각 1,309,908,992 / 268,201,984 bytes였다.
+
+[공개 대시보드](https://jjundev.github.io/project-clot/)의 기본 URL에서 HTTP 200을 확인했다. Last-Modified는 `2026-10-25T01:48:02Z`(10:48:02 KST), revision은 배포 전 `0d9c5b23-47be-4c0c-9a5e-7463b6260bc9`에서 `8f583af5-6c16-457e-8ece-038d24238adf`로 바뀌었다. 공개 HTML에서도 430,353개·`scanState=complete`·`has4910All=true`·적립금 enabled를 확인했다.
+
+공개 worker, robots와 index/card/history 각 1개도 HTTP 200이었다. 세 데이터 asset의 bytes·ID·revision이 공개 manifest와 일치했다. 이는 공개 경로의 표본 확인이며, 전체 asset/history 정합성은 배포 전 CI verifier가 확인했다. 공개 확인 결과는 `/tmp/clot-pages-public-40151540535.json`에 있다.
 
 ## 독립 리뷰
 
