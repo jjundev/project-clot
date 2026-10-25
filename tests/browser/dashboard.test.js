@@ -8,16 +8,16 @@ import http from 'node:http';
 import {pathToFileURL} from 'node:url';
 import {chromium} from 'playwright';
 import {writeFixture} from '../helpers/dashboard-page.js';
-async function fixture(t,options={}) {
+async function fixture(t,{basePath='/',...options}={}) {
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'clot-browser-'));writeFixture(dir,options);
- const server=http.createServer((req,res)=>{try{const file=path.join(dir,new URL(req.url,'http://localhost').pathname);res.setHeader('Content-Type',file.endsWith('.html')?'text/html':'text/javascript');res.end(fs.readFileSync(file));}catch{res.statusCode=404;res.end();}});
+ const server=http.createServer((req,res)=>{try{const pathname=new URL(req.url,'http://localhost').pathname;if(!pathname.startsWith(basePath))throw Error('outside fixture');const file=path.join(dir,pathname.slice(basePath.length)||'index.html');res.setHeader('Content-Type',file.endsWith('.html')?'text/html':'text/javascript');res.end(fs.readFileSync(file));}catch{res.statusCode=404;res.end();}});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));
  const browser=await chromium.launch({executablePath:process.env.CLOT_BROWSER_EXECUTABLE||undefined,headless:true});
  const page=await browser.newPage();// Large fixtures include real observation evidence for 440k rows; allow CI to load it.
  const readinessTimeout=options.scale?30000:8000;page.setDefaultTimeout(readinessTimeout);page.setDefaultNavigationTimeout(8000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.route(/https:\/\//,route=>route.request().url().includes('chart.umd')?route.fulfill({body:'window.Chart=class {constructor(canvas,config){canvas.dataset.chartConfig=JSON.stringify(config);} destroy(){}}',contentType:'text/javascript'}):route.abort());
  t.after(async()=>{await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r));fs.rmSync(dir,{recursive:true,force:true});assert.deepEqual(errors,[]);});
- return {page,dir,url:'http://127.0.0.1:'+server.address().port+'/index.html'};
+ return {page,dir,url:'http://127.0.0.1:'+server.address().port+basePath+'index.html'};
 }
 test('all includes every source; search and facets share the complete catalog over HTTP and file',async t=>{
  const {page,dir,url}=await fixture(t);
@@ -40,8 +40,8 @@ test('legacy source and numeric deep link preserve the selected scope',async t=>
  const {page,url}=await fixture(t);
  await page.goto(url);await page.evaluate(()=>{localStorage.setItem('clot.src','4910all');localStorage.setItem('clot.cat','bag');});
  await page.goto(url+'?goods=1');
- await page.locator('#scrim.open').waitFor();assert.equal(await page.locator('#mName').textContent(),'나이키 상품 1');
- await page.locator('#closeBtn').click();assert.equal(await page.locator('[data-src="4910"]').getAttribute('aria-pressed'),'true');
+ await page.locator('#detailView:not([hidden]) #detailContent:not([hidden])').waitFor();assert.equal(await page.locator('#mName').textContent(),'나이키 상품 1');
+ await page.locator('#detailBack').click();await page.locator('#catalogView').waitFor({state:'visible'});assert.equal(await page.locator('[data-src="4910"]').getAttribute('aria-pressed'),'true');
 });
 test('detail history failure retains summary and can retry without changing counts',async t=>{
  const {page,url}=await fixture(t);let fail=true;
@@ -64,8 +64,8 @@ test('late detail completion and catalog completion never replace the current se
  const selected=await page.locator('#mName').textContent();
  release();await page.waitForTimeout(100);
  assert.equal(await page.locator('#mName').textContent(),selected);
- await page.locator('#closeBtn').click();
- assert.equal(await page.locator('#scrim.open').count(),0);
+ await page.locator('#detailBack').click();await page.locator('#catalogView').waitFor({state:'visible'});
+ assert.equal(await page.locator('#detailView:not([hidden]) #detailContent:not([hidden])').count(),0);
 });
 test('bootstrap survives index failure and retry restores exact scoped counts',async t=>{
  const {page,url}=await fixture(t);let fail=true;
@@ -126,6 +126,8 @@ test('440129 summaries search the final part while rendering only 120 cards',asy
    timings.push(performance.now()-start);
  }
  timings.sort((a,b)=>a-b);t.diagnostic('scale UI operations ms: '+JSON.stringify({median:timings[5],max:timings.at(-1)}));
+ // Finish the last sort before asserting exact catalog counts while its DOM is suspended.
+ await page.locator('#grid[data-search-status=ready]').waitFor();
  await page.locator('.card').click();await page.waitForFunction(()=>document.querySelector('#mRows').textContent.includes('2026-10-16'));
  assert.equal(await page.locator('#shownN').textContent(),'1');assert.equal(histories,1);
 });
@@ -145,13 +147,13 @@ test('constant scan price has no lowest annotation in details or chart',async t=
 });
 test('closing after detail navigation or history retry restores the visible product card',async t=>{
  const {page,url}=await fixture(t);await page.goto(url);
- const card=page.locator('.card[data-k="4910:3"]');await card.click();await page.locator('#prevBtn').click();await page.locator('#closeBtn').click();
+ const card=page.locator('.card[data-k="4910:3"]');await card.click();await page.locator('#prevBtn').click();await page.locator('#detailBack').click();await page.locator('#catalogView').waitFor({state:'visible'});
  assert.equal(await card.evaluate(e=>e===document.activeElement),true);
  let fail=true;await page.route('**/assets/history-*.js*',r=>fail?r.abort():r.continue());
  // A fresh page ensures there is no cached successful brand history.
  await page.reload();await card.click();await page.getByRole('button',{name:'이력 다시 시도'}).waitFor();
  fail=false;await page.getByRole('button',{name:'이력 다시 시도'}).click();await page.waitForFunction(()=>document.querySelector('#mRows').textContent.includes('2026-10-16'));
- await page.locator('#closeBtn').click();assert.equal(await card.evaluate(e=>e===document.activeElement),true);
+ await page.locator('#detailBack').click();await page.locator('#catalogView').waitFor({state:'visible'});assert.equal(await card.evaluate(e=>e===document.activeElement),true);
 });
 
 test('detail lowest annotations use the latest basis and retain eligible historical lows',async t=>{
@@ -172,15 +174,13 @@ test('removing a zero-count brand keeps keyboard focus inside the open dialog',a
  assert.equal(await page.locator('#brandDialog').evaluate(e=>e.contains(document.activeElement)&&document.activeElement.offsetParent!==null),true);
  await page.keyboard.press('Tab');assert.equal(await page.locator('#brandDialog').evaluate(e=>e.contains(document.activeElement)),true);
 });
-test('a delayed deep link closes the brand dialog and transfers focus to the product',async t=>{
- const {page,url}=await fixture(t,{scale:true});
- let release;const gate=new Promise(r=>release=r);
+test('a delayed deep link shows loading then focuses the product page',async t=>{
+ const {page,url}=await fixture(t,{scale:true});let release;const gate=new Promise(r=>release=r);
  await page.route('**/assets/routes-*.js*',async r=>{await gate;await r.continue();});
- await page.goto(url+'?goods=4910:439510',{waitUntil:'domcontentloaded'});
- await page.locator('#brandTrigger').click();await page.getByRole('dialog',{name:'브랜드 선택',exact:true}).waitFor();
- release();await page.locator('#scrim.open').waitFor();
- assert.equal(await page.getByRole('dialog',{name:'브랜드 선택',exact:true}).count(),0);
- assert.equal(await page.locator('#closeBtn').evaluate(e=>e===document.activeElement),true);
+ try{await page.goto(url+'?goods=4910:439510',{waitUntil:'domcontentloaded'});await page.locator('#detailStatus').filter({hasText:'상품 조회 중'}).waitFor();
+ assert.equal(await page.locator('#catalogView').isVisible(),false);release();await page.locator('#detailContent').waitFor({state:'visible'});
+ assert.equal(await page.locator('#mName').evaluate(e=>e===document.activeElement),true);
+ }finally{release();}
 });
 
 test('explicit watched prices take precedence and wide estimates retain lazy histories on HTTP and file',async t=>{
@@ -194,10 +194,10 @@ test('explicit watched prices take precedence and wide estimates retain lazy his
  await page.locator('.card[data-k="musinsa:77"]').click();
  await page.waitForFunction(()=>document.querySelector('#mRows').textContent.includes('2026-10-16'));
  assert.match(await page.locator('#mFacts').textContent(),/추정가/);
- assert.doesNotMatch(await page.locator('#mFacts').textContent(),/역대 최저가/);
+ assert.doesNotMatch(await page.locator('#mFacts').textContent(),/수집 이력 최저가/);
  assert.match(await page.locator('#mRows').textContent(),/추정가/);
  assert.equal(await page.locator('#mPrice').textContent().then(s=>s.includes('70원')),true);
- await page.locator('#closeBtn').click();
+ await page.locator('#detailBack').click();await page.locator('#catalogView').waitFor({state:'visible'});
  }
 });
 
@@ -237,7 +237,7 @@ test('focus arriving during a pending page keeps both focus and the 360-card bou
  await page.locator('#gridMore').click();const focused=await page.locator('.card').first().getAttribute('data-k');await page.locator('.card').first().focus();await page.waitForTimeout(600);assert.ok(await page.locator('.card').count()<=360);assert.equal(await page.evaluate(()=>document.activeElement.dataset.k),focused);
 });
 test('delayed deep lookup never resets a newer search',async t=>{
- const {page,url,dir}=await fixture(t,{scale:true});const script=fs.readFileSync(path.join(dir,'dashboard-worker.js'),'utf8');await page.route('**/dashboard-worker.js*',r=>r.fulfill({contentType:'text/javascript',body:script+';const original=onmessage;onmessage=e=>{if(e.data.method==="lookup")setTimeout(()=>original(e),1500);else original(e);};'}));await page.goto(url+'?goods=4910:439510');await page.locator('#q').fill('GU 상품');await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='1');await page.waitForTimeout(1800);assert.equal(await page.locator('#scrim.open').count(),0);assert.equal(await page.locator('#q').inputValue(),'GU 상품');assert.equal(await page.locator('#shownN').textContent(),'1');
+ const {page,url,dir}=await fixture(t,{scale:true});const script=fs.readFileSync(path.join(dir,'dashboard-worker.js'),'utf8');await page.route('**/dashboard-worker.js*',r=>r.fulfill({contentType:'text/javascript',body:script+';const original=onmessage;onmessage=e=>{if(e.data.method==="lookup")setTimeout(()=>original(e),1500);else original(e);};'}));await page.goto(url+'?goods=4910:439510');await page.locator('#detailStatus').filter({hasText:'상품 조회 중'}).waitFor();await page.locator('#detailBack').click();await page.locator('#catalogView').waitFor({state:'visible'});await page.locator('#q').fill('GU 상품');await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='1');await page.waitForTimeout(1800);assert.equal(await page.locator('#detailView:not([hidden]) #detailContent:not([hidden])').count(),0);assert.equal(await page.locator('#q').inputValue(),'GU 상품');assert.equal(await page.locator('#shownN').textContent(),'1');
 });
 
 test('blocked indexes still show first cards with restored filters',async t=>{
@@ -252,13 +252,13 @@ test('unknown facet counts render dash while zero stays zero',async t=>{
  assert.equal(await page.locator('#s4910').textContent(),'—');assert.equal(await page.locator('#cntBag').textContent(),'0');
  const parts=await page.evaluate(()=>window.__CLOT_DATA__.catalog.indexParts.filter(x=>x.source==='musinsa'&&x.category==='top').map(x=>x.path));assert.equal(paths.length,parts.length);assert.ok(paths.every(p=>parts.some(x=>p.includes(x))));
 });
-test('missing direct link reports missing product',async t=>{const {page,url}=await fixture(t);await page.goto(url+'?goods=musinsa:99999');await page.locator('#catalogNotice').filter({hasText:'상품을 찾을 수 없습니다'}).waitFor();});
+test('missing direct link reports missing product',async t=>{const {page,url}=await fixture(t);await page.goto(url+'?goods=musinsa:99999');await page.locator('#detailStatus').filter({hasText:'상품을 찾을 수 없습니다'}).waitFor();});
 test('scoped performance sample distinguishes preview from search readiness',async t=>{
  const {url}=await fixture(t);const {measureDashboard}=await import('../../scripts/measure-dashboard-loading.js');const report=await measureDashboard(url,{runs:1,isolateExternal:true});const sample=report.results[0];assert.equal(sample.scenario,'musinsa-top');assert.ok(sample.firstCardsMs<=sample.searchReadyMs);assert.equal(sample.indexParts.length,1);assert.equal(sample.errors.length,0);
 });
 test('direct link outside previews opens while all search indexes are blocked',async t=>{
  const {page,url,dir}=await fixture(t,{scale:true,scaleCount:600});const D=JSON.parse(fs.readFileSync(path.join(dir,'index.html'),'utf8').match(/window\.__CLOT_DATA__ = ([^\n]+);/)[1]);assert.ok(!D.catalog.previewItems.some(x=>x.k==='4910:609'));
- await page.context().route('**/assets/index-*.js*',r=>r.abort());for(const location of [url,pathToFileURL(path.join(dir,'index.html')).href]){await page.goto(location+'?goods=4910:609');await page.locator('#scrim.open').waitFor();assert.match(await page.locator('#mName').textContent(),/LAST_SENTINEL/);}
+ await page.context().route('**/assets/index-*.js*',r=>r.abort());for(const location of [url,pathToFileURL(path.join(dir,'index.html')).href]){await page.goto(location+'?goods=4910:609');await page.locator('#detailView:not([hidden]) #detailContent:not([hidden])').waitFor();assert.match(await page.locator('#mName').textContent(),/LAST_SENTINEL/);}
 });
 test('rapid scope changes retain newest results after delayed old downloads',async t=>{
  const {page,url,dir}=await fixture(t);const D=JSON.parse(fs.readFileSync(path.join(dir,'index.html'),'utf8').match(/window\.__CLOT_DATA__ = ([^\n]+);/)[1]);const oldParts=new Set(D.catalog.indexParts.filter(x=>x.source==='4910').map(x=>x.path));let release;const gate=new Promise(r=>release=r);
@@ -266,7 +266,7 @@ test('rapid scope changes retain newest results after delayed old downloads',asy
  await page.context().route('**/assets/index-*.js*',async r=>{if([...oldParts].some(p=>r.request().url().includes(p)))await gate;await r.continue();});
  try{await page.goto(url);await page.locator('[data-src=musinsa]').click();await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready');assert.equal(await page.locator('#shownN').textContent(),'1');release();await page.waitForTimeout(100);assert.equal(await page.locator('.card').first().getAttribute('data-k'),'musinsa:2');}finally{release();}
 });
-test('a deferred chart that arrives after deep-link history redraws the current modal',async t=>{
+test('a deferred chart that arrives after deep-link history redraws the current detail page',async t=>{
  const {page,url}=await fixture(t);let release;const gate=new Promise(r=>release=r);
  await page.route('**/chart.umd.min.js',async r=>{await gate;await r.fulfill({contentType:'text/javascript',body:'window.Chart=class {constructor(canvas,config){canvas.dataset.chartConfig=JSON.stringify(config);} destroy(){}}'});});
  try{await page.goto(url+'?goods=1',{waitUntil:'commit'});await page.waitForFunction(()=>document.querySelector('#mRows')?.textContent.includes('2026-10-16'));release();await page.waitForFunction(()=>document.querySelector('#chart').dataset.chartConfig);assert.equal(await page.locator('#chartFallback').isVisible(),false);}finally{release();}
@@ -288,8 +288,8 @@ test('product search bypasses blocked indexes over HTTP and file',async t=>{
   await page.locator(coatSelector).waitFor();assert.equal(await page.locator('.card').count(),1);
   assert.equal(await page.locator('#gridMore').isVisible(),false);
   assert.match(await page.locator('#catalogNotice').textContent(),/상품번호 조회/);
-  await page.locator(coatSelector).click();await page.locator('#scrim.open').waitFor();assert.equal(await page.locator('#prevBtn').isEnabled(),false);assert.equal(await page.locator('#nextBtn').isEnabled(),false);
-  await page.locator('#mRows').filter({hasText:'2026-10-16'}).waitFor();await page.locator('#closeBtn').click();
+  await page.locator(coatSelector).click();await page.locator('#detailView:not([hidden]) #detailContent:not([hidden])').waitFor();assert.equal(await page.locator('#prevBtn').isEnabled(),false);assert.equal(await page.locator('#nextBtn').isEnabled(),false);
+  await page.locator('#mRows').filter({hasText:'2026-10-16'}).waitFor();await page.locator('#detailBack').click();await page.locator('#catalogView').waitFor({state:'visible'});
  }
 });
 test('product search preserves saved filters',async t=>{
@@ -443,9 +443,9 @@ test('독립 상품 조회의 적립금 병기, 필터 보존과 상세 재열�
   for(const q of ['2156295','https://www.musinsa.com/products/2156295']){
    await page.locator('#q').fill(q);await page.locator(coatSelector).waitFor();assert.match(await page.locator(coatSelector).textContent(),/230,830원/);
    for(let i=0;i<2;i++){
-    await page.locator(coatSelector).click();await page.locator('#scrim.open').waitFor();await page.locator('#mRows').filter({hasText:new Date().toISOString().slice(0,10)}).waitFor();
+    await page.locator(coatSelector).click();await page.locator('#detailView:not([hidden]) #detailContent:not([hidden])').waitFor();await page.locator('#mRows').filter({hasText:new Date().toISOString().slice(0,10)}).waitFor();
     assert.match(await page.locator('#mPrice').textContent(),/248,200원/);assert.match(await page.locator('#mFacts').textContent(),/230,830원.*적립금 17,370원 이상 보유 가정/);
-    assert.equal(await page.locator('#prevBtn').isEnabled(),false);assert.equal(await page.locator('#nextBtn').isEnabled(),false);await page.locator('#closeBtn').click();
+    assert.equal(await page.locator('#prevBtn').isEnabled(),false);assert.equal(await page.locator('#nextBtn').isEnabled(),false);await page.locator('#detailBack').click();await page.locator('#catalogView').waitFor({state:'visible'});
    }
    assert.deepEqual(await page.evaluate(()=>['src','cat','filter'].map(k=>localStorage.getItem('clot.'+k))),['4910','top','drop']);
   }
@@ -459,7 +459,7 @@ for(const [scenario,enabled,message] of [['RESTRICTED',true,'적립금 사용 �
    const text=await page.locator(coatSelector).textContent();if(message)assert.ok(text.includes(message));else assert.ok(!text.includes('적립금'));
    assert.ok(!text.includes('230,830원'));await page.locator(coatSelector).click();await page.locator('#mRows').filter({hasText:new Date().toISOString().slice(0,10)}).waitFor();
    const detail=await page.locator('#mFacts').textContent();if(message)assert.ok(detail.includes(message));else assert.ok(!detail.includes('적립금'));
-   await page.locator('#closeBtn').click();
+   await page.locator('#detailBack').click();await page.locator('#catalogView').waitFor({state:'visible'});
   }
  });
 }
@@ -529,4 +529,56 @@ test('mobile catalog exposes a price in the first viewport with expandable filte
  await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready');
  const box=await page.locator('.mine').first().boundingBox();assert.ok(box.y+box.height<=844);
  await page.getByText('필터',{exact:true}).click();await page.locator('#brandTrigger').click();await page.getByRole('dialog',{name:'브랜드 선택',exact:true}).waitFor();
+});
+
+test('detail is a page and browser back restores catalog',async t=>{
+ const {page,url}=await fixture(t);await page.goto(url);await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready');
+ const card=page.locator('.card[data-k="musinsa:2"]');await card.click();await page.locator('#detailView').waitFor({state:'visible'});
+ assert.equal(await page.locator('#catalogView').isVisible(),false);assert.notEqual(await page.locator('#detailView').getAttribute('role'),'dialog');
+ await page.waitForFunction(()=>document.querySelector('#mRows').textContent.includes('2026-10-16'));
+ assert.equal(await page.locator('[data-range="90"]').getAttribute('aria-pressed'),'true');assert.equal(await page.locator('body').evaluate(el=>el.style.overflow),'');
+ assert.equal(await page.locator('#mName').evaluate(el=>el===document.activeElement),true);
+ await page.goBack();await page.locator('#catalogView').waitFor({state:'visible'});assert.equal(await page.locator('#detailView').isVisible(),false);assert.equal(await card.evaluate(el=>el===document.activeElement),true);
+ await page.goForward();await page.locator('#mName').filter({hasText:'아디다스 상품 2'}).waitFor();await page.keyboard.press('Escape');await page.locator('#catalogView').waitFor({state:'visible'});
+});
+test('direct and reloaded detail return to local catalog HTTP/file',async t=>{
+ const {page,dir,url}=await fixture(t,{basePath:'/project-clot/'});
+ for(const base of [url,pathToFileURL(path.join(dir,'index.html')).href])for(const [goods,name,link] of [['1','나이키 상품 1','https://www.musinsa.com/products/1'],['4910:3','나이키 상품 3','https://4910.kr/goods/3']]){
+  const direct=base+'?goods='+goods+'&keep=1#x';await page.goto(direct);await page.locator('#mName').filter({hasText:name}).waitFor();
+  assert.equal(await page.locator('#mLink').getAttribute('href'),link);await page.reload();await page.locator('#mName').filter({hasText:name}).waitFor();
+  await page.locator('#detailBack').click();await page.locator('#catalogView').waitFor({state:'visible'});await page.locator('#catalogView').waitFor({state:'visible'});
+  const u=new URL(page.url());assert.equal(u.pathname,new URL(base).pathname);assert.equal(u.searchParams.get('keep'),'1');assert.equal(u.searchParams.has('goods'),false);assert.equal(u.hash,'#x');
+ }
+});
+test('late history after back or product change cannot reopen detail',async t=>{
+ const {page,url}=await fixture(t);let release;const gate=new Promise(r=>release=r);await page.route('**/assets/history-*.js*',async r=>{await gate;await r.continue();});
+ try{await page.goto(url);await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready');await page.locator('.card[data-k="4910:3"]').click();await page.locator('#detailView').waitFor({state:'visible'});await page.locator('#detailBack').click();await page.locator('#catalogView').waitFor({state:'visible'});await page.locator('#catalogView').waitFor({state:'visible'});release();await page.waitForTimeout(100);assert.equal(await page.locator('#detailView').isVisible(),false);await page.locator('.card[data-k="musinsa:2"]').click();await page.locator('#mName').filter({hasText:'아디다스 상품 2'}).waitFor();assert.equal(new URL(page.url()).searchParams.get('goods'),'musinsa:2');}finally{release();}
+});
+test('chart failure retains history table',async t=>{
+ const {page,url}=await fixture(t);await page.route('**/*chart.umd*',r=>r.abort());await page.goto(url+'?goods=1');await page.waitForFunction(()=>document.querySelector('#mRows').textContent.includes('2026-10-16'));
+ assert.equal(await page.locator('#chartFallback').isVisible(),true);assert.match(await page.locator('#mPrice').textContent(),/100원/);
+});
+test('detail lookup failure is visible and retryable',async t=>{
+ const {page,url}=await fixture(t,{search:true});let fail=true;await page.route('**/assets/routes-*.js*',r=>fail?r.abort():r.continue());
+ await page.goto(url+'?goods=2156295');await page.getByRole('button',{name:'상품 다시 시도',exact:true}).waitFor();assert.equal(await page.locator('#detailBack').isVisible(),true);
+ fail=false;await page.getByRole('button',{name:'상품 다시 시도',exact:true}).click();await page.locator('#mName').filter({hasText:'캐시미어'}).waitFor();
+});
+test('detail expires without rebuilding the hidden list',async t=>{
+ const {page,url}=await fixture(t);await page.clock.install();await page.goto(url);await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='5');
+ const keys=await page.locator('.card').evaluateAll(xs=>xs.map(x=>x.dataset.k));await page.locator('.card[data-k="musinsa:2"]').click();await page.waitForFunction(()=>document.querySelector('#mRows').textContent.includes('2026-10-16'));
+ await page.clock.fastForward(49*3600000);assert.match(await page.locator('#mFacts').textContent(),/갱신 지연/);assert.deepEqual(await page.locator('.card').evaluateAll(xs=>xs.map(x=>x.dataset.k)),keys);
+ await page.locator('#detailBack').click();await page.locator('#catalogView').waitFor({state:'visible'});await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='0');
+ await page.getByRole('checkbox',{name:'과거 기록 포함',exact:true}).check();await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='5');assert.equal(await page.locator('#cDrop').textContent(),'0');assert.equal(await page.locator('#cLowest').textContent(),'0');
+});
+test('detail layout fits mobile tablet desktop and mobile chart follows summary',async t=>{
+ const {page,url}=await fixture(t);for(const width of [390,768,1440]){
+ await page.setViewportSize({width,height:1000});await page.goto(url+'?goods=1');await page.waitForFunction(()=>document.querySelector('#mRows').textContent.includes('2026-10-16'));
+ assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+ const info=await page.locator('.detail-summary').boundingBox(),chart=await page.locator('.detail-history').boundingBox();
+ if(width<900){assert.ok(chart.y>info.y);if(width===390)assert.ok(chart.y<900);}else assert.ok(info.x>chart.x);
+ }
+});
+test('invalid direct goods has a local return and no product lookup',async t=>{
+ const {page,url}=await fixture(t);let lookups=0;page.on('request',r=>{if(/assets\/routes-/.test(r.url()))lookups++;});await page.goto(url+'?goods=bad&keep=1');
+ await page.locator('#detailStatus').filter({hasText:'상품번호'}).waitFor();assert.equal(lookups,0);await page.locator('#detailBack').click();await page.locator('#catalogView').waitFor({state:'visible'});await page.locator('#catalogView').waitFor({state:'visible'});assert.equal(new URL(page.url()).searchParams.get('keep'),'1');
 });

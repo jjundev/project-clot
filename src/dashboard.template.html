@@ -611,65 +611,6 @@ input {
   max-width:90ch;
   margin:8px 0
 }
-/* ─── Modal ──────────────────────────────────────────────────────── */ .scrim {
-  position:fixed;
-  inset:0;
-  z-index:60;
-  background:oklch(0.18 0.01 258 / .5);
-  display:none;
-  align-items:center;
-  justify-content:center;
-  padding:24px;
-  backdrop-filter:blur(2px);
-}
-.scrim.open {
-  display:flex
-}
-.sheet {
-  background:var(--bg);
-  border-radius:12px;
-  box-shadow:var(--shadow-lg);
-  width:min(860px,100%);
-  max-height:min(880px,92vh);
-  display:flex;
-  flex-direction:column;
-  overflow:hidden;
-}
-.sheet-head {
-  padding:20px 20px 16px;
-  border-bottom:1px solid var(--border);
-  display:flex;
-  gap:16px;
-  align-items:flex-start;
-}
-.sheet-thumb {
-  width:104px;
-  height:104px;
-  flex:none;
-  border-radius:var(--r);
-  overflow:hidden;
-  background:var(--surface);
-}
-.sheet-thumb img {
-  width:100%;
-  height:100%;
-  object-fit:cover;
-  display:block
-}
-.sheet-thumb .ph {
-  width:100%;
-  height:100%;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  color:var(--muted);
-  font-size:28px;
-  font-weight:800
-}
-.sheet-info {
-  flex:1;
-  min-width:0
-}
 .sheet-brand {
   font-size:13px;
   font-weight:700;
@@ -738,34 +679,6 @@ input {
 .fact.out {
   background:var(--surface);
   color:var(--muted)
-}
-.sheet-actions {
-  display:flex;
-  flex-direction:column;
-  gap:8px;
-  align-items:flex-end;
-  flex:none
-}
-.close-x {
-  width:34px;
-  height:34px;
-  border:1px solid var(--border);
-  background:var(--bg);
-  border-radius:var(--r);
-  cursor:pointer;
-  display:grid;
-  place-items:center;
-}
-.close-x:hover {
-  background:var(--hover);
-  border-color:var(--muted)
-}
-.close-x:active {
-  background:var(--press)
-}
-.close-x svg {
-  width:15px;
-  height:15px
 }
 .cta {
   height:38px;
@@ -933,7 +846,7 @@ input {
   font-size:13px;
   background:var(--surface);
   border-radius:var(--r);
-  margin:0 20px;
+  margin:0;
 }
 .tbl-wrap {
   padding:20px
@@ -1167,34 +1080,6 @@ td.mine-c {
   .mine {
     font-size:16px
   }
-  .scrim {
-    padding:12px
-  }
-  .sheet {
-    width:100%;
-    max-height:94dvh
-  }
-  .sheet-head {
-    padding:16px;
-    gap:12px
-  }
-  .sheet-thumb {
-    width:64px;
-    height:64px
-  }
-  .sheet-name {
-    font-size:16px
-  }
-  .sheet-actions .cta {
-    display:none
-  }
-  .cta-mobile {
-    display:flex!important;
-    margin:0 16px 16px
-  }
-  .sheet-bar {
-    padding:12px 16px
-  }
   .seg button {
     padding:0 8px
   }
@@ -1266,6 +1151,57 @@ td.mine-c {
     padding:8px 0
   }
 }
+
+.detail-page {padding-top:20px;min-height:70vh}
+.detail-nav {display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--border)}
+.detail-back {display:inline-flex;align-items:center;gap:6px;min-height:44px;border:0;background:none;padding:0 8px 0 0;font-size:13px;font-weight:650}
+.detail-back svg {width:20px;height:20px}
+.detail-layout {display:grid;grid-template-columns:minmax(0,1.45fr) minmax(280px,.8fr);gap:32px 48px;align-items:start}
+.detail-image {grid-column:1;grid-row:1;aspect-ratio:5/6;max-height:420px;width:100%;overflow:hidden;background:var(--surface-2)}
+.detail-image img {width:100%;height:100%;object-fit:contain;display:block}
+.detail-summary {grid-column:2;grid-row:1 / span 2;position:sticky;top:104px;min-width:0;overflow-wrap:anywhere}
+.detail-summary .sheet-brand {font-size:15px;margin-bottom:10px}
+.detail-summary .sheet-name {font-size:25px;line-height:1.45;letter-spacing:-.03em;font-weight:650;margin:0 0 8px}
+.detail-summary .sheet-no {font-size:12px}
+.price-caption {font-size:12px;color:var(--muted);margin:28px 0 4px}
+.detail-summary .sheet-price {margin:0;gap:10px;padding-bottom:20px;border-bottom:1px solid var(--border)}
+.detail-summary .sheet-price .now {font-size:32px;order:-1}
+.detail-summary .sheet-facts {display:flex;flex-direction:column;align-items:stretch;margin:16px 0 24px;gap:0}
+.detail-summary .fact {display:block;padding:10px 0;border-radius:0;background:none;font-size:12px;border-bottom:1px solid var(--border);line-height:1.6}
+.detail-summary .fact.low {font-size:14px;color:var(--down)}
+.detail-summary .cta {display:flex;justify-content:center;min-height:48px;width:100%;background:var(--fg);color:var(--fg-invert);border-radius:2px}
+.detail-summary .cta:hover {background:var(--fg-hover)}
+.detail-history {grid-column:1;grid-row:2;min-width:0}
+.detail-history h2 {font-size:19px;margin:0 0 16px;letter-spacing:-.02em}
+.detail-history .sheet-bar {padding:0 0 16px;border:0}
+.detail-history .chart-wrap {padding:20px 0;background:var(--surface)}
+.detail-history .chart-box {height:280px;margin:0 16px}
+.detail-history .chart-fallback {margin:0 16px}
+.detail-history .legend {padding:16px;font-size:11px;gap:12px}
+.detail-history .tbl-wrap {padding:24px 0;max-width:100%;overflow-x:auto}
+#detailStatus {padding:28px 0;color:var(--muted)}
+.step {width:44px;height:44px}
+.seg {border-radius:2px;max-width:100%}
+.seg button {min-height:40px;border-radius:2px}
+@media(max-width:899px){
+ .detail-layout {grid-template-columns:128px minmax(0,1fr);gap:24px}
+ .detail-image {grid-column:1;grid-row:1;max-height:154px}
+ .detail-summary {grid-column:2;grid-row:1;position:static}
+ .detail-history {grid-column:1 / -1;grid-row:2}
+ .detail-summary .sheet-name {font-size:21px}
+ .detail-summary .sheet-price .now {font-size:26px}
+ .detail-summary .sheet-facts {margin:12px 0}
+ .price-caption {margin-top:16px}
+}
+@media(max-width:639px){
+ .detail-page {padding-top:12px}.detail-nav {margin-bottom:20px;padding-bottom:12px}.stepper .pos {min-width:40px;font-size:11px}
+ .detail-layout {grid-template-columns:76px minmax(0,1fr);gap:16px}.detail-image {max-height:92px}
+ .detail-summary .sheet-name {font-size:18px}.detail-summary .sheet-brand {font-size:13px;margin-bottom:4px}.detail-summary .sheet-price .now {font-size:24px}
+ .detail-summary .fact {font-size:11px;padding:7px 0}.detail-summary .fact.low {font-size:12px}.detail-summary .sheet-price {padding-bottom:10px}
+ .detail-history {margin-top:12px}.detail-history .chart-box {height:220px}.detail-history .chart-wrap {padding:12px 0}
+ .detail-history table {min-width:560px}.seg button {padding:0 12px}.detail-summary .cta {font-size:12px}
+}
+
 </style>
 </head>
 <body>
@@ -1380,33 +1316,8 @@ td.mine-c {
   <div class="search"><input id="brandSearch" type="search" aria-label="브랜드 찾기" placeholder="브랜드 찾기" autocomplete="off"></div>
   <div class="brand-options" id="brandOptions"></div>
 </dialog>
-<div class="scrim" id="scrim"  role="dialog" aria-modal="true" aria-labelledby="mName" data-od-id="detail-modal">
-  <div class="sheet" id="sheet">
-    <div class="sheet-head">
-      <div class="sheet-thumb" id="mThumb"></div>
-      <div class="sheet-info">
-        <div class="sheet-brand" id="mBrand"></div>
-        <h2 class="sheet-name" id="mName"></h2>
-        <div class="sheet-no" id="mNo"></div>
-        <div class="sheet-price" id="mPrice"></div>
-        <div class="sheet-facts" id="mFacts"></div>
-      </div>
-      <div class="sheet-actions">
-        <button class="close-x" id="closeBtn" type="button" aria-label="닫기 (ESC)">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="m5.5 5.5 9 9m0-9-9 9"/></svg>
-        </button>
-        <a class="cta" id="mLink" href="#" target="_blank" rel="noopener noreferrer" data-od-id="modal-cta">무신사에서 보기 ↗</a>
-      </div>
-    </div>
-
-    <div class="sheet-bar">
-      <div class="seg" role="group" aria-label="기간 선택" data-od-id="period-tabs">
-        <button type="button" data-range="90" aria-pressed="true">90일</button>
-        <button type="button" data-range="0" aria-pressed="false">전체</button>
-        <button type="button" data-range="30" aria-pressed="false">30일</button>
-        <button type="button" data-range="14" aria-pressed="false">14일</button>
-        <button type="button" data-range="7" aria-pressed="false">7일</button>
-      </div>
+<main class="detail-page shell" id="detailView" hidden aria-labelledby="mName">
+  <div class="detail-nav"><button type="button" class="detail-back" id="detailBack"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m12 4-6 6 6 6"/></svg>목록으로</button>
       <div class="stepper" data-od-id="modal-stepper">
         <button class="step" id="prevBtn" type="button" aria-label="이전 상품 (←)">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4.5 6.5 10 12 15.5"/></svg>
@@ -1416,10 +1327,30 @@ td.mine-c {
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4.5 13.5 10 8 15.5"/></svg>
         </button>
       </div>
+  </div>
+  <p id="detailStatus" role="status" tabindex="-1"></p>
+  <div class="detail-layout" id="detailContent" hidden>
+    <div class="detail-image" id="mThumb"></div>
+    <div class="detail-summary">
+      <div class="sheet-brand" id="mBrand"></div>
+      <h1 class="sheet-name" id="mName" tabindex="-1"></h1>
+      <div class="sheet-no" id="mNo"></div>
+      <p class="price-caption">현재 혜택 적용 가격</p>
+      <div class="sheet-price" id="mPrice"></div>
+      <div class="sheet-facts" id="mFacts"></div>
+      <a class="cta" id="mLink" href="#" target="_blank" rel="noopener noreferrer">무신사에서 보기 ↗</a>
+      <a id="mLinkMobile" hidden href="#" target="_blank" rel="noopener noreferrer">무신사에서 보기 ↗</a>
     </div>
-
-    <div class="sheet-body">
-      <a class="cta cta-mobile" id="mLinkMobile" href="#" target="_blank" rel="noopener noreferrer">무신사에서 보기 ↗</a>
+    <section class="detail-history" aria-label="가격 이력">
+      <h2>가격 추이</h2><div class="sheet-bar">
+      <div class="seg" role="group" aria-label="기간 선택" data-od-id="period-tabs">
+        <button type="button" data-range="90" aria-pressed="true">90일</button>
+        <button type="button" data-range="0" aria-pressed="false">전체</button>
+        <button type="button" data-range="30" aria-pressed="false">30일</button>
+        <button type="button" data-range="14" aria-pressed="false">14일</button>
+        <button type="button" data-range="7" aria-pressed="false">7일</button>
+      </div>
+      </div>
       <div class="chart-wrap">
         <div class="chart-box"><canvas id="chart"></canvas></div>
         <div class="chart-fallback" id="chartFallback">차트를 불러오지 못했습니다</div>
@@ -1440,9 +1371,9 @@ td.mine-c {
           <tbody id="mRows"></tbody>
         </table>
       </div>
-    </div>
+    </section>
   </div>
-</div>
+</main>
 <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script>
 /* ══ 데이터 (빌드 시 인라인 주입 — file:// CORS 회피, 기획 S3) ══ */
@@ -1472,9 +1403,6 @@ td.mine-c {
   function store(k, v) {
     try { if (v === undefined) return localStorage.getItem(LS + k); localStorage.setItem(LS + k, v); }
     catch (e) { return null; }
-  }
-  function setUrl(qs) {
-    try { history.replaceState(null, '', location.pathname + (qs || '')); } catch (e) { /* opaque origin */ }
   }
 
   /* __CLOT_NAVIGATION__ */
@@ -1526,9 +1454,9 @@ td.mine-c {
     if(location.protocol!=='file:')return fetch(ref.path+'?v='+encodeURIComponent(D.catalog.revision),{signal:AbortSignal.timeout(15000)}).then(function(r){if(!r.ok)throw Error('파일 요청 실패');return r.text();}).then(function(text){(0,eval)(text);var payload=(globalThis.__CLOT_ASSETS__||{})[ref.id];delete globalThis.__CLOT_ASSETS__[ref.id];return {payload:payload,bytes:new TextEncoder().encode(text).length};});
     return new Promise(function(resolve,reject){var tag=document.createElement('script'),timer=setTimeout(function(){finish(Error('파일 요청 시간 초과'));},15000),done=false;function finish(error){if(done)return;done=true;clearTimeout(timer);tag.remove();var p=(globalThis.__CLOT_ASSETS__||{})[ref.id];if(globalThis.__CLOT_ASSETS__)delete globalThis.__CLOT_ASSETS__[ref.id];if(error||!p)reject(error||Error('파일 내용 없음'));else resolve({payload:p,bytes:ref.bytes});}tag.onload=function(){finish();};tag.onerror=function(){finish(Error('파일 요청 실패'));};tag.src=ref.path+'?v='+encodeURIComponent(D.catalog.revision);document.head.appendChild(tag);});
   }
-  var searchMode='empty',previousCards=false;
+  var searchMode='empty',previousCards=false,detailActive=false,catalogDirty=false,catalogRestoring=false;
   var isV2=D.catalog.v===2,queryToken=0,pageBusy=false,firstOffset=0,topHeight=0;
-  var runtime = window.__CLOT_RUNTIME_FACTORY__({model:model,baseItems:D.items,inlineHistories:D.inlineHistories,manifest:D.catalog,loadScript:loadDataScript,loadAsset:loadAsset,createWorker:isV2&&location.protocol!=='file:'?function(file){return new Worker(file+'?v='+encodeURIComponent(D.catalog.revision));}:null,onChange:function(data){if(searchMode==='product'||searchMode==='invalid')return;if(!isV2)render();else if(data.status==='error'){grid.dataset.searchStatus='error';showStatus(data,true);}}});
+  var runtime = window.__CLOT_RUNTIME_FACTORY__({model:model,baseItems:D.items,inlineHistories:D.inlineHistories,manifest:D.catalog,loadScript:loadDataScript,loadAsset:loadAsset,createWorker:isV2&&location.protocol!=='file:'?function(file){return new Worker(file+'?v='+encodeURIComponent(D.catalog.revision));}:null,onChange:function(data){if(detailActive){catalogDirty=true;return;}if(searchMode==='product'||searchMode==='invalid')return;if(!isV2)render();else if(data.status==='error'){grid.dataset.searchStatus='error';showStatus(data,true);}}});
   var topSpacer=document.createElement('div');topSpacer.id='gridTopSpacer';grid.before(topSpacer);
 
   var brandDialog=document.getElementById('brandDialog'),brandTrigger=document.getElementById('brandTrigger');
@@ -1536,7 +1464,7 @@ td.mine-c {
   function closeBrand(){if(brandDialog.open)brandDialog.close();}
   brandTrigger.addEventListener('click',function(){brandDialog.showModal();brandOptionKeys='';renderBrandBar();brandSearch.focus();});
   document.getElementById('brandClose').addEventListener('click',closeBrand);
-  brandDialog.addEventListener('close',function(){if(!scrim||!scrim.classList.contains('open'))brandTrigger.focus();});
+  brandDialog.addEventListener('close',function(){if(!detailActive)brandTrigger.focus({preventScroll:true});});
   brandDialog.addEventListener('click',function(e){
     if(e.target!==brandDialog)return;
     var r=brandDialog.getBoundingClientRect();
@@ -1689,6 +1617,7 @@ td.mine-c {
     pending.then(function(result){if(token!==queryToken)return;paintProduct(result.item,'ready',result.item?'':'현재 대시보드에 등록된 상품이 없습니다');}).catch(function(error){if(token!==queryToken||error.code==='STALE_RESULT')return;paintProduct(null,'error','상품을 조회하지 못했습니다');});
   }
   function render() {
+    if(detailActive){catalogDirty=true;return;}
     var parsed=model.parseSearchInput(state.q),token=++queryToken;
     setSearchMode(parsed.type);
     if(parsed.type==='invalid'){paintProduct(null,'invalid',parsed.message);return;}
@@ -1766,6 +1695,7 @@ td.mine-c {
 
   var moreBtn = document.getElementById('gridMore');
   async function renderMore() {
+    if(detailActive||catalogRestoring)return;
     if(isV2){
       if(!lastQuery||pageBusy||(view.length>=360&&grid.contains(document.activeElement)))return;
       if(shown<view.length){grid.insertAdjacentHTML('beforeend',view.slice(shown,shown+PAGE).map(cardHtml).join(''));shown=Math.min(shown+PAGE,view.length);}
@@ -1791,7 +1721,7 @@ td.mine-c {
   // Re-observing after each page forces a fresh callback, so a button still within the margin keeps filling
   // instead of waiting for a leave/enter transition that never comes.
   var moreIo = window.IntersectionObserver ? new IntersectionObserver(function (entries) {
-    if (!entries[entries.length - 1].isIntersecting || moreBtn.hidden) return;
+    if (detailActive||catalogRestoring||!entries[entries.length - 1].isIntersecting || moreBtn.hidden) return;
     renderMore();
     moreIo.unobserve(moreBtn); moreIo.observe(moreBtn);
   }, { rootMargin: '600px' }) : null;
@@ -1868,18 +1798,111 @@ td.mine-c {
   });
   applyTheme(store('theme') || 'light');
 
-  /* ── 모달 ───────────────────────────────────────────────── */
-  var scrim = document.getElementById('scrim');
-  var modalItem = null, chart = null, range = 90, lastFocus = null;
+  var detailView=document.getElementById('detailView'),catalogView=document.getElementById('catalogView');
+  var detailContent=document.getElementById('detailContent'),detailStatus=document.getElementById('detailStatus');
+  var modalItem=null,chart=null,range=90,detailToken=0,routeKey=null,catalogSnapshot=null;
+  var catalogTitle=document.title;
+  try{history.scrollRestoration='manual';}catch(e){}
+  var navigation=window.__CLOT_NAVIGATION_FACTORY__({window:window,model:model,onRoute:applyRoute});
   document.querySelector('script[src*="chart.umd.min.js"]').addEventListener('load',function(){
-    if(modalItem&&modalItem.historyLoaded&&scrim.classList.contains('open'))drawChart(modalItem);
+    if(detailActive&&modalItem&&modalItem.historyLoaded)drawChart(modalItem);
   });
-
+  function captureCatalog(){
+    var focus=document.activeElement,card=focus&&focus.closest('.card');
+    catalogSnapshot={scrollY:window.scrollY,focus:focus,key:card&&card.dataset.k,anchorY:card&&card.getBoundingClientRect().top,offset:firstOffset,height:topHeight,length:view.length};
+  }
+  function applyRoute(route){
+    if(route.type==='catalog'){returnToCatalog();return;}
+    if(!detailActive){
+      captureCatalog();catalogDirty=catalogDirty||pageBusy||grid.dataset.searchStatus!=='ready';
+      ++queryToken;pageBusy=false;
+    }
+    detailActive=true;catalogView.hidden=true;detailView.hidden=false;closeBrand();
+    if(moreIo)moreIo.unobserve(moreBtn);
+    window.scrollTo(0,0);
+    if(route.type==='invalid'){
+      ++detailToken;routeKey=null;modalItem=null;detailContent.hidden=true;
+      detailStatus.hidden=false;detailStatus.textContent=route.message;detailStatus.focus();return;
+    }
+    routeKey=route.key;showDetail(route.key,route.brand);
+  }
+  function restoreCatalogPosition(snapshot,changed){
+    if(detailActive)return;
+    var cards=Array.from(grid.querySelectorAll('.card'));
+    var card=snapshot&&cards.find(function(el){return el.dataset.k===snapshot.key;});
+    var focus=card||(snapshot&&snapshot.focus&&snapshot.focus.isConnected&&!snapshot.focus.closest('#detailView')?snapshot.focus:null);
+    if(!focus||focus.offsetParent===null)focus=cards[0]||qEl;
+    focus.focus({preventScroll:true});
+    var y=snapshot?snapshot.scrollY:0;
+    if(changed&&card&&snapshot.anchorY!=null)y=window.scrollY+card.getBoundingClientRect().top-snapshot.anchorY;
+    window.scrollTo(0,y);
+    if(moreIo)moreIo.observe(moreBtn);
+  }
+  async function returnToCatalog(){
+    var wasDetail=detailActive,snapshot=catalogSnapshot;
+    detailActive=false;++detailToken;routeKey=null;modalItem=null;
+    if(chart){chart.destroy();chart=null;}
+    detailView.hidden=true;catalogView.hidden=false;document.title=catalogTitle;
+    if(!wasDetail)return;
+    var dirty=catalogDirty;catalogDirty=false;
+    if(dirty&&isV2){
+      var token=++queryToken;catalogRestoring=true;
+      try{
+        var query=await runtime.query(state);if(token!==queryToken||detailActive)return;
+        var target=Math.min(snapshot?.offset||0,Math.max(0,Math.floor((query.total-1)/PAGE)*PAGE));
+        var count=Math.min(360,Math.max(PAGE,snapshot?.length||PAGE));
+        var offsets=[];for(var i=target;i<Math.min(query.total,target+count);i+=PAGE)offsets.push(i);
+        var pages=await Promise.all(offsets.map(function(offset){return offset===0?Promise.resolve(query):runtime.page(query.resultId,offset);}));
+        if(token!==queryToken||detailActive)return;
+        var items=pages.flatMap(function(page){return page.items;});
+        paint(Object.assign({},query,{items:items,nextOffset:null}),runtime.getState(),false);
+        view=items;shown=items.length;firstOffset=target;topHeight=target?(snapshot?.height||0):0;topSpacer.style.height=topHeight+'px';
+        lastQuery=query;lastQuery.nextOffset=target+items.length<query.total?target+items.length:null;
+        grid.innerHTML=items.length?items.map(cardHtml).join(''):'<div class="empty"><b>현재 조건에 맞는 상품이 없습니다</b>검색 조건을 바꾸거나 ‘과거 기록 포함’을 선택해 보세요.</div>';
+        document.getElementById('renderedN').textContent=fmt(items.length);grid.dataset.searchStatus='ready';
+        moreBtn.hidden=lastQuery.nextOffset==null;moreBtn.textContent='더 보기 (남은 '+fmt(Math.max(0,query.total-target-items.length))+'개)';
+      }catch(error){if(token===queryToken&&!detailActive){grid.dataset.searchStatus='error';showStatus({...runtime.getState(),status:'error',error:error.message},true);}}
+      finally{catalogRestoring=false;}
+    }else if(dirty){render();}
+    if(detailActive)return;
+    restoreCatalogPosition(snapshot,dirty);
+  }
+  async function showDetail(key,brand){
+    var token=++detailToken;
+    modalItem=null;detailContent.hidden=true;detailStatus.hidden=false;detailStatus.textContent='상품 조회 중…';detailStatus.focus({preventScroll:true});
+    document.getElementById('prevBtn').disabled=true;document.getElementById('nextBtn').disabled=true;
+    if(chart){chart.destroy();chart=null;}
+    var it;
+    try{
+      it=isV2?(view.find(function(x){return x.k===key;})||(D.catalog.previewItems||D.items).find(function(x){return x.k===key;})||await runtime.lookup(key)):runtime.getCatalog().items.find(function(x){return x.k===key;});
+      if(!it&&!isV2){await runtime.ensureCatalog();it=runtime.getCatalog().items.find(function(x){return x.k===key;});}
+    }catch(error){
+      if(token!==detailToken||!detailActive)return;
+      detailStatus.innerHTML='상품을 조회하지 못했습니다 · <button type="button" data-retry-detail>상품 다시 시도</button>';return;
+    }
+    if(token!==detailToken||!detailActive)return;
+    if(!it){detailStatus.textContent='상품을 찾을 수 없습니다';return;}
+    modalItem=Object.assign({},it,{L:[],historyLoaded:false});range=90;
+    detailStatus.hidden=true;detailContent.hidden=false;
+    document.getElementById('chartFallback').style.display='none';
+    document.getElementById('chart').parentNode.style.display='none';
+    fillModal(modalItem);document.title=it.g+' · CLOT';document.getElementById('mName').focus({preventScroll:true});
+    document.getElementById('mRows').innerHTML='<tr><td colspan="7">가격 이력 불러오는 중…</td></tr>';
+    try{
+      var rows=await runtime.getHistory(key,isV2?{days:range}:undefined);
+      if(token!==detailToken||!detailActive||!modalItem)return;
+      modalItem=Object.assign({},it,{L:isV2?rows.rows:rows,anchor:isV2?rows.anchor:null,historyLoaded:true});fillModal(modalItem);
+    }catch(error){
+      if(token!==detailToken||!detailActive||!modalItem)return;
+      document.getElementById('mRows').innerHTML='<tr><td colspan="7">가격 이력을 불러오지 못했습니다 <button type="button" id="retryHistory">이력 다시 시도</button></td></tr>';
+      document.getElementById('retryHistory').onclick=function(){isV2?loadRange():showDetail(key,brand);};
+    }
+  }
+  detailStatus.addEventListener('click',function(e){if(e.target.closest('[data-retry-detail]')&&routeKey)showDetail(routeKey);});
   document.getElementById('catalogNotice').addEventListener('click',function(e){if(e.target.closest('[data-retry-catalog]'))(isV2||searchMode==='product')?render():runtime.retryCatalog();});
-  grid.addEventListener('click', function (e) {
+  grid.addEventListener('click',function(e){
     if(e.target.closest('[data-retry-catalog]')){(isV2||searchMode==='product')?render():runtime.retryCatalog();return;}
-    var c = e.target.closest('.card');
-    if (c) openModal(c.dataset.k);
+    var card=e.target.closest('.card');if(card){var item=view.find(function(x){return x.k===card.dataset.k;});navigation.open({key:card.dataset.k,brand:item?.bs??null});}
   });
 
   function updateStepper(i) {
@@ -1890,67 +1913,16 @@ td.mine-c {
     document.getElementById('mPos').textContent = i >= 0 ? (i + 1) + ' / ' + view.length : '—';
   }
 
-  var detailToken=0;
-  async function openModal(key,withinResult) {
-    closeBrand();
-    key=model.resolveKey(key);
-    var token=++detailToken,selectionQuery=JSON.stringify(state);
-    var it;try{it=isV2?(D.catalog.previewItems||D.items).find(function(x){return x.k===key;})||await runtime.lookup(key):runtime.getCatalog().items.find(function(x){return x.k===key;});}catch(error){return;}
-    if(token!==detailToken||selectionQuery!==JSON.stringify(state))return;
-    if(!it&&isV2){detailNotice='상품을 찾을 수 없습니다';showStatus(runtime.getState(),false);return;}
-    if(!it){
-      await runtime.ensureCatalog();if(token!==detailToken)return;
-      it=runtime.getCatalog().items.find(function(x){return x.k===key;});
-    }
-    if(!it)return;
-    closeBrand();
-    if(!isV2&&!withinResult&&!view.some(function(x){return x.k===key;})){
-      state.filter='all';state.cat='all';state.brandKeys=[];state.q='';qEl.value='';state.src='all';
-      runtime.ensureCatalog();
-      render();
-    }
-    if(!scrim.classList.contains('open'))lastFocus=document.activeElement;
-    modalItem=Object.assign({},it,{L:[],historyLoaded:false});range=90;
-    fillModal(modalItem);
-    scrim.classList.add('open');document.body.style.overflow='hidden';
-    document.querySelector('.sheet-body').scrollTop=0;document.getElementById('closeBtn').focus();setUrl(goodsQs(it));
-    document.getElementById('mRows').innerHTML='<tr><td colspan="7">가격 이력 불러오는 중…</td></tr>';
-    try {
-      var rows=await runtime.getHistory(key,isV2?{days:range}:undefined);if(token!==detailToken||!modalItem)return;
-      modalItem=Object.assign({},it,{L:isV2?rows.rows:rows,anchor:isV2?rows.anchor:null,historyLoaded:true});fillModal(modalItem);
-    }catch(error){
-      if(token!==detailToken||!modalItem)return;
-      document.getElementById('mRows').innerHTML='<tr><td colspan="7">가격 이력을 불러오지 못했습니다 <button type="button" id="retryHistory">이력 다시 시도</button></td></tr>';
-      document.getElementById('retryHistory').onclick=function(){openModal(key);};
-    }
-  }
-  // A scanned listing's link names its brand file so a reload can fetch it again.
-  function goodsQs(it) { return '?goods=' + it.k + (it.bs != null ? '&brand=' + it.bs : ''); }
-  function closeModal() {
-    ++detailToken;
-    scrim.classList.remove('open');
-    document.body.style.overflow = '';
-    if (chart) { chart.destroy(); chart = null; }
-    var closingKey=modalItem&&modalItem.k;
-    modalItem = null;
-    setUrl('');
-    if(lastFocus&&lastFocus.isConnected&&!scrim.contains(lastFocus)&&lastFocus.offsetParent!==null&&lastFocus!==document.body)lastFocus.focus();
-    else {
-      var card=[].find.call(grid.querySelectorAll('.card'),function(el){return el.dataset.k===closingKey;});
-      (card||qEl).focus();
-    }
-  }
   async function stepTo(delta) {
-    if(isV2){if(!modalItem||!lastQuery?.resultId)return;try{var token=detailToken,next=await runtime.neighbor(lastQuery.resultId,modalItem.k,delta);if(token===detailToken&&next)openModal(next.k,true);}catch(error){}return;}
+    if(isV2){if(!modalItem||!lastQuery?.resultId)return;try{var token=detailToken,next=await runtime.neighbor(lastQuery.resultId,modalItem.k,delta);if(token===detailToken&&next)navigation.replace({key:next.k,brand:next.bs??null});}catch(error){}return;}
     var i = view.findIndex(function(x){return x.k===modalItem.k;});
     if (i < 0) return;
     var j = i + delta;
     if (j < 0 || j >= view.length) return;
-    openModal(view[j].k);
+    navigation.replace({key:view[j].k,brand:view[j].bs??null});
   }
 
-  document.getElementById('closeBtn').addEventListener('click', closeModal);
-  scrim.addEventListener('mousedown', function (e) { if (e.target === scrim) closeModal(); });
+  document.getElementById('detailBack').addEventListener('click',function(){navigation.backToList();});
   document.getElementById('prevBtn').addEventListener('click', function () { stepTo(-1); });
   document.getElementById('nextBtn').addEventListener('click', function () { stepTo(1); });
   document.querySelectorAll('.seg button').forEach(function (b) {
@@ -1972,24 +1944,16 @@ td.mine-c {
     catch(error){if(token!==detailToken)return;document.getElementById('mRows').innerHTML='<tr><td colspan="7">가격 이력을 불러오지 못했습니다 <button type="button" id="retryHistory">이력 다시 시도</button></td></tr>';document.getElementById('retryHistory').onclick=loadRange;}
   }
   window.addEventListener('scroll',async function(){
-    if(!isV2||!firstOffset||pageBusy||grid.contains(document.activeElement)||!lastQuery?.resultId||window.scrollY>topSpacer.offsetTop+topHeight+100)return;
+    if(detailActive||catalogRestoring||!isV2||!firstOffset||pageBusy||grid.contains(document.activeElement)||!lastQuery?.resultId||window.scrollY>topSpacer.offsetTop+topHeight+100)return;
     pageBusy=true;var token=queryToken,target=window.scrollY<=topSpacer.offsetTop?0:firstOffset-120;try{var pages=await Promise.all([0,120,240].filter(function(i){return target+i<lastQuery.total;}).map(function(i){return runtime.page(lastQuery.resultId,target+i);}));if(token!==queryToken)return;firstOffset=target;view=pages.flatMap(function(p){return p.items;});grid.innerHTML=view.map(cardHtml).join('');shown=view.length;topHeight=target===0?0:Math.max(0,topHeight-grid.getBoundingClientRect().height/3);topSpacer.style.height=topHeight+'px';lastQuery.nextOffset=firstOffset+view.length<lastQuery.total?firstOffset+view.length:null;}catch(error){}finally{pageBusy=false;}
   },{passive:true});
   document.addEventListener('keydown', function (e) {
     if(brandDialog.open&&e.key==='Escape'){e.preventDefault();closeBrand();return;}
-    if (e.key === 'Escape' && scrim.classList.contains('open')) { e.preventDefault(); closeModal(); return; }
-    if (scrim.classList.contains('open')) {
-      if (e.key === 'ArrowLeft') { e.preventDefault(); stepTo(-1); }
-      if (e.key === 'ArrowRight') { e.preventDefault(); stepTo(1); }
-      if (e.key === 'Tab') {
-        var f = [].slice.call(document.getElementById('sheet').querySelectorAll(
-          'a[href],button:not([disabled]),input,select,[tabindex]:not([tabindex="-1"])'))
-          .filter(function (el) { return el.offsetParent !== null; });
-        if (!f.length) return;
-        var first = f[0], last = f[f.length - 1];
-        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-      }
+    if(e.key==='Escape'&&detailActive){e.preventDefault();navigation.backToList();return;}
+    if(detailActive){
+      if(e.target.closest('input,textarea,select,a,button,[contenteditable="true"]'))return;
+      if(e.key==='ArrowLeft'){e.preventDefault();stepTo(-1);}
+      if(e.key==='ArrowRight'){e.preventDefault();stepTo(1);}
       return;
     }
     if(brandDialog.open)return;
@@ -2008,10 +1972,11 @@ td.mine-c {
     var on4910 = is4910(it);
     var linkTxt = on4910 ? '4910에서 보기 ↗' : '무신사에서 보기 ↗';
     // is-4910 reveals the 신규회원가 column, which only liked listings carry.
-    document.getElementById('sheet').classList.toggle('is-4910', it.kind === 'liked');
-    document.getElementById('mLink').href = it.u;
+    detailContent.classList.toggle('is-4910', it.kind === 'liked');
+    var sourceUrl=it.u||(on4910?'https://4910.kr/goods/':'https://www.musinsa.com/products/')+it.n;
+    document.getElementById('mLink').href = sourceUrl;
     document.getElementById('mLink').textContent = linkTxt;
-    document.getElementById('mLinkMobile').href = it.u;
+    document.getElementById('mLinkMobile').href = sourceUrl;
     document.getElementById('mLinkMobile').textContent = linkTxt;
 
     var pr = document.getElementById('mPrice'), fx = document.getElementById('mFacts');
@@ -2029,6 +1994,7 @@ td.mine-c {
       if (on4910 && it.vd) f.push('<span class="fact">' + (it.my == null ? '검토일 ' : '검증일 ') + esc(new Date(it.vd).toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })) + '</span>');
       if(it.kind!=='wide'||it.lowEligible)f.push('<span class="fact' + (it.isLow ? ' low' : '') + '">수집 이력 최저가 <b class="num">' + won(it.lowMy) +
         '</b> · ' + md(it.lowDate) + '</span>');
+      if(it.dropAmt>0)f.push('<span class="fact low">직전 관측 대비 <b>−'+won(it.dropAmt)+'</b></span>');
       f.push('<span class="fact">' + (on4910 ? '4910 표시가' : '무신사 판매가') + ' <b class="num">' + won(it.sale) + '</b></span>');
       if (it.newbie != null) f.push('<span class="fact">쿠폰적용가(신규회원 기준) <b class="num">' + won(it.newbie) + '</b></span>');
       if (it.coupon > 0) f.push('<span class="fact">' + esc(it.couponName || '쿠폰') + ' <b class="num">−' + won(it.coupon) + '</b></span>');
@@ -2224,17 +2190,16 @@ td.mine-c {
   else window.addEventListener('resize',measureHeader);
   function refreshPrices() {
     if(document.hidden)return;
+    if(detailActive){catalogDirty=true;if(modalItem)fillModal(modalItem);return;}
     render();
-    if(modalItem)fillModal(modalItem);
   }
   document.addEventListener('visibilitychange',refreshPrices);
   window.addEventListener('pageshow',function(e){if(e.persisted)refreshPrices();});
   setInterval(refreshPrices,60000);
   render();
   if(!isV2&&(state.src!=='musinsa'||D.catalog.musinsaCount>0))runtime.ensureCatalog();
-  var qs=new URLSearchParams(location.search);
-  var dl=qs.get('goods')||(D.targetGoodsNo?String(D.targetGoodsNo):null);
-  if(dl)openModal(dl);
+  navigation.start();
+  if(!new URLSearchParams(location.search).has('goods')&&D.targetGoodsNo)navigation.replace({key:String(D.targetGoodsNo)});
 })();
 </script>
 </body>
