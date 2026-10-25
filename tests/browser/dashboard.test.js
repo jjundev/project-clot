@@ -95,6 +95,7 @@ test('brand dialog fits mobile and desktop, scopes slash and restores focus',asy
  const {page,url}=await fixture(t);
  for(const size of [{width:390,height:844},{width:1440,height:1000}]){
  await page.setViewportSize(size);await page.goto(url);
+ if(size.width<640)await page.locator('#catalogFilters>summary').click();
  const trigger=page.getByRole('button',{name:'브랜드 선택',exact:true});await trigger.click();
  const dialog=page.getByRole('dialog',{name:'브랜드 선택',exact:true});
  const box=await dialog.boundingBox();assert.ok(box.x>=0&&box.y>=0&&box.x+box.width<=size.width&&box.y+box.height<=size.height);
@@ -296,7 +297,7 @@ test('product search preserves saved filters',async t=>{
  for(const location of [url,pathToFileURL(path.join(dir,'index.html')).href]){
   await page.goto(location);await page.evaluate(()=>{localStorage.setItem('clot.src','4910');localStorage.setItem('clot.cat','top');localStorage.setItem('clot.filter','drop');});await page.reload();
   await page.locator('#q').fill('2156295');await page.locator(coatSelector).waitFor();
-  assert.equal(await page.locator('[data-od-id=kpi-row]').isVisible(),false);
+  assert.equal(await page.locator('.price-tabs').isVisible(),false);
   assert.deepEqual(await page.evaluate(()=>['src','cat','filter'].map(k=>localStorage.getItem('clot.'+k))),['4910','top','drop']);
   await page.locator('#q').fill('');await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready');
   assert.equal(await page.locator('[data-src="4910"]').getAttribute('aria-pressed'),'true');
@@ -380,7 +381,7 @@ test('query failure marks counts unknown and labels previous cards',async t=>{
 test('estimated drop exclusion has an explanation',async t=>{
  const {page,url}=await fixture(t,{search:true});await page.goto(url);await page.locator('#q').fill('키뮤어 캐시미어');await page.locator(coatSelector).waitFor();
  await page.locator('.chip[data-filter="drop"]').click();await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready'&&document.querySelector('#shownN').textContent==='0');
- assert.equal(await page.locator('.card').count(),0);await page.getByText('최저가는 최근 48시간 내 확인한 가격, 하락은 최근 48시간 내 관측한 변동을 기준으로 합니다',{exact:true}).waitFor();
+ assert.equal(await page.locator('.card').count(),0);await page.getByText('수집 이력 최저가는 최근 48시간 내 확인한 가격, 하락은 최근 48시간 내 관측한 변동을 기준으로 합니다',{exact:true}).waitFor();
  await page.getByText('현재 조건에 맞는 상품이 없습니다',{exact:true}).waitFor();
 });
 test('normalized search variants find the same coat over HTTP and file',async t=>{
@@ -486,4 +487,46 @@ test('first visit and reset use dropAmt while saved sorts survive',async t=>{
  await page.locator('[data-src=musinsa]').click();
  await page.locator('#resetBtn').click();
  assert.equal(await page.locator('#sortSel').inputValue(),'dropAmt');
+});
+
+test('catalog shows one price-filter group without duplicate KPI cards',async t=>{
+ const {page,url}=await fixture(t);await page.goto(url);await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='5');
+ assert.equal(await page.locator('.kpi').count(),0);
+ for(const filter of ['all','drop','lowest'])assert.equal(await page.locator(`[data-filter="${filter}"]`).count(),1);
+ assert.equal(await page.locator('[data-src]').count(),3);
+ const card=page.locator('.card[data-k="musinsa:2"]');
+ assert.equal(await card.locator('.mine').textContent(),'80원');
+ assert.match(await card.locator('.rate').textContent(),/60%/);
+ assert.match(await card.locator('.pin.drop').textContent(),/20원/);
+ assert.match(await card.locator('.price-source').textContent(),/직접 확인 가격.*기준/);
+});
+test('catalog fits 390 768 1440 with the specified column counts',async t=>{
+ const {page,url}=await fixture(t);await page.goto(url);
+ for(const [width,columns] of [[390,2],[768,3],[1440,6]]){
+  await page.setViewportSize({width,height:1000});
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  assert.equal(await page.locator('#grid').evaluate(el=>getComputedStyle(el).gridTemplateColumns.trim().split(/\s+/).length),columns);
+  const box=await page.locator('.thumb').first().boundingBox();assert.ok(Math.abs(box.width/box.height-5/6)<.01);
+ }
+});
+test('unstored theme defaults light even under dark OS preference',async t=>{
+ const {page,url}=await fixture(t);await page.emulateMedia({colorScheme:'dark'});await page.goto(url);
+ assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
+ await page.locator('#themeBtn').click();await page.reload();assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
+});
+test('collection explanation stays available when collapsed',async t=>{
+ const {page,url}=await fixture(t,{wide:true});await page.goto(url);
+ const notice=page.locator('#musinsaNotice');assert.equal(await notice.evaluate(e=>e.tagName),'DETAILS');
+ assert.equal(await notice.getAttribute('open'),null);await notice.locator('summary').click();
+ assert.match(await notice.textContent(),/추정가는 확인된 혜택 기준/);
+});
+test('missing product image preserves accessible card',async t=>{
+ const {page,url}=await fixture(t);await page.goto(url);const card=page.getByRole('button',{name:'아디다스 아디다스 상품 2 가격 추이 보기',exact:true});
+ await card.waitFor();assert.equal(await card.locator('.ph').count(),1);assert.match(await card.textContent(),/80원/);await card.click();assert.equal(await page.locator('#mName').textContent(),'아디다스 상품 2');
+});
+test('mobile catalog exposes a price in the first viewport with expandable filters',async t=>{
+ const {page,url}=await fixture(t,{search:true});await page.setViewportSize({width:390,height:844});await page.goto(url);
+ await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready');
+ const box=await page.locator('.mine').first().boundingBox();assert.ok(box.y+box.height<=844);
+ await page.getByText('필터',{exact:true}).click();await page.locator('#brandTrigger').click();await page.getByRole('dialog',{name:'브랜드 선택',exact:true}).waitFor();
 });
