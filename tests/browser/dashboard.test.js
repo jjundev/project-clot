@@ -261,7 +261,7 @@ test('restored filters show skeletons then a retry panel when indexes fail',asyn
  assert.equal(await page.locator('#grid').getAttribute('aria-busy'),'true');assert.ok(await page.locator('#loadBar').isVisible());
  assert.equal(await page.locator('#loadStatus').textContent(),'상품을 불러오는 중');
  await page.locator('#grid').getByRole('button',{name:'다시 시도',exact:true}).waitFor();
- assert.match(await page.locator('#grid').textContent(),/상품을 불러오지 못했습니다/);
+ assert.match(await page.locator('#grid').textContent(),/상품을 불러오지 못했습니다/);assert.equal(await page.locator('#loadStatus').textContent(),'상품을 불러오지 못했습니다');
  assert.equal(await page.locator('#shownN').textContent(),'—');assert.doesNotMatch(await page.locator('#catalogNotice').textContent(),/검색 준비 중/);
 });
 test('periodic refresh keeps cards without skeleton',async t=>{
@@ -278,6 +278,36 @@ test('tab return inside the exact window keeps loaded pages',async t=>{
  await page.locator('#gridMore').click();await page.locator('.card').nth(239).waitFor();
  await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));await page.waitForTimeout(200);
  assert.equal(await page.locator('.card').count(),240);assert.equal(await page.locator('.skeleton-card').count(),0);
+});
+test('tab return while more waits on the exact screen still appends the next page',async t=>{
+ const {page,url}=await fixture(t,{scale:true,scaleCount:600});let release;const gate=new Promise(r=>release=r);
+ await page.addInitScript(()=>{window.IntersectionObserver=class {observe(){} unobserve(){}};});
+ await page.context().route('**/assets/index-*.js*',async r=>{await gate;await r.continue();});
+ await page.goto(url);await page.locator('.card').nth(119).waitFor();
+ await page.locator('#gridMore').click();await page.locator('#gridMore').filter({hasText:'불러오는 중'}).waitFor();
+ await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
+ release();await page.locator('.card').nth(120).waitFor();
+});
+test('periodic refresh of a product lookup keeps its card without a skeleton',async t=>{
+ const {page,url}=await fixture(t,{scale:true,scaleCount:600});await page.goto(url);await page.locator('.card').first().waitFor();
+ await page.locator('#q').fill('4910:609');await page.locator('.card[data-k="4910:609"]').waitFor();
+ await page.evaluate(()=>{window.sawSkeleton=false;new MutationObserver(()=>{if(document.querySelector('.skeleton-card'))window.sawSkeleton=true;}).observe(document.querySelector('#grid'),{childList:true,subtree:true});document.dispatchEvent(new Event('visibilitychange'));});
+ await page.waitForTimeout(300);assert.equal(await page.evaluate(()=>window.sawSkeleton),false);
+ assert.equal(await page.locator('.card[data-k="4910:609"]').count(),1);
+});
+test('more on a searched result shows a spinner while the page loads',async t=>{
+ const {page,url,dir}=await fixture(t,{scale:true,scaleCount:600});await page.addInitScript(()=>{window.IntersectionObserver=class {observe(){} unobserve(){}};localStorage.setItem('clot.sort','priceAsc');});
+ const script=fs.readFileSync(path.join(dir,'dashboard-worker.js'),'utf8');await page.route('**/dashboard-worker.js*',r=>r.fulfill({contentType:'text/javascript',body:script+';const original=onmessage;onmessage=e=>{if(e.data.method==="page")setTimeout(()=>original(e),600);else original(e);};'}));
+ await page.goto(url);await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready');await page.locator('.card').nth(119).waitFor();
+ await page.locator('#gridMore').click();await page.locator('#gridMore .spinner').waitFor();assert.match(await page.locator('#gridMore').textContent(),/불러오는 중/);
+ await page.locator('.card').nth(120).waitFor();
+});
+test('a background result that arrives after the exact window is not spliced onto the build page',async t=>{
+ const {page,url}=await fixture(t);let release;const gate=new Promise(r=>release=r);await page.clock.install();
+ await page.context().route('**/assets/index-*.js*',async r=>{await gate;await r.continue();});
+ await page.goto(url);await page.locator('#shownN').filter({hasText:/^5$/}).waitFor();
+ await page.clock.setSystemTime(Date.now()+49*3600e3);release();
+ await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='0');
 });
 test('superseded slow scope never paints skeletons over the newer result',async t=>{
  const {page,url}=await fixture(t,{search:true});await page.addInitScript(()=>{localStorage.setItem('clot.src','musinsa');localStorage.setItem('clot.cat','top');});

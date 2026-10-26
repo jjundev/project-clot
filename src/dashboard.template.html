@@ -1560,7 +1560,7 @@ td.mine-c {
   }
   function paintError(){
     setLoading(false);clearGrid('<div class="empty load-error"><b>상품을 불러오지 못했습니다</b><button type="button" data-retry-catalog>다시 시도</button></div>');
-    unknownCounts();
+    unknownCounts();document.getElementById('loadStatus').textContent='상품을 불러오지 못했습니다';
   }
   function setSearchMode(mode) {
     searchMode=mode;
@@ -1577,26 +1577,27 @@ td.mine-c {
     notice.innerHTML=status==='error'?'상품을 조회하지 못했습니다 · <button type="button" data-retry-catalog>다시 시도</button>':status==='invalid'?esc(message):'상품번호 조회 · 과거 기록을 포함하며 일반 검색 필터와 관계없이 표시합니다';
     if(modalItem)updateStepper(-1);
   }
-  function renderProduct(parsed,token) {
-    paintProduct(null,'loading');
+  function renderProduct(parsed,token,silent) {
+    if(!silent)paintProduct(null,'loading');
     var pending=isV2?runtime.searchProduct(parsed.key):runtime.ensureCatalog().then(function(data){if(data.status!=='ready')throw Error(data.error);return {item:data.items.find(function(x){return x.k===parsed.key;})||null};});
     return pending.then(function(result){if(token!==queryToken)return;paintProduct(result.item,'ready',result.item?'':'현재 대시보드에 등록된 상품이 없습니다');}).catch(function(error){if(token!==queryToken||error.code==='STALE_RESULT')return;paintProduct(null,'error','상품을 조회하지 못했습니다');});
   }
   // opts.silent: periodic or tab-return refresh; it never replaces cards with loading placeholders.
   function render(opts) {
     if(detailActive){catalogDirty=true;return;}
-    var silent=!!(opts&&opts.silent),wasExact=exactToken===queryToken;
+    var silent=!!(opts&&opts.silent);
+    // A refresh inside the same exact window changes nothing. Leave tokens alone so a pending page or
+    // background result for this screen still lands, and the reader keeps their place.
+    if(silent&&isV2&&exactToken===queryToken&&exactKey===JSON.stringify(model.restoreState(state))&&runtime.exactPreview(state))return;
     // This query supersedes any in-flight return to the old catalog.
     catalogRestoring=false;pageBusy=false;clearTimeout(skeletonTimer);
     var parsed=model.parseSearchInput(state.q),token=++queryToken;
     setSearchMode(parsed.type);
     if(parsed.type==='invalid'){paintProduct(null,'invalid',parsed.message);return;}
-    if(parsed.type==='product'){renderProduct(parsed,token);return;}
+    if(parsed.type==='product'){renderProduct(parsed,token,silent);return;}
     if(isV2){
       var exact=runtime.exactPreview(state),key=JSON.stringify(model.restoreState(state));
       if(exact){
-        // A refresh inside the same exact window changes nothing; keep the reader's place.
-        if(silent&&wasExact&&exactKey===key){exactToken=token;if(exactPending)exactPending.token=token;return;}
         exactToken=token;exactKey=key;exactPending=null;setLoading(false);
         paint(exact,{...runtime.getState(),status:'ready'},false);
         grid.dataset.searchStatus='ready';startExact(token);return;
@@ -1631,7 +1632,12 @@ td.mine-c {
     entry.promise=gate.then(function(){
       if(entry.token!==queryToken)throw Object.assign(Error('검색 결과가 변경되었습니다'),{code:'STALE_RESULT'});
       return runtime.query(state);
-    }).then(function(q){if(entry.token===queryToken&&lastQuery&&!lastQuery.resultId)lastQuery.resultId=q.resultId;return q;});
+    }).then(function(q){
+      if(entry.token!==queryToken||!lastQuery||lastQuery.resultId)return q;
+      // Past the window the build page may no longer be the first page of q; requery instead of splicing.
+      if(Date.now()<D.catalog.exactUntilMs)lastQuery.resultId=q.resultId;else render({silent:true});
+      return q;
+    });
     exactPending=entry;
     entry.promise.catch(function(){if(exactPending===entry)exactPending=null;});
   }
@@ -1702,7 +1708,7 @@ td.mine-c {
         if(ready)return renderMore();
       }
       else if(lastQuery.nextOffset!=null&&runtime.getState().status==='ready'){
-        pageBusy=true;var token=queryToken,id=lastQuery.resultId;
+        pageBusy=true;var token=queryToken,id=lastQuery.resultId;moreBtn.innerHTML='<span class="spinner" aria-hidden="true"></span>불러오는 중';
         try{var p=await runtime.page(id,lastQuery.nextOffset);if(token!==queryToken||(view.length>=360&&grid.contains(document.activeElement)))return;view=view.concat(p.items);grid.insertAdjacentHTML('beforeend',p.items.map(cardHtml).join(''));lastQuery.nextOffset=p.nextOffset;shown=view.length;
           if(view.length>360&&!grid.contains(document.activeElement)){var oldTop=grid.getBoundingClientRect().height;Array.from(grid.querySelectorAll('.card')).slice(0,120).forEach(function(c){c.remove();});var removed=oldTop-grid.getBoundingClientRect().height;topHeight+=removed;topSpacer.style.height=topHeight+'px';view=view.slice(120);firstOffset+=120;shown=view.length;}
         }catch(error){if(token===queryToken&&error.code!=='STALE_RESULT'){moreBtn.textContent='목록을 불러오지 못했습니다 · 다시 시도';return;}}finally{if(token===queryToken)pageBusy=false;}
