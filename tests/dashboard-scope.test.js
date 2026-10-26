@@ -538,3 +538,55 @@ test('direct lookup ignores blocked indexes after query failure',async t=>{
  const count=calls.length;assert.equal((await engine.lookup('musinsa:518')).k,'musinsa:518');
  assert.ok(calls.slice(count).every(ref=>!ref.id.startsWith('index')));
 });
+function tierFixture(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tier-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const asOfMs = Date.parse("2026-10-26T00:00:00Z"), H = 3600e3,
+    b = createDashboardBuilder({ outDir: dir, revision: "tier", asOfMs }),
+    L = [["2026-10-25", 200, 100, 90, 0, null, 0]];
+  for (let n = 0; n < 40; n++)
+    b.add({ src: "musinsa", n, b: "A", g: "P" + n, c: "top", L,
+      tracking: freshTracking(90, null, { at: n % 4 ? asOfMs : asOfMs - 72 * H }) });
+  const data = b.finish({ scanState: "complete" });
+  const read = (ref) => {
+    const s = fs.readFileSync(path.join(dir, ref.path), "utf8"), ctx = {};
+    vm.runInNewContext(s, ctx);
+    return { payload: JSON.parse(JSON.stringify(ctx.__CLOT_ASSETS__[ref.id])), bytes: Buffer.byteLength(s) };
+  };
+  return { data, read, asOfMs, H };
+}
+test("index parts split by freshness tier and expose exactUntilMs", (t) => {
+  const { data, read, asOfMs, H } = tierFixture(t);
+  const counts = {};
+  for (const r of data.catalog.indexParts) {
+    counts[r.tier] = (counts[r.tier] || 0) + r.count;
+    for (const x of index.unpackIndex(read(r).payload))
+      assert.equal(model.freshWindow(x)?.until >= asOfMs ? "live" : "history", r.tier);
+  }
+  assert.deepEqual(counts, { live: 30, history: 10 });
+  assert.equal(data.catalog.exactUntilMs, asOfMs - H + 48 * H);
+});
+test("selectParts skips history unless included or the clock precedes the build", async () => {
+  const scope = (await import("../src/dashboard-scope.js")).createDashboardScope();
+  const m = { asOfMs: 100, indexParts: [
+    { id: "a", source: "musinsa", category: "top", tier: "live" },
+    { id: "b", source: "musinsa", category: "top", tier: "history" },
+    { id: "c", source: "musinsa", category: "top" }] };
+  const ids = (s, nowMs) => scope.selectParts(m, s, { nowMs }).map((r) => r.id);
+  assert.deepEqual(ids({}, 200), ["a", "c"]);
+  assert.deepEqual(ids({ includeHistory: true }, 200), ["a", "b", "c"]);
+  assert.deepEqual(ids({}, 50), ["a", "b", "c"]);
+  assert.equal(scope.facetCoverage(m, new Set(["a", "c"]), {}, { nowMs: 200 }).sources.musinsa, true);
+});
+test("default query never requests history parts; includeHistory adds only them", async (t) => {
+  const { data, read, asOfMs } = tierFixture(t), calls = [];
+  const scope = (await import("../src/dashboard-scope.js")).createDashboardScope();
+  const engine = await createDashboardTransport({ manifest: data.catalog, index, scope,
+    loadAsset: async (ref) => { calls.push(ref.id); return read(ref); } });
+  const tierOf = (id) => data.catalog.indexParts.find((r) => r.id === id)?.tier;
+  assert.equal((await engine.query({}, 1, asOfMs + 1)).total, 30);
+  assert.ok(calls.filter((id) => id.startsWith("index")).every((id) => tierOf(id) === "live"));
+  const before = calls.length;
+  assert.equal((await engine.query({ includeHistory: true }, 2, asOfMs + 1)).total, 40);
+  assert.ok(calls.slice(before).filter((id) => id.startsWith("index")).every((id) => tierOf(id) === "history"));
+});

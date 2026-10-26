@@ -1,16 +1,19 @@
 /** Shared build/Worker/file scope rules. Keep free of module references. */
 export function createDashboardScope() {
   const categories = ["all", "top", "outer", "bottom", "shoes", "bag", "etc"];
-  function selectParts(manifest, state = {}) {
+  // History rows cannot be fresh at or after asOfMs, so only a clock behind the build needs them by default.
+  function selectParts(manifest, state = {}, { nowMs = Date.now() } = {}) {
+    const history = state.includeHistory || nowMs < manifest.asOfMs;
     return manifest.indexParts.filter(
       (r) =>
         (!state.src || state.src === "all" || r.source === state.src) &&
-        (!state.cat || state.cat === "all" || r.category === state.cat),
+        (!state.cat || state.cat === "all" || r.category === state.cat) &&
+        (history || r.tier !== "history"),
     );
   }
-  function facetCoverage(manifest, loadedIds, state) {
+  function facetCoverage(manifest, loadedIds, state, { nowMs = Date.now() } = {}) {
     const covered = (s) =>
-      selectParts(manifest, s).every((r) => loadedIds.has(r.id));
+      selectParts(manifest, s, { nowMs }).every((r) => loadedIds.has(r.id));
     return {
       sources: Object.fromEntries(
         ["all", "musinsa", "4910"].map((src) => [

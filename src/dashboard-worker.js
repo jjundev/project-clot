@@ -235,7 +235,7 @@ export async function createDashboardTransport({
         const superseded = new Promise((resolve, reject) => {
           cancelCurrent = () => reject(stale());
         });
-        const refs = scope.selectParts(manifest, state),
+        const refs = scope.selectParts(manifest, state, { nowMs: asOfMs }),
           needed = new Set(refs.map((x) => x.id));
         for (let i = queue.length - 1; i >= 0; i--)
           if (queue[i].kind === "index" && !needed.has(queue[i].ref.id)) {
@@ -260,6 +260,7 @@ export async function createDashboardTransport({
             manifest,
             new Set(loaded.keys()),
             state,
+            { nowMs: asOfMs },
           );
           const result = await Promise.race([
             engine.query(state, requestId,asOfMs),

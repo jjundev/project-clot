@@ -178,7 +178,7 @@ function verifyV2(D, directory) {
     return p;
   }
   const keys = new Set(), cards = new Map(), cardParts = new Map(), cardOwners = new Map();
-  let totalItems = 0, total4910 = 0;
+  let totalItems = 0, total4910 = 0, exactUntilMs = Infinity;
   for (const r of m.indexParts) {
     const rows = unpackIndex(load(r));
     if (rows.length !== r.count) throw Error("index count mismatch");
@@ -186,6 +186,15 @@ function verifyV2(D, directory) {
       m.loadingMode === "scoped" &&
       rows.some((x) => x.src !== r.source || x.c !== r.category)
     ) throw Error("index partition mismatch");
+    if (m.loadingMode === "scoped")
+      for (const x of rows) {
+        const w = model.freshWindow(x),
+          live = !!w && w.until >= m.asOfMs;
+        if ((live ? "live" : "history") !== (r.tier ?? "live"))
+          throw Error("index tier mismatch");
+        if (live)
+          exactUntilMs = Math.min(exactUntilMs, w.from > m.asOfMs ? w.from : w.until);
+      }
     for (const row of rows) {
       totalItems++;
       if (row.src === "4910") total4910++;
@@ -256,6 +265,8 @@ function verifyV2(D, directory) {
   )
     throw Error("bootstrap order mismatch");
   if (m.loadingMode === "scoped") {
+    if (exactUntilMs === Infinity) exactUntilMs = m.asOfMs + model.PRICE_TTL_MS;
+    if (m.exactUntilMs !== exactUntilMs) throw Error("exactUntilMs mismatch");
     const scope = createDashboardScope(),
       routes = new Map();
     for (const [bucket, refs] of Object.entries(m.routes))
