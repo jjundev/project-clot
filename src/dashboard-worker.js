@@ -5,6 +5,7 @@ export async function createDashboardTransport({
   scope,
   loadAsset,
   yieldTask = () => Promise.resolve(),
+  onProgress = () => {},
 }) {
   function validate(ref, p, bytes) {
     if (
@@ -123,7 +124,7 @@ export async function createDashboardTransport({
         code: "STALE_RESULT",
       });
     function pump() {
-      while (active < 4 && queue.length) {
+      while (active < 8 && queue.length) {
         const job = queue.shift();
         active++;
         Promise.resolve()
@@ -243,9 +244,22 @@ export async function createDashboardTransport({
             inflight.delete(job.ref.id);
             job.reject(stale());
           }
+        let done = refs.filter((ref) => loaded.has(ref.id)).length;
+        const total = refs.length;
+        onProgress({ requestId, loaded: done, total });
         try {
           await Promise.race([
-            Promise.all(refs.map((ref) => indexPart(ref, own))),
+            Promise.all(
+              refs.map((ref) =>
+                loaded.has(ref.id)
+                  ? loaded.get(ref.id)
+                  : indexPart(ref, own).then((rows) => {
+                      if (own === generation)
+                        onProgress({ requestId, loaded: ++done, total });
+                      return rows;
+                    }),
+              ),
+            ),
             superseded,
           ]);
           if (own !== generation) throw stale();
@@ -333,7 +347,13 @@ export function runDashboardWorker({ model, index, scope, transport }) {
       if (method === "init") {
         const manifest = args[0];
         revisionAssets.set("revision", manifest.revision);
-        enginePromise = transport({ manifest, index, scope, loadAsset });
+        enginePromise = transport({
+          manifest,
+          index,
+          scope,
+          loadAsset,
+          onProgress: (p) => postMessage({ type: "progress", ...p }),
+        });
         await enginePromise;
         result = true;
       } else {

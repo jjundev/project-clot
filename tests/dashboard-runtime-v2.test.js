@@ -290,3 +290,17 @@ test('retry repeats product lookup and preserves missing versus failure',async t
 test('dispose settles product requests',async t=>{
  const {api,lookups}=runtimeHarness(t);const pending=api.searchProduct('musinsa:1'),failed=assert.rejects(pending,/disposed/i);await tick();api.dispose();await failed;lookups[0].resolve(null);
 });
+test("runtime applies progress only from the current query", async () => {
+  let report, release;
+  const gate = new Promise((r) => (release = r));
+  const api = createDashboardRuntime({ manifest: { v: 2, revision: "r", bootstrap: { items: [] }, indexParts: [] },
+    model: createDashboardModel(), indexFactory: createDashboardIndex, historyFactory: createHistoryLoader,
+    transportFactory: async ({ onProgress }) => { report = onProgress; return { query: () => gate, cancelQuery: async () => {} }; } });
+  const first = api.query({ q: "a" }).catch(() => {}), second = api.query({ q: "b" }).catch(() => {});
+  await new Promise((r) => setTimeout(r, 0));
+  report({ requestId: 1, loaded: 1, total: 2 });
+  assert.deepEqual(api.getState().progress, { loaded: 0, total: null });
+  report({ requestId: 2, loaded: 1, total: 2 });
+  assert.deepEqual(api.getState().progress, { loaded: 1, total: 2 });
+  release({ items: [] }); await Promise.all([first, second]); api.dispose();
+});
