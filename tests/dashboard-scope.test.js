@@ -106,6 +106,7 @@ async function transportFixture(t, options = {}) {
     manifest: f.data.catalog,
     index,
     scope,
+    retryDelays: options.retryDelays ?? [0, 0],
     loadAsset: async (ref) => {
       calls.push(ref);
       return options.load ? options.load(ref, f.read) : f.read(ref);
@@ -173,20 +174,50 @@ test("lookup uses only route and card files", async (t) => {
     ),
   );
 });
-test("failed part is retryable and never counted as complete", async (t) => {
-  let fail = true;
-  const { engine, calls } = await transportFixture(t, {
+test("one flaky part response is retried inside the same query", async (t) => {
+  const failed = new Set();
+  const { engine, calls, data } = await transportFixture(t, {
     load: (ref, read) => {
-      if (fail && ref.id.startsWith("index")) {
-        fail = false;
+      if (ref.id.startsWith("index") && !failed.has(ref.id)) {
+        failed.add(ref.id);
         throw Error("offline");
       }
       return read(ref);
     },
   });
-  await assert.rejects(engine.query({ src: "musinsa", cat: "top" }), /offline/);
   assert.equal((await engine.query({ src: "musinsa", cat: "top" })).total, 173);
-  assert.equal(calls.filter((x) => x.id.startsWith("index")).length, 2);
+  const parts = data.catalog.indexParts.filter(
+    (x) => x.source === "musinsa" && x.category === "top",
+  ).length;
+  assert.equal(calls.filter((x) => x.id.startsWith("index")).length, 2 * parts);
+});
+test("a stale edge copy of a part is retried before the query fails", async (t) => {
+  let stale = 1;
+  const { engine } = await transportFixture(t, {
+    load: (ref, read) => {
+      const v = read(ref);
+      if (stale && ref.id.startsWith("index")) {
+        stale--;
+        v.payload.revision = "previous-deploy";
+      }
+      return v;
+    },
+  });
+  assert.equal((await engine.query({ src: "musinsa", cat: "top" })).total, 173);
+});
+test("persistently failed part rejects, is never counted as complete, and a later query retries it", async (t) => {
+  let fail = true;
+  const { engine, calls } = await transportFixture(t, {
+    load: (ref, read) => {
+      if (fail && ref.id.startsWith("index")) throw Error("offline");
+      return read(ref);
+    },
+  });
+  await assert.rejects(engine.query({ src: "musinsa", cat: "top" }), /offline/);
+  const tried = calls.filter((x) => x.id.startsWith("index")).length;
+  fail = false;
+  assert.equal((await engine.query({ src: "musinsa", cat: "top" })).total, 173);
+  assert.ok(calls.filter((x) => x.id.startsWith("index")).length > tried);
 });
 test("latest scope bypasses obsolete queued downloads", async (t) => {
   let release;

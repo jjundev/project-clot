@@ -6,6 +6,8 @@ export async function createDashboardTransport({
   loadAsset,
   yieldTask = () => Promise.resolve(),
   onProgress = () => {},
+  retryDelays = [500, 1500],
+  sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
 }) {
   function validate(ref, p, bytes) {
     if (
@@ -15,6 +17,20 @@ export async function createDashboardTransport({
       bytes !== ref.bytes
     )
       throw Error("데이터 파일 버전/크기 불일치");
+  }
+  // A search needs ~1,300 files; one timeout, 5xx or CDN edge still serving the previous
+  // deploy's file at the same path (Pages ignores ?v=) must not fail the whole query.
+  async function fetchValid(ref) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const v = await loadAsset(ref);
+        validate(ref, v.payload, v.bytes);
+        return v;
+      } catch (error) {
+        if (attempt >= retryDelays.length) throw error;
+        await sleep(retryDelays[attempt]);
+      }
+    }
   }
   if (manifest.loadingMode === "scoped") return scoped();
   const chunks = new Array(manifest.indexParts.length);
@@ -26,8 +42,7 @@ export async function createDashboardTransport({
         while (next < manifest.indexParts.length) {
           const i = next++,
             ref = manifest.indexParts[i],
-            v = await loadAsset(ref);
-          validate(ref, v.payload, v.bytes);
+            v = await fetchValid(ref);
           chunks[i] = index.unpackIndex(v.payload);
           await yieldTask();
         }
@@ -52,8 +67,7 @@ export async function createDashboardTransport({
     }
     if (inflight.has(ref.id)) return inflight.get(ref.id);
     const p = (async () => {
-      const v = await loadAsset(ref);
-      validate(ref, v.payload, v.bytes);
+      const v = await fetchValid(ref);
       const items = v.payload.items;
       if (!Array.isArray(items) || items.length !== ref.count)
         throw Error("카드 건수 불일치");
@@ -128,12 +142,8 @@ export async function createDashboardTransport({
         const job = queue.shift();
         active++;
         Promise.resolve()
-          .then(() => loadAsset(job.ref))
-          .then((v) => {
-            validate(job.ref, v.payload, v.bytes);
-            job.resolve(v.payload);
-          }, job.reject)
-          .catch(job.reject)
+          .then(() => fetchValid(job.ref))
+          .then((v) => job.resolve(v.payload), job.reject)
           .finally(() => {
             active--;
             inflight.delete(job.ref.id);
