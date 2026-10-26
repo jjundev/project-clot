@@ -17,6 +17,15 @@ export function createDashboardModel() {
  const comparable=distinct&&prev.basis===last.basis&&at-instant(prev.at)<=PRICE_TTL_MS&&Number.isFinite(prev.price);
  return {trackingState:'CURRENT',fresh:true,canLow:!!distinct&&prev.basis===last.basis,dropAmt:comparable&&prev.price>price?prev.price-price:0};
  }
+ // Every instant t where refresh(x,{asOfMs:t}).fresh holds lies in [from, until].
+ function freshWindow(x) {
+ const tracking=x.tracking,last=Array.isArray(tracking?.samples)?tracking.samples.at(-1):undefined;
+ if(tracking?.status!=='ACTIVE'||!last)return null;
+ const at=instant(last.at),saleAt=instant(tracking.saleAt);
+ if(!Number.isFinite(at)||!Number.isFinite(saleAt)||last.price==null||last.price!==x.my||(x.priceBasis&&last.basis!==x.priceBasis))return null;
+ const from=Math.max(at,saleAt),until=Math.min(at,saleAt)+PRICE_TTL_MS;
+ return from<=until?{from,until}:null;
+ }
  // Idempotent: keep the historical candidate separate from the expiring signal.
  function refresh(x,{asOfMs=Date.now()}={}) {
  const p=priceSignalEligibility(x.tracking,{asOfMs,price:x.my,basis:x.priceBasis});
@@ -119,5 +128,5 @@ export function createDashboardModel() {
  result.sort((a,b)=>sorts[s.sort](a,b)||a.k.localeCompare(b.k));
  return {items:result,total:result.length,sources,quick,categories,brands:[...brands.values()].filter(b=>b.count>0||selected.has(b.key)).sort((a,b)=>b.count-a.count||a.label.localeCompare(b.label,'ko'))};
  }
- return {parseSearchInput,normalizeSearchText,searchFields,matchesSearch,itemKey,resolveKey,brandKey,summarize,mergeSummaries,queryCatalog,restoreState,refresh,priceSignalEligibility,PRICE_TTL_MS};
+ return {parseSearchInput,normalizeSearchText,searchFields,matchesSearch,itemKey,resolveKey,brandKey,summarize,mergeSummaries,queryCatalog,restoreState,refresh,freshWindow,priceSignalEligibility,PRICE_TTL_MS};
 }
