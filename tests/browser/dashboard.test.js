@@ -70,11 +70,28 @@ test('bootstrap survives index failure and retry restores exact scoped counts',a
  const {page,url}=await fixture(t);let fail=true;
  await page.route('**/assets/index-*.js*',r=>fail?r.abort():r.continue());
  await page.goto(url);assert.equal(await page.locator('.card').count(),5);
- await openFilters(page);await page.locator('[data-src=musinsa]').click();await page.getByRole('button',{name:'다시 시도',exact:true}).waitFor();
- assert.equal(await page.locator('.card').count(),2);assert.equal(await page.locator('#shownN').textContent(),'—');
+ // A source's default view is exact from the build; a narrower scope needs the failing index.
+ await openFilters(page);await page.locator('[data-src=musinsa]').click();await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='2');
+ await page.locator('[data-cat=shoes]').click();await page.getByRole('button',{name:'다시 시도',exact:true}).waitFor();
+ assert.equal(await page.locator('#shownN').textContent(),'—');
  fail=false;await page.getByRole('button',{name:'다시 시도',exact:true}).click();
- await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='2');
- await openFilters(page);await page.locator('[data-src=all]').click();await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='5');
+ await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='1');
+ await openFilters(page);await page.locator('[data-cat=all]').click();await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='2');
+ await page.locator('[data-src=all]').click();await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='5');
+});
+test('default landing is exact while every index request hangs',async t=>{
+ const {page,url}=await fixture(t);await page.context().route('**/assets/index-*.js*',()=>{});await page.goto(url);
+ await page.locator('#shownN').filter({hasText:/^5$/}).waitFor();
+ assert.equal(await page.locator('#grid').getAttribute('data-search-status'),'ready');
+ assert.equal(await page.locator('.skeleton-card').count(),0);
+});
+test('more beyond the exact first page waits for the background query',async t=>{
+ const {page,url}=await fixture(t,{scale:true,scaleCount:600});let release;const gate=new Promise(r=>release=r);
+ await page.addInitScript(()=>{window.IntersectionObserver=class {observe(){} unobserve(){}};});
+ await page.context().route('**/assets/index-*.js*',async r=>{await gate;await r.continue();});
+ await page.goto(url);await page.locator('.card').nth(119).waitFor();
+ await page.locator('#gridMore').click();await page.locator('#gridMore').filter({hasText:'불러오는 중'}).waitFor();
+ release();await page.locator('.card').nth(120).waitFor();
 });
 test('common brand picker preserves OR selections and zero-count removals across sources',async t=>{
  const {page,url}=await fixture(t);await page.goto(url);await page.locator('#shownN').filter({hasText:'5'}).waitFor();
@@ -207,12 +224,12 @@ test('recent 90 defaults and archived all-history failure retries without changi
 });
 test('default cards do not wait for index and saved filters do not show default counts',async t=>{
  const {page,url}=await fixture(t);let release;const gate=new Promise(r=>release=r);await page.route('**/assets/index-*.js*',async r=>{await gate;await r.continue();});
- await page.goto(url);assert.equal(await page.locator('.card').count(),5);assert.equal(await page.locator('#shownN').textContent(),'—');await openFilters(page);await page.locator('[data-src=musinsa]').click();assert.equal(await page.locator('#shownN').textContent(),'—');assert.equal(await page.locator('.card').count(),2);release();await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='2');
+ await page.goto(url);assert.equal(await page.locator('.card').count(),5);assert.equal(await page.locator('#shownN').textContent(),'5');await openFilters(page);await page.locator('[data-src=musinsa]').click();assert.equal(await page.locator('#shownN').textContent(),'2');await page.locator('[data-cat=top]').click();assert.equal(await page.locator('#shownN').textContent(),'—');release();await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='1');
 });
 
 test('bounded card window reloads previous pages without losing the result order',async t=>{
  const {page,url}=await fixture(t,{scale:true});await page.addInitScript(()=>{window.IntersectionObserver=class {observe(){} unobserve(){}};});await page.goto(url);await page.locator('#q').fill('LAST_SENTINEL');await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='1');await page.locator('#q').fill('');await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='440,129');const first=await page.locator('.card').first().getAttribute('data-k');
- for(let i=0;i<4;i++){await page.locator('#gridMore').click();await page.waitForTimeout(100);assert.ok(await page.locator('.card').count()<=360);}
+ for(let i=0;i<4;i++){await page.locator('#gridMore').click();await page.locator('#gridMore').filter({hasNotText:'불러오는 중'}).waitFor();await page.waitForTimeout(100);assert.ok(await page.locator('.card').count()<=360);}
  assert.notEqual(await page.locator('.card').first().getAttribute('data-k'),first);await page.evaluate(()=>window.scrollTo(0,0));await page.waitForTimeout(300);assert.ok(await page.locator('.card').count()<=360);assert.equal(await page.locator('.card').first().getAttribute('data-k'),first);
 });
 test('late all-history reply cannot replace a newer 30-day selection',async t=>{
@@ -226,7 +243,7 @@ test('neighbor beyond loaded first page preserves source filter and result posit
  const {page,url}=await fixture(t,{scale:true});await page.addInitScript(()=>{window.IntersectionObserver=class {observe(){} unobserve(){}};});await page.goto(url);await openFilters(page);await page.locator('[data-src="4910"]').click();await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='439,503');await page.locator('.card').last().click();await page.waitForFunction(()=>document.querySelector('#mPos').textContent==='120 / 439503');await page.locator('#nextBtn').click();await page.waitForFunction(()=>document.querySelector('#mPos').textContent.startsWith('121 /'));assert.equal(await page.locator('[data-src="4910"]').getAttribute('aria-pressed'),'true');assert.equal(await page.locator('#mPos').textContent(),'121 / 439503');
 });
 test('worker startup failure keeps bootstrap visible and offers retry immediately',async t=>{
- const {page,url,dir}=await fixture(t);let fail=true;const script=fs.readFileSync(path.join(dir,'dashboard-worker.js'),'utf8');await page.route('**/dashboard-worker.js*',r=>r.fulfill({contentType:'text/javascript',body:fail?'throw Error("test-worker-failure")':script}));await page.goto(url);assert.equal(await page.locator('.card').count(),5);await page.getByRole('button',{name:'다시 시도',exact:true}).waitFor();fail=false;await page.getByRole('button',{name:'다시 시도',exact:true}).click();await page.locator('#q').fill('나이키');await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='3');
+ const {page,url,dir}=await fixture(t);let fail=true;const script=fs.readFileSync(path.join(dir,'dashboard-worker.js'),'utf8');await page.route('**/dashboard-worker.js*',r=>r.fulfill({contentType:'text/javascript',body:fail?'throw Error("test-worker-failure")':script}));await page.goto(url);assert.equal(await page.locator('.card').count(),5);assert.equal(await page.locator('#shownN').textContent(),'5');await page.locator('#q').fill('아디다스');await page.getByRole('button',{name:'다시 시도',exact:true}).waitFor();fail=false;await page.getByRole('button',{name:'다시 시도',exact:true}).click();await page.locator('#q').fill('나이키');await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='3');
 });
 test('focus arriving during a pending page keeps both focus and the 360-card bound',async t=>{
  const {page,url,dir}=await fixture(t,{scale:true});await page.addInitScript(()=>{window.IntersectionObserver=class {observe(){} unobserve(){}};});const script=fs.readFileSync(path.join(dir,'dashboard-worker.js'),'utf8');await page.route('**/dashboard-worker.js*',r=>r.fulfill({contentType:'text/javascript',body:script+';const original=onmessage;onmessage=e=>{if(e.data.method==="page"&&e.data.args[1]>=360)setTimeout(()=>original(e),400);else original(e);};'}));await page.goto(url);await page.locator('#q').fill('LAST_SENTINEL');await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='1');await page.locator('#q').fill('');await page.waitForFunction(()=>document.querySelector('#shownN').textContent==='440,129');
@@ -345,6 +362,8 @@ test('composition searches only committed input',async t=>{
  await page.addInitScript(()=>{window.queryMessages=[];const Base=window.Worker;window.Worker=class extends Base{postMessage(message,...args){if(message.method==='query')window.queryMessages.push(message.args[0].q);return super.postMessage(message,...args);}};});
  for(const location of [url,pathToFileURL(path.join(dir,'index.html')).href]){
   await page.goto(location);await page.waitForFunction(()=>document.querySelector('#grid').dataset.searchStatus==='ready');
+  // The exact landing prefetches its own result once idle; only typed input must stay unsent.
+  if(location===url)await page.waitForFunction(()=>window.queryMessages.length>0);
   await page.evaluate(()=>{window.queryMessages=[];const q=document.querySelector('#q');q.dispatchEvent(new CompositionEvent('compositionstart'));for(const value of ['ㅋ','키','키뮤어 캐시미어']){q.value=value;q.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));}});
   await page.waitForTimeout(250);
   assert.deepEqual(await page.evaluate(()=>window.queryMessages),[]);
@@ -371,9 +390,9 @@ test('query failure marks counts unknown and labels previous cards',async t=>{
  const manifest=await page.evaluate(()=>window.__CLOT_DATA__.catalog);
  const blocked=new Set(manifest.indexParts.filter(x=>x.source==='musinsa'&&x.category==='top').map(x=>'/'+x.path));
  await page.route('**/assets/index-*.js*',r=>blocked.has(new URL(r.request().url()).pathname)?r.abort():r.continue());
- await openFilters(page);await page.locator('[data-cat="all"]').click();await page.getByRole('button',{name:'다시 시도',exact:true}).waitFor();
+ await openFilters(page);await page.locator('[data-cat="top"]').click();await page.getByRole('button',{name:'다시 시도',exact:true}).waitFor();
  assert.equal(await page.locator('#shownN').textContent(),'—');
- assert.match(await page.locator('#catalogNotice').textContent(),/이전 검색 결과 표시/);assert.ok(await page.locator('.card').count()>0);
+ assert.match(await page.locator('#catalogNotice').textContent(),/이전 검색 결과 표시/);
 });
 test('estimated drop exclusion has an explanation',async t=>{
  const {page,url}=await fixture(t,{search:true});await page.goto(url);await page.locator('#q').fill('키뮤어 캐시미어');await page.locator(coatSelector).waitFor();

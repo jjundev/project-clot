@@ -523,6 +523,22 @@ input {
   font-size:13px;
   font-weight:600
 }
+.spinner {
+  display:inline-block;
+  width:12px;
+  height:12px;
+  margin-right:8px;
+  vertical-align:-1px;
+  border:2px solid var(--border);
+  border-top-color:var(--fg);
+  border-radius:50%;
+  animation:spin .8s linear infinite
+}
+@keyframes spin {
+  to {
+    transform:rotate(360deg)
+  }
+}
 #catalogNotice {
   font-size:12px;
   line-height:1.7;
@@ -1342,8 +1358,8 @@ td.mine-c {
     return new Promise(function(resolve,reject){var tag=document.createElement('script'),timer=setTimeout(function(){finish(Error('파일 요청 시간 초과'));},15000),done=false;function finish(error){if(done)return;done=true;clearTimeout(timer);tag.remove();var p=(globalThis.__CLOT_ASSETS__||{})[ref.id];if(globalThis.__CLOT_ASSETS__)delete globalThis.__CLOT_ASSETS__[ref.id];if(error||!p)reject(error||Error('파일 내용 없음'));else resolve({payload:p,bytes:ref.bytes});}tag.onload=function(){finish();};tag.onerror=function(){finish(Error('파일 요청 실패'));};tag.src=ref.path+'?v='+encodeURIComponent(D.catalog.revision);document.head.appendChild(tag);});
   }
   var searchMode='empty',previousCards=false,detailActive=false,catalogDirty=false,catalogRestoring=false;
-  var isV2=D.catalog.v===2,queryToken=0,pageBusy=false,firstOffset=0,topHeight=0;
-  var runtime = window.__CLOT_RUNTIME_FACTORY__({model:model,baseItems:D.items,inlineHistories:D.inlineHistories,manifest:D.catalog,loadScript:loadDataScript,loadAsset:loadAsset,createWorker:isV2&&location.protocol!=='file:'?function(file){return new Worker(file+'?v='+encodeURIComponent(D.catalog.revision));}:null,onChange:function(data){if(detailActive){catalogDirty=true;return;}if(searchMode==='product'||searchMode==='invalid')return;if(!isV2)render();else if(data.status==='error'){grid.dataset.searchStatus='error';showStatus(data,true);}}});
+  var isV2=D.catalog.v===2,queryToken=0,pageBusy=false,firstOffset=0,topHeight=0,exactToken=0,exactPending=null;
+  var runtime = window.__CLOT_RUNTIME_FACTORY__({model:model,baseItems:D.items,inlineHistories:D.inlineHistories,manifest:D.catalog,loadScript:loadDataScript,loadAsset:loadAsset,createWorker:isV2&&location.protocol!=='file:'?function(file){return new Worker(file+'?v='+encodeURIComponent(D.catalog.revision));}:null,onChange:function(data){if(detailActive){catalogDirty=true;return;}if(searchMode==='product'||searchMode==='invalid')return;if(!isV2)render();else if(data.status==='error'&&exactToken!==queryToken){grid.dataset.searchStatus='error';showStatus(data,true);}}});
   var topSpacer=document.createElement('div');topSpacer.id='gridTopSpacer';grid.before(topSpacer);
 
   var catalogFilters=document.getElementById('catalogFilters'),filterToggle=document.getElementById('filterToggle');
@@ -1494,6 +1510,12 @@ td.mine-c {
     if(parsed.type==='invalid'){paintProduct(null,'invalid',parsed.message);return;}
     if(parsed.type==='product'){renderProduct(parsed,token);return;}
     if(isV2){
+      var exact=runtime.exactPreview(state);
+      if(exact){
+        previousCards=false;exactToken=token;exactPending=null;
+        paint(exact,{...runtime.getState(),status:'ready'},false);
+        grid.dataset.searchStatus='ready';startExact(token);return;
+      }
       var data=runtime.getState();
       var baseline=model.restoreState({src:state.src});
       var defaults=JSON.stringify(model.restoreState(state))===JSON.stringify(baseline);
@@ -1509,6 +1531,29 @@ td.mine-c {
     }
     var data=runtime.getCatalog(), waiting=(state.src!=='musinsa'||D.catalog.musinsaCount>0)&&data.status!=='ready';
     var query=model.queryCatalog(data.items,state);paint(query,data,waiting);
+  }
+  // An exact build page has no worker result yet. Fetch one once the page is idle, or at once when
+  // paging or detail navigation needs it, without repainting the exact cards.
+  // entry.token follows the exact screen across detail visits (see applyRoute).
+  function startExact(token){
+    var entry={token:token},gate=new Promise(function(resolve){
+      entry.kick=resolve;
+      function idle(){(window.requestIdleCallback||function(f){setTimeout(f,1);})(function(){resolve();});}
+      if(document.readyState==='complete')idle();else window.addEventListener('load',idle,{once:true});
+    });
+    entry.promise=gate.then(function(){
+      if(entry.token!==queryToken)throw Object.assign(Error('검색 결과가 변경되었습니다'),{code:'STALE_RESULT'});
+      return runtime.query(state);
+    }).then(function(q){if(entry.token===queryToken&&lastQuery&&!lastQuery.resultId)lastQuery.resultId=q.resultId;return q;});
+    exactPending=entry;
+    entry.promise.catch(function(){if(exactPending===entry)exactPending=null;});
+  }
+  function exactResult(){
+    if(lastQuery&&lastQuery.resultId)return Promise.resolve(true);
+    if(exactToken!==queryToken)return Promise.reject(Object.assign(Error('검색 결과가 변경되었습니다'),{code:'STALE_RESULT'}));
+    if(!exactPending)startExact(queryToken);
+    exactPending.kick();
+    return exactPending.promise.then(function(){return !!(lastQuery&&lastQuery.resultId);});
   }
   function emptyCatalog(){
     var hint=['drop','lowest'].includes(state.filter)?'최근 48시간 안에 같은 기준으로 확인한 가격만 포함합니다.':'검색 조건을 바꾸거나 필터에서 과거 기록을 포함해 보세요.';
@@ -1562,6 +1607,12 @@ td.mine-c {
     if(isV2){
       if(!lastQuery||pageBusy||(view.length>=360&&grid.contains(document.activeElement)))return;
       if(shown<view.length){grid.insertAdjacentHTML('beforeend',view.slice(shown,shown+PAGE).map(cardHtml).join(''));shown=Math.min(shown+PAGE,view.length);}
+      else if(lastQuery.nextOffset!=null&&!lastQuery.resultId&&exactToken===queryToken){
+        pageBusy=true;var token=queryToken,ready=false;moreBtn.innerHTML='<span class="spinner" aria-hidden="true"></span>불러오는 중';
+        try{ready=await exactResult();}catch(error){if(token===queryToken&&error.code!=='STALE_RESULT'){moreBtn.textContent='목록을 불러오지 못했습니다 · 다시 시도';return;}}finally{if(token===queryToken)pageBusy=false;}
+        if(token!==queryToken)return;
+        if(ready)return renderMore();
+      }
       else if(lastQuery.nextOffset!=null&&runtime.getState().status==='ready'){
         pageBusy=true;var token=queryToken,id=lastQuery.resultId;
         try{var p=await runtime.page(id,lastQuery.nextOffset);if(token!==queryToken||(view.length>=360&&grid.contains(document.activeElement)))return;view=view.concat(p.items);grid.insertAdjacentHTML('beforeend',p.items.map(cardHtml).join(''));lastQuery.nextOffset=p.nextOffset;shown=view.length;
@@ -1673,7 +1724,10 @@ td.mine-c {
     if(route.type==='catalog'){returnToCatalog();return;}
     if(!detailActive){
       captureCatalog();catalogDirty=catalogDirty||catalogRestoring||pageBusy||grid.dataset.searchStatus!=='ready';
+      // The exact screen is not repainted by a detail visit, so its background result stays usable.
+      var exactScreen=exactToken===queryToken;
       ++queryToken;pageBusy=false;catalogRestoring=false;
+      if(exactScreen){exactToken=queryToken;if(exactPending)exactPending.token=queryToken;}
     }
     detailActive=true;catalogView.hidden=true;detailView.hidden=false;closeBrand();
     if(moreIo)moreIo.unobserve(moreBtn);
@@ -1772,7 +1826,7 @@ td.mine-c {
 
   function updateStepper(i) {
     if(searchMode==='product'||searchMode==='invalid'){document.getElementById('prevBtn').disabled=true;document.getElementById('nextBtn').disabled=true;document.getElementById('mPos').textContent='—';return;}
-    if(isV2){if(!modalItem||!lastQuery?.resultId){document.getElementById('prevBtn').disabled=true;document.getElementById('nextBtn').disabled=true;return;}var key=modalItem.k,token=detailToken;runtime.neighbor(lastQuery.resultId,key,0).then(function(x){if(token!==detailToken||!x)return;document.getElementById('prevBtn').disabled=x._position<=0;document.getElementById('nextBtn').disabled=x._position>=lastQuery.total-1;document.getElementById('mPos').textContent=(x._position+1)+' / '+lastQuery.total;}).catch(function(){});return;}
+    if(isV2){if(!modalItem||!lastQuery?.resultId){document.getElementById('prevBtn').disabled=true;document.getElementById('nextBtn').disabled=true;if(modalItem&&lastQuery&&exactToken===queryToken){var waitKey=modalItem.k;exactResult().then(function(ready){if(ready&&detailActive&&modalItem&&modalItem.k===waitKey)updateStepper(i);}).catch(function(){});}return;}var key=modalItem.k,token=detailToken;runtime.neighbor(lastQuery.resultId,key,0).then(function(x){if(token!==detailToken||!x)return;document.getElementById('prevBtn').disabled=x._position<=0;document.getElementById('nextBtn').disabled=x._position>=lastQuery.total-1;document.getElementById('mPos').textContent=(x._position+1)+' / '+lastQuery.total;}).catch(function(){});return;}
     var p = document.getElementById('prevBtn'), n = document.getElementById('nextBtn');
     p.disabled = i <= 0; n.disabled = i < 0 || i >= view.length - 1;
     document.getElementById('mPos').textContent = i >= 0 ? (i + 1) + ' / ' + view.length : '—';
