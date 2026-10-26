@@ -306,7 +306,7 @@ test('restored scope loads only its own index partitions',async t=>{
 });
 test('missing direct link reports missing product',async t=>{const {page,url}=await fixture(t);await page.goto(url+'?goods=musinsa:99999');await page.locator('#detailStatus').filter({hasText:'상품을 찾을 수 없습니다'}).waitFor();});
 test('scoped performance sample distinguishes preview from search readiness',async t=>{
- const {url}=await fixture(t);const {measureDashboard}=await import('../../scripts/measure-dashboard-loading.js');const report=await measureDashboard(url,{runs:1,isolateExternal:true});const sample=report.results[0];assert.equal(sample.scenario,'musinsa-top');assert.ok(sample.firstCardsMs<=sample.searchReadyMs);assert.equal(sample.indexParts.length,1);assert.equal(sample.errors.length,0);
+ const {url}=await fixture(t);const {measureDashboard}=await import('../../scripts/measure-dashboard-loading.js');const report=await measureDashboard(url,{runs:1,isolateExternal:true});const sample=report.results[0];assert.equal(sample.scenario,'musinsa-top');assert.ok(sample.firstCardsMs<=sample.searchReadyMs);assert.ok(sample.countReadyMs!=null&&sample.countReadyMs<=sample.searchReadyMs);assert.equal(sample.indexParts.length,1);assert.equal(sample.errors.length,0);
 });
 test('direct link outside previews opens while all search indexes are blocked',async t=>{
  const {page,url,dir}=await fixture(t,{scale:true,scaleCount:600});const D=JSON.parse(fs.readFileSync(path.join(dir,'index.html'),'utf8').match(/window\.__CLOT_DATA__ = ([^\n]+);/)[1]);assert.ok(!D.catalog.previewItems.some(x=>x.k==='4910:609'));

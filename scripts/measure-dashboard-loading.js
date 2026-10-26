@@ -47,12 +47,12 @@ export async function measureDashboard(
         if (isolateExternal)
           await context.route(/^https:\/\//, (r) => r.abort());
         await page.addInitScript((state) => {
-          for (const key of ["src", "cat", "sort", "filter"])
+          for (const key of ["src", "cat", "sort", "filter", "includeHistory"])
             if (state[key] != null)
               localStorage.setItem("clot." + key, state[key]);
         }, scenario.state);
         await page.addInitScript(() => {
-          window.__measure = { first: null, ready: null, longTasks: [] };
+          window.__measure = { first: null, count: null, ready: null, longTasks: [] };
           new PerformanceObserver((list) => {
             window.__measure.longTasks.push(
               ...list.getEntries().map((e) => e.duration),
@@ -65,6 +65,13 @@ export async function measureDashboard(
             )
               window.__measure.first = performance.now();
             const n = document.querySelector("#shownN");
+            // First confirmed count, before any measurement query is typed.
+            if (
+              n &&
+              /^\d[\d,]*$/.test(n.textContent) &&
+              window.__measure.count == null
+            )
+              window.__measure.count = performance.now();
             if (
               n &&
               /^\d[\d,]*$/.test(n.textContent) &&
@@ -94,6 +101,9 @@ export async function measureDashboard(
           total: window.__CLOT_DATA__.catalog.totalItems || null,
           v: window.__CLOT_DATA__.catalog.v,
         }));
+        await page.waitForFunction(() => window.__measure.count != null, null, {
+          timeout: 120000,
+        });
         // Readiness must reflect a real nondefault query, never the bootstrap count.
         await page.locator("#q").fill("__PERFORMANCE_NO_MATCH__");
         await page.waitForFunction(
@@ -110,6 +120,7 @@ export async function measureDashboard(
         );
         const sample = await page.evaluate(() => ({
           firstCardsMs: window.__measure.first,
+          countReadyMs: window.__measure.count,
           heap: performance.memory
             ? {
                 used: performance.memory.usedJSHeapSize,
@@ -172,13 +183,27 @@ export async function measureDashboard(
 }
 if (process.argv[1]?.endsWith("measure-dashboard-loading.js")) {
   try {
-    const result = await measureDashboard(process.argv[2]);
+    const result = await measureDashboard(process.argv[2], {
+      runs: 3,
+      scenarios: [
+        { name: "all-all", state: { src: "all", cat: "all" } },
+        { name: "musinsa-top", state: { src: "musinsa", cat: "top" } },
+        {
+          name: "all-history",
+          state: { src: "all", cat: "all", includeHistory: "true" },
+        },
+      ],
+    });
     fs.writeFileSync(process.argv[3], JSON.stringify(result, null, 2));
     console.log(
       JSON.stringify(
         result.results.map((x) => ({
+          scenario: x.scenario,
           firstCardsMs: x.firstCardsMs,
+          countReadyMs: x.countReadyMs,
           searchReadyMs: x.searchReadyMs,
+          indexParts: x.indexParts.length,
+          indexEncodedBytes: x.indexEncodedBytes,
           errors: x.errors,
         })),
       ),
