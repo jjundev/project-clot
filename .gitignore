@@ -10,3 +10,15 @@ data/prices.db-*
 data/4910.db-*
 data/musinsa-wide.db
 data/musinsa-wide.db-*
+
+# Local-only tooling and artifacts; this repo is public.
+# Musinsa page recreation with site captures
+rea-musinsa/
+# Project-local REA install (machine-specific paths)
+.codex/
+tools/
+scripts/rea.sh
+docs/rea.md
+.agents/skills/reverse-engineer-anything/
+# Legacy dashboard output; the build deletes it
+data/4910-all.js
