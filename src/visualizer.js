@@ -469,6 +469,7 @@ export function generateDashboardHtml({
   const sink=createDashboardBuilder({outDir,revision,asOfMs});
   let total4910All = 0;
   let wide = null;
+  const runs = {};
   // Fail the build on a supplied but invalid wide snapshot; never silently publish a subtotal.
   if(dbMusinsaPath && fs.existsSync(dbMusinsaPath)) {
     const wideDb=new DatabaseSync(dbMusinsaPath,{readOnly:true});
@@ -483,12 +484,15 @@ export function generateDashboardHtml({
     if(process.env.CLOT_REQUIRE_MUSINSA_WIDE==='1')throw Error('Required Musinsa wide snapshot missing');
     fs.rmSync(path.join(outDir,'musinsa'),{recursive:true,force:true});
   }
+  // Watched goods are fresh from the last daily collection: daily_runs, never a manual skip or the checked_at fallback in lastRun.
+  try { runs['musinsa-watched']=(activeDb.db||activeDb).prepare("SELECT completed_at FROM daily_runs WHERE mode IS NOT 'skipped' ORDER BY date DESC,completed_at DESC LIMIT 1").get()?.completed_at??null; } catch {}
   const checkpoint=sink.checkpoint();
   try {
     let db4910;
     try {
       if (db4910Path && fs.existsSync(db4910Path)) db4910 = new DatabaseSync(db4910Path, {readOnly:true});
       payload = exportDashboardBase(activeDb,{sink,targetGoodsNo:gNo,db4910,skipMusinsa:wide?.goodsIds});
+      if(db4910)try { runs['4910']=db4910.prepare('SELECT completed_at FROM scan_runs WHERE complete=1 ORDER BY date DESC LIMIT 1').get()?.completed_at??null; } catch {}
       if(wide)payload.items=payload.items.filter(x=>x.src!=='musinsa'||!wide.goodsIds.has(x.n));
       let scanIndex = {brands:[]}, scanState=db4910?'complete':'unavailable', notice=db4910?null:'4910 데이터 미포함: 원본 DB 없음';
       if(db4910)try { scanIndex=buildScan4910Index(db4910); } catch(err) { scanState='partial';notice='4910 데이터 일부 미포함: '+err.message; }
@@ -501,12 +505,15 @@ export function generateDashboardHtml({
     } catch(err) {
       console.warn('⚠️ [4910] 대시보드에서 4910 항목 제외: '+err.message);
       sink.rollback(checkpoint);
+      delete runs['4910'];
       payload = exportDashboardBase(activeDb,{sink,targetGoodsNo:gNo,skipMusinsa:wide?.goodsIds});
       if(wide)payload.items=payload.items.filter(x=>x.src!=='musinsa'||!wide.goodsIds.has(x.n));
       packaged = buildDashboardCatalog({baseItems:payload.items,dir4910,revision,sink,scanState:'unavailable',notice:'4910 데이터 미포함: '+err.message});
     } finally { if(db4910)db4910.close(); }
   } finally { if(shouldCloseDb)activeDb.close(); }
   total4910All = packaged.catalog.scanCount;
+  // Coverage counts a group only against its own complete collection run.
+  runs['musinsa-wide']=wide?.metadata.complete?wide.metadata.completedAt:null;
   if(wide) {
     payload.musinsa=wide.metadata;
     payload.lastRun=wide.metadata.completedAt;
@@ -515,7 +522,7 @@ export function generateDashboardHtml({
     packaged.catalog.musinsaCount=wide.metadata.exported;
   }
   const base4910=payload.total4910Base;
-  packaged=sink.finish({scanState:packaged.catalog.scanState,notice:packaged.catalog.notice,musinsaCount:wide?.metadata.exported||0,scanCount:total4910All+(wide?.metadata.exported||0)});
+  packaged=sink.finish({scanState:packaged.catalog.scanState,notice:packaged.catalog.notice,musinsaCount:wide?.metadata.exported||0,scanCount:total4910All+(wide?.metadata.exported||0),runs});
   payload.dates=payload.dates?.length?[payload.dates[0],payload.dates.at(-1)]:[];payload.runs=payload.runs?.slice(-1)||[];
   Object.assign(payload,packaged,{has4910All:packaged.catalog.scanState==='complete',total4910All});
   const total4910 = base4910 + total4910All;

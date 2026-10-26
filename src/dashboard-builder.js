@@ -5,6 +5,7 @@ import { createHistoryExporter } from "./dashboard-history.js";
 import { createDashboardModel } from "./dashboard-model.js";
 import { createDashboardScope } from "./dashboard-scope.js";
 import { packIndex } from "./dashboard-index.js";
+import { COVERAGE_KEYS, coverageGroup } from "./dashboard-coverage.js";
 /** Build-time sink: retains current summaries, never the whole archive. */
 export function createDashboardBuilder({ outDir, revision, asOfMs=Date.now() }) {
   const writer = createAssetWriter({ outDir, revision }),
@@ -64,16 +65,22 @@ export function createDashboardBuilder({ outDir, revision, asOfMs=Date.now() }) 
       cards.push(x);
       size += bytes;
     },
-    finish({ scanState, notice, musinsaCount = 0, scanCount = 0 }) {
+    finish({ scanState, notice, musinsaCount = 0, scanCount = 0, runs = {} }) {
       history.finish();
       flush();
       const indexParts = [],
-        groups = new Map();
+        groups = new Map(),
+        coverage = new Map(COVERAGE_KEYS.map((key) => [key, { key, active: 0, live: 0, lastRunAt: runs[key] ?? null }]));
       // Live rows can be fresh at or after asOfMs; the default result cannot change before exactUntilMs.
       let exactUntilMs = Infinity;
       for (const x of summaries) {
         const w = model.freshWindow(x),
           tier = w && w.until >= asOfMs ? "live" : "history";
+        if (x.tracking?.status === "ACTIVE") {
+          const g = coverage.get(coverageGroup(x));
+          g.active++;
+          if (tier === "live") g.live++;
+        }
         if (tier === "live")
           exactUntilMs = Math.min(exactUntilMs, w.from > asOfMs ? w.from : w.until);
         const k = x.src + ":" + x.c + ":" + tier;
@@ -138,6 +145,7 @@ export function createDashboardBuilder({ outDir, revision, asOfMs=Date.now() }) 
           notice,
           totalItems: summaries.length,
           indexParts,
+          coverage: [...coverage.values()],
           loadingMode: "scoped",
           routes,
           previews,

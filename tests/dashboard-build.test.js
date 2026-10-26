@@ -9,7 +9,7 @@ test('build verifier rejects missing summaries, revisions, counts and histories'
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'clot-build-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
  const output=path.join(dir,'index.html');
  const generate=()=>writeFixture(dir);
- generate();fs.writeFileSync(output,fs.readFileSync(output,'utf8').replace('나이키 상품 1','나이키\u2028상품 1'));assert.deepEqual(verifyDashboardBuild(output),{totalItems:5,total4910:3,scanState:'complete'});
+ generate();fs.writeFileSync(output,fs.readFileSync(output,'utf8').replace('나이키 상품 1','나이키\u2028상품 1'));const v=verifyDashboardBuild(output);assert.deepEqual({totalItems:v.totalItems,total4910:v.total4910,scanState:v.scanState},{totalItems:5,total4910:3,scanState:'complete'});
  const manifest=()=>JSON.parse(fs.readFileSync(output,'utf8').match(/window\.__CLOT_DATA__ = ([^\n]+);/)[1]).catalog;
  for(const mode of ['missing','revision','count','history']){
  generate();const m=manifest(),refs=m.indexParts;let ref=refs[0];
@@ -35,11 +35,18 @@ test('scoped build verifier rejects wrong freshness tier and exact window',t=>{
  mutate(m=>{const r=m.indexParts[0];r.tier=r.tier==='history'?'live':'history';});assert.throws(()=>verifyDashboardBuild(file),/index tier mismatch/);
  mutate(m=>{m.exactUntilMs-=1;});assert.throws(()=>verifyDashboardBuild(file),/exactUntilMs mismatch/);
 });
+test('verifier rejects a manifest whose coverage disagrees with the index',t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'clot-coverage-verify-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const file=path.join(dir,'index.html');
+ function mutate(fn){writeFixture(dir);let html=fs.readFileSync(file,'utf8');const raw=html.match(/window\.__CLOT_DATA__ = ([^\n]+);/)[1],D=JSON.parse(raw);fn(D.catalog);fs.writeFileSync(file,html.replace(raw,JSON.stringify(D)));}
+ mutate(m=>{m.coverage[0].live+=1;});assert.throws(()=>verifyDashboardBuild(file),/coverage count mismatch/);
+ mutate(m=>{delete m.coverage;});assert.throws(()=>verifyDashboardBuild(file),/coverage count mismatch/);
+});
 test('verifier checks complete histories after cycling through more assets than its cache',t=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'clot-verify-working-set-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
  const file=path.join(dir,'index.html');writeFixture(dir,{scale:true,scaleCount:14000});
  assert.ok(fs.readdirSync(path.join(dir,'assets')).length>32);
- assert.deepEqual(verifyDashboardBuild(file),{totalItems:14628,total4910:14002,scanState:'complete'});
+ const v=verifyDashboardBuild(file);assert.deepEqual({totalItems:v.totalItems,total4910:v.total4910,scanState:v.scanState},{totalItems:14628,total4910:14002,scanState:'complete'});
  // A history well outside the bootstrap still has to be read and verified.
  const histories=fs.readdirSync(path.join(dir,'assets')).filter(x=>x.startsWith('history-'));
  fs.unlinkSync(path.join(dir,'assets',histories.at(-1)));
