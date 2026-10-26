@@ -27,6 +27,14 @@ test('scoped build verifier rejects wrong partition and route target',t=>{
  mutate(m=>m.indexParts[0].source='wrong');assert.throws(()=>verifyDashboardBuild(file),/partition/);
  mutate(m=>{const buckets=Object.keys(m.routes);m.routes[(Number(buckets[0])+1)%256]=m.routes[buckets[0]];delete m.routes[buckets[0]];});assert.throws(()=>verifyDashboardBuild(file),/route/);
 });
+test('scoped build verifier rejects wrong freshness tier and exact window',t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'clot-tier-verify-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const file=path.join(dir,'index.html');
+ function mutate(fn){writeFixture(dir);let html=fs.readFileSync(file,'utf8');const raw=html.match(/window\.__CLOT_DATA__ = ([^\n]+);/)[1],D=JSON.parse(raw);fn(D.catalog);fs.writeFileSync(file,html.replace(raw,JSON.stringify(D)));}
+ mutate(()=>{});verifyDashboardBuild(file);
+ mutate(m=>{const r=m.indexParts[0];r.tier=r.tier==='history'?'live':'history';});assert.throws(()=>verifyDashboardBuild(file),/index tier mismatch/);
+ mutate(m=>{m.exactUntilMs-=1;});assert.throws(()=>verifyDashboardBuild(file),/exactUntilMs mismatch/);
+});
 test('verifier checks complete histories after cycling through more assets than its cache',t=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'clot-verify-working-set-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
  const file=path.join(dir,'index.html');writeFixture(dir,{scale:true,scaleCount:14000});

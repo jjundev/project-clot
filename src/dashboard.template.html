@@ -523,6 +523,85 @@ input {
   font-size:13px;
   font-weight:600
 }
+.spinner {
+  display:inline-block;
+  width:12px;
+  height:12px;
+  margin-right:8px;
+  vertical-align:-1px;
+  border:2px solid var(--border);
+  border-top-color:var(--fg);
+  border-radius:50%;
+  animation:spin .8s linear infinite
+}
+@keyframes spin {
+  to {
+    transform:rotate(360deg)
+  }
+}
+/* Loading placeholders occupy the same grid cells as cards but are not cards. */
+.skeleton-card {
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  min-width:0
+}
+.sk-thumb,
+.sk-line {
+  background:linear-gradient(90deg,var(--surface-2) 25%,var(--surface) 50%,var(--surface-2) 75%);
+  background-size:200% 100%;
+  animation:sk-shimmer 1.2s ease-in-out infinite
+}
+.sk-thumb {
+  aspect-ratio:5/6
+}
+.sk-line {
+  height:12px;
+  border-radius:2px
+}
+.sk-line.short {
+  width:55%
+}
+@keyframes sk-shimmer {
+  from {
+    background-position:100% 0
+  }
+  to {
+    background-position:-100% 0
+  }
+}
+.load-bar {
+  position:relative;
+  height:2px;
+  overflow:hidden;
+  background:var(--surface-2)
+}
+.load-bar span {
+  display:block;
+  height:100%;
+  width:0;
+  background:var(--fg);
+  transition:width .2s ease
+}
+.load-bar.indeterminate span {
+  width:30%;
+  animation:load-slide 1.1s ease-in-out infinite
+}
+@keyframes load-slide {
+  from {
+    transform:translateX(-100%)
+  }
+  to {
+    transform:translateX(340%)
+  }
+}
+#grid.dim {
+  opacity:.45;
+  transition:opacity .15s
+}
+.load-error button {
+  margin-top:12px
+}
 #catalogNotice {
   font-size:12px;
   line-height:1.7;
@@ -1189,6 +1268,8 @@ td.mine-c {
 
 
   <p id="catalogNotice" role="status" hidden></p>
+  <div id="loadBar" class="load-bar" hidden><span></span></div>
+  <p id="loadStatus" class="sr-only" role="status"></p>
   <section class="grid" id="grid" data-od-id="product-grid" aria-label="추적 상품 목록"></section>
   <button class="more" id="gridMore" type="button" hidden data-od-id="grid-more"></button>
 </main>
@@ -1341,9 +1422,9 @@ td.mine-c {
     if(location.protocol!=='file:')return fetch(ref.path+'?v='+encodeURIComponent(D.catalog.revision),{signal:AbortSignal.timeout(15000)}).then(function(r){if(!r.ok)throw Error('파일 요청 실패');return r.text();}).then(function(text){(0,eval)(text);var payload=(globalThis.__CLOT_ASSETS__||{})[ref.id];delete globalThis.__CLOT_ASSETS__[ref.id];return {payload:payload,bytes:new TextEncoder().encode(text).length};});
     return new Promise(function(resolve,reject){var tag=document.createElement('script'),timer=setTimeout(function(){finish(Error('파일 요청 시간 초과'));},15000),done=false;function finish(error){if(done)return;done=true;clearTimeout(timer);tag.remove();var p=(globalThis.__CLOT_ASSETS__||{})[ref.id];if(globalThis.__CLOT_ASSETS__)delete globalThis.__CLOT_ASSETS__[ref.id];if(error||!p)reject(error||Error('파일 내용 없음'));else resolve({payload:p,bytes:ref.bytes});}tag.onload=function(){finish();};tag.onerror=function(){finish(Error('파일 요청 실패'));};tag.src=ref.path+'?v='+encodeURIComponent(D.catalog.revision);document.head.appendChild(tag);});
   }
-  var searchMode='empty',previousCards=false,detailActive=false,catalogDirty=false,catalogRestoring=false;
-  var isV2=D.catalog.v===2,queryToken=0,pageBusy=false,firstOffset=0,topHeight=0;
-  var runtime = window.__CLOT_RUNTIME_FACTORY__({model:model,baseItems:D.items,inlineHistories:D.inlineHistories,manifest:D.catalog,loadScript:loadDataScript,loadAsset:loadAsset,createWorker:isV2&&location.protocol!=='file:'?function(file){return new Worker(file+'?v='+encodeURIComponent(D.catalog.revision));}:null,onChange:function(data){if(detailActive){catalogDirty=true;return;}if(searchMode==='product'||searchMode==='invalid')return;if(!isV2)render();else if(data.status==='error'){grid.dataset.searchStatus='error';showStatus(data,true);}}});
+  var searchMode='empty',detailActive=false,catalogDirty=false,catalogRestoring=false,loadingOn=false,skeletonTimer=0;
+  var isV2=D.catalog.v===2,queryToken=0,pageBusy=false,firstOffset=0,topHeight=0,exactToken=0,exactPending=null,exactKey='';
+  var runtime = window.__CLOT_RUNTIME_FACTORY__({model:model,baseItems:D.items,inlineHistories:D.inlineHistories,manifest:D.catalog,loadScript:loadDataScript,loadAsset:loadAsset,createWorker:isV2&&location.protocol!=='file:'?function(file){return new Worker(file+'?v='+encodeURIComponent(D.catalog.revision));}:null,onChange:function(data){if(detailActive){catalogDirty=true;return;}if(searchMode==='product'||searchMode==='invalid')return;if(!isV2)render();else if(loadingOn&&data.status==='loading')setLoading(true,data.progress);}});
   var topSpacer=document.createElement('div');topSpacer.id='gridTopSpacer';grid.before(topSpacer);
 
   var catalogFilters=document.getElementById('catalogFilters'),filterToggle=document.getElementById('filterToggle');
@@ -1372,8 +1453,10 @@ td.mine-c {
     state.brandKeys=state.brandKeys.filter(function(k){return k!==b.dataset.removeBrand;});render();
   });
   function renderBrandBar(){
-    if(!lastQuery)return;
-    var known=new Map(lastQuery.brands.map(function(x){return [x.key,x.label];}));
+    // Before the first result, the source's build facets list candidate brands; counts stay unconfirmed.
+    var p=isV2&&D.catalog.previews&&D.catalog.previews[state.src],brands=lastQuery?lastQuery.brands:p?p.facets.brands:null;
+    if(!brands)return;
+    var known=new Map(brands.map(function(x){return [x.key,x.label];}));
     var selected=state.brandKeys;
     document.getElementById('brandSummary').innerHTML=selected.slice(0,2).map(function(k){
       var label=known.get(k)||k;
@@ -1386,7 +1469,7 @@ td.mine-c {
       brandOptions.innerHTML='<p>'+(data.status==='error'?'브랜드 목록을 불러오지 못했습니다. 창을 닫고 다시 시도해 주세요.':'브랜드 집계 중…')+'</p>';brandOptionKeys='';return;
     }
     var query=model.brandKey(brandSearch.value);
-    var choices=lastQuery.brands.filter(function(b){return !query||model.brandKey(b.label).includes(query);});
+    var choices=brands.filter(function(b){return !query||model.brandKey(b.label).includes(query);});
     var keys=JSON.stringify(choices.map(function(b){return b.key;}));
     var optionHadFocus=brandOptions.contains(document.activeElement);
     var focusedBrand=optionHadFocus?document.activeElement.dataset.brand:null;
@@ -1458,12 +1541,26 @@ td.mine-c {
   }
 
   function fmt(n) { return n==null?'—':Number(n).toLocaleString('ko-KR'); }
-  var previewSource=null, detailNotice='';
-  function showPreview(data) {
-    var p=D.catalog.previews&&D.catalog.previews[state.src],map=new Map((D.catalog.previewItems||D.items).map(function(x){return [x.k,x];}));
-    var query=p?Object.assign({},p.facets,{items:p.keys.map(function(k){return map.get(k);})}):D.catalog.bootstrap;
-    previewSource=state.src;
-    return model.queryCatalog(query.items,state);
+  var detailNotice='';
+  function skeletonHtml(n){
+    return new Array(n+1).join('<div class="skeleton-card" aria-hidden="true"><div class="sk-thumb"></div><div class="sk-line"></div><div class="sk-line"></div><div class="sk-line short"></div></div>');
+  }
+  // One visible loading state: bar, screen-reader status and aria-busy move together.
+  function setLoading(on,progress){
+    var bar=document.getElementById('loadBar'),known=!!(progress&&progress.total);
+    loadingOn=on;bar.hidden=!on;bar.classList.toggle('indeterminate',on&&!known);
+    bar.firstElementChild.style.width=on&&known?Math.round(100*progress.loaded/progress.total)+'%':'';
+    document.getElementById('loadStatus').textContent=on?'상품을 불러오는 중':'';
+    grid.setAttribute('aria-busy',String(on));
+    if(!on){clearTimeout(skeletonTimer);grid.classList.remove('dim');}
+  }
+  function clearGrid(html){
+    view=[];shown=0;firstOffset=0;topHeight=0;topSpacer.style.height='0px';moreBtn.hidden=true;
+    grid.classList.remove('dim');grid.innerHTML=html;
+  }
+  function paintError(){
+    setLoading(false);clearGrid('<div class="empty load-error"><b>상품을 불러오지 못했습니다</b><button type="button" data-retry-catalog>다시 시도</button></div>');
+    unknownCounts();document.getElementById('loadStatus').textContent='상품을 불러오지 못했습니다';
   }
   function setSearchMode(mode) {
     searchMode=mode;
@@ -1474,41 +1571,82 @@ td.mine-c {
   function paintProduct(item,status,message) {
     lastQuery=null;brandCountsKnown=false;view=item?[item]:[];shown=view.length;
     firstOffset=0;topHeight=0;pageBusy=false;topSpacer.style.height='0px';moreBtn.hidden=true;
-    grid.dataset.searchStatus=status;
-    grid.innerHTML=item?cardHtml(item):'<div class="empty"><b>'+esc(message||'상품 조회 중')+'</b></div>';
+    grid.dataset.searchStatus=status;setLoading(status==='loading',null);
+    grid.innerHTML=item?cardHtml(item):status==='loading'?skeletonHtml(1):'<div class="empty"><b>'+esc(message||'상품 조회 중')+'</b></div>';
     var notice=document.getElementById('catalogNotice');notice.hidden=false;
     notice.innerHTML=status==='error'?'상품을 조회하지 못했습니다 · <button type="button" data-retry-catalog>다시 시도</button>':status==='invalid'?esc(message):'상품번호 조회 · 과거 기록을 포함하며 일반 검색 필터와 관계없이 표시합니다';
     if(modalItem)updateStepper(-1);
   }
-  function renderProduct(parsed,token) {
-    paintProduct(null,'loading');
+  function renderProduct(parsed,token,silent) {
+    if(!silent)paintProduct(null,'loading');
     var pending=isV2?runtime.searchProduct(parsed.key):runtime.ensureCatalog().then(function(data){if(data.status!=='ready')throw Error(data.error);return {item:data.items.find(function(x){return x.k===parsed.key;})||null};});
     return pending.then(function(result){if(token!==queryToken)return;paintProduct(result.item,'ready',result.item?'':'현재 대시보드에 등록된 상품이 없습니다');}).catch(function(error){if(token!==queryToken||error.code==='STALE_RESULT')return;paintProduct(null,'error','상품을 조회하지 못했습니다');});
   }
-  function render() {
+  // opts.silent: periodic or tab-return refresh; it never replaces cards with loading placeholders.
+  function render(opts) {
     if(detailActive){catalogDirty=true;return;}
+    var silent=!!(opts&&opts.silent);
+    // A refresh inside the same exact window changes nothing. Leave tokens alone so a pending page or
+    // background result for this screen still lands, and the reader keeps their place.
+    if(silent&&isV2&&exactToken===queryToken&&exactKey===JSON.stringify(model.restoreState(state))&&runtime.exactPreview(state))return;
     // This query supersedes any in-flight return to the old catalog.
-    catalogRestoring=false;pageBusy=false;
+    catalogRestoring=false;pageBusy=false;clearTimeout(skeletonTimer);
     var parsed=model.parseSearchInput(state.q),token=++queryToken;
     setSearchMode(parsed.type);
     if(parsed.type==='invalid'){paintProduct(null,'invalid',parsed.message);return;}
-    if(parsed.type==='product'){renderProduct(parsed,token);return;}
+    if(parsed.type==='product'){renderProduct(parsed,token,silent);return;}
     if(isV2){
-      var data=runtime.getState();
-      var baseline=model.restoreState({src:state.src});
-      var defaults=JSON.stringify(model.restoreState(state))===JSON.stringify(baseline);
-      var keep=lastQuery&&lastQuery.resultId&&previewSource===state.src;
-      var preview=keep?lastQuery:showPreview(data);
-      previousCards=!!keep;
-      paint(model.queryCatalog(preview.items,state),{...data,status:'loading',preview:true,previous:!!keep},true);
-      grid.dataset.searchStatus='loading';
-      runtime.query(state).then(function(q){if(token!==queryToken)return;paint(q,runtime.getState(),false);grid.dataset.searchStatus='ready';}).catch(function(error){
+      var exact=runtime.exactPreview(state),key=JSON.stringify(model.restoreState(state));
+      if(exact){
+        exactToken=token;exactKey=key;exactPending=null;setLoading(false);
+        paint(exact,{...runtime.getState(),status:'ready'},false);
+        grid.dataset.searchStatus='ready';startExact(token);return;
+      }
+      if(!silent){
+        updateFilterSummary();syncControls();setLoading(true,null);unknownCounts();
+        if(grid.querySelector('.card')){
+          grid.classList.add('dim');
+          skeletonTimer=setTimeout(function(){if(token===queryToken&&loadingOn)clearGrid(skeletonHtml(12));},150);
+        }else clearGrid(skeletonHtml(12));
+        grid.dataset.searchStatus='loading';
+      }
+      runtime.query(state).then(function(q){if(token!==queryToken)return;setLoading(false);paint(q,runtime.getState(),false);grid.dataset.searchStatus='ready';}).catch(function(error){
         if(token!==queryToken||error.code==='STALE_RESULT')return;
-        grid.dataset.searchStatus='error';showStatus({...runtime.getState(),status:'error',error:error.message},true);
+        grid.dataset.searchStatus='error';
+        if(silent&&!loadingOn&&grid.querySelector('.card'))showStatus({...runtime.getState(),status:'error',error:error.message},true);
+        else paintError();
       });return;
     }
     var data=runtime.getCatalog(), waiting=(state.src!=='musinsa'||D.catalog.musinsaCount>0)&&data.status!=='ready';
     var query=model.queryCatalog(data.items,state);paint(query,data,waiting);
+  }
+  // An exact build page has no worker result yet. Fetch one once the page is idle, or at once when
+  // paging or detail navigation needs it, without repainting the exact cards.
+  // entry.token follows the exact screen across detail visits (see applyRoute).
+  function startExact(token){
+    var entry={token:token},gate=new Promise(function(resolve){
+      entry.kick=resolve;
+      function idle(){(window.requestIdleCallback||function(f){setTimeout(f,1);})(function(){resolve();});}
+      if(document.readyState==='complete')idle();else window.addEventListener('load',idle,{once:true});
+    });
+    entry.promise=gate.then(function(){
+      if(entry.token!==queryToken)throw Object.assign(Error('검색 결과가 변경되었습니다'),{code:'STALE_RESULT'});
+      return runtime.query(state);
+    }).then(function(q){
+      if(entry.token!==queryToken||!lastQuery||lastQuery.resultId)return q;
+      // Past the window the build page may no longer be the first page of q; requery instead of splicing.
+      if(Date.now()<D.catalog.exactUntilMs)lastQuery.resultId=q.resultId;else render({silent:true});
+      return q;
+    });
+    exactPending=entry;
+    entry.promise.catch(function(){if(exactPending===entry)exactPending=null;});
+  }
+  function exactResult(){
+    if(lastQuery&&lastQuery.resultId)return Promise.resolve(true);
+    if(exactToken!==queryToken)return Promise.reject(Object.assign(Error('검색 결과가 변경되었습니다'),{code:'STALE_RESULT'}));
+    if(!exactPending)startExact(queryToken);
+    exactPending.kick();
+    return exactPending.promise.then(function(){return !!(lastQuery&&lastQuery.resultId);});
   }
   function emptyCatalog(){
     var hint=['drop','lowest'].includes(state.filter)?'최근 48시간 안에 같은 기준으로 확인한 가격만 포함합니다.':'검색 조건을 바꾸거나 필터에서 과거 기록을 포함해 보세요.';
@@ -1519,20 +1657,22 @@ td.mine-c {
     lastQuery=query;brandCountsKnown=!waiting;firstOffset=0;topHeight=0;topSpacer.style.height="0px";pageBusy=false;
     view=query.items;
     document.getElementById('shownN').textContent=waiting?'—':fmt(query.total);
-    document.querySelectorAll('[data-cat]').forEach(function(b){
-      b.setAttribute('aria-pressed',String(b.dataset.cat===state.cat));
-      if(b.dataset.cat==='etc')b.hidden=(query.categories.etc===0||!Object.hasOwn(query.categories,'etc'))&&state.cat!=='etc';
+    document.querySelectorAll('[data-cat=etc]').forEach(function(b){
+      b.hidden=(query.categories.etc===0||!Object.hasOwn(query.categories,'etc'))&&state.cat!=='etc';
     });
-    document.querySelectorAll('[data-src]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.src===state.src));});
-    document.querySelectorAll('[data-filter]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.filter===state.filter));});
-    showStatus(data,waiting);
+    syncControls();showStatus(data,waiting);
     shown=0;renderBrandBar();
-    grid.innerHTML=view.length?'':waiting||data.preview?'<div class="empty"><b>검색 준비 중 · 기본 상품 미리보기</b></div>':emptyCatalog();
+    grid.innerHTML=view.length?'':waiting?skeletonHtml(12):emptyCatalog();
     renderMore();
     if(moreIo){moreIo.unobserve(moreBtn);moreIo.observe(moreBtn);}
     if(modalItem)updateStepper(view.findIndex(function(x){return x.k===modalItem.k;}));
   }
 
+  function syncControls(){
+    document.querySelectorAll('[data-cat]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.cat===state.cat));});
+    document.querySelectorAll('[data-src]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.src===state.src));});
+    document.querySelectorAll('[data-filter]').forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.filter===state.filter));});
+  }
   function updateFilterSummary() {
     var labels=[];
     if(state.src!=='all')labels.push(state.src==='musinsa'?'무신사':'4910');
@@ -1551,8 +1691,7 @@ td.mine-c {
   function showStatus(data,waiting) {
     var notice=document.getElementById('catalogNotice'),text=detailNotice||data.notice||'';
     if(data.status==='loading'||data.status==='error')unknownCounts();
-    if(data.status==='error'){notice.hidden=false;notice.innerHTML=(previousCards?'이전 검색 결과 표시 · ':'기본 상품 미리보기 · ')+esc(data.error||'검색 준비 실패')+' · <button type="button" data-retry-catalog>다시 시도</button>';return;}
-    if(data.status==='loading')text=(data.previous?'검색 준비 중 · 이전 검색 결과 표시':waiting?'검색 준비 중 · 기본 상품 미리보기':'검색 준비 중')+(text?' · '+text:'');
+    if(data.status==='error'){notice.hidden=false;notice.innerHTML=esc(data.error||'상품을 불러오지 못했습니다')+' · <button type="button" data-retry-catalog>다시 시도</button>';return;}
     notice.hidden=!text;notice.textContent=text;
   }
 
@@ -1562,8 +1701,14 @@ td.mine-c {
     if(isV2){
       if(!lastQuery||pageBusy||(view.length>=360&&grid.contains(document.activeElement)))return;
       if(shown<view.length){grid.insertAdjacentHTML('beforeend',view.slice(shown,shown+PAGE).map(cardHtml).join(''));shown=Math.min(shown+PAGE,view.length);}
+      else if(lastQuery.nextOffset!=null&&!lastQuery.resultId&&exactToken===queryToken){
+        pageBusy=true;var token=queryToken,ready=false;moreBtn.innerHTML='<span class="spinner" aria-hidden="true"></span>불러오는 중';
+        try{ready=await exactResult();}catch(error){if(token===queryToken&&error.code!=='STALE_RESULT'){moreBtn.textContent='목록을 불러오지 못했습니다 · 다시 시도';return;}}finally{if(token===queryToken)pageBusy=false;}
+        if(token!==queryToken)return;
+        if(ready)return renderMore();
+      }
       else if(lastQuery.nextOffset!=null&&runtime.getState().status==='ready'){
-        pageBusy=true;var token=queryToken,id=lastQuery.resultId;
+        pageBusy=true;var token=queryToken,id=lastQuery.resultId;moreBtn.innerHTML='<span class="spinner" aria-hidden="true"></span>불러오는 중';
         try{var p=await runtime.page(id,lastQuery.nextOffset);if(token!==queryToken||(view.length>=360&&grid.contains(document.activeElement)))return;view=view.concat(p.items);grid.insertAdjacentHTML('beforeend',p.items.map(cardHtml).join(''));lastQuery.nextOffset=p.nextOffset;shown=view.length;
           if(view.length>360&&!grid.contains(document.activeElement)){var oldTop=grid.getBoundingClientRect().height;Array.from(grid.querySelectorAll('.card')).slice(0,120).forEach(function(c){c.remove();});var removed=oldTop-grid.getBoundingClientRect().height;topHeight+=removed;topSpacer.style.height=topHeight+'px';view=view.slice(120);firstOffset+=120;shown=view.length;}
         }catch(error){if(token===queryToken&&error.code!=='STALE_RESULT'){moreBtn.textContent='목록을 불러오지 못했습니다 · 다시 시도';return;}}finally{if(token===queryToken)pageBusy=false;}
@@ -1673,7 +1818,10 @@ td.mine-c {
     if(route.type==='catalog'){returnToCatalog();return;}
     if(!detailActive){
       captureCatalog();catalogDirty=catalogDirty||catalogRestoring||pageBusy||grid.dataset.searchStatus!=='ready';
+      // The exact screen is not repainted by a detail visit, so its background result stays usable.
+      var exactScreen=exactToken===queryToken;
       ++queryToken;pageBusy=false;catalogRestoring=false;
+      if(exactScreen){exactToken=queryToken;if(exactPending)exactPending.token=queryToken;}
     }
     detailActive=true;catalogView.hidden=true;detailView.hidden=false;closeBrand();
     if(moreIo)moreIo.unobserve(moreBtn);
@@ -1725,7 +1873,7 @@ td.mine-c {
         grid.innerHTML=items.length?items.map(cardHtml).join(''):emptyCatalog();
   grid.dataset.searchStatus='ready';
         moreBtn.hidden=lastQuery.nextOffset==null;moreBtn.textContent='더 보기 (남은 '+fmt(Math.max(0,query.total-target-items.length))+'개)';
-      }catch(error){if(token===queryToken&&!detailActive){grid.dataset.searchStatus='error';showStatus({...runtime.getState(),status:'error',error:error.message},true);}}
+      }catch(error){if(token===queryToken&&!detailActive){grid.dataset.searchStatus='error';paintError();}}
       finally{if(token===queryToken)catalogRestoring=false;}
     }else if(dirty){render();}
     if(detailActive)return;
@@ -1772,7 +1920,7 @@ td.mine-c {
 
   function updateStepper(i) {
     if(searchMode==='product'||searchMode==='invalid'){document.getElementById('prevBtn').disabled=true;document.getElementById('nextBtn').disabled=true;document.getElementById('mPos').textContent='—';return;}
-    if(isV2){if(!modalItem||!lastQuery?.resultId){document.getElementById('prevBtn').disabled=true;document.getElementById('nextBtn').disabled=true;return;}var key=modalItem.k,token=detailToken;runtime.neighbor(lastQuery.resultId,key,0).then(function(x){if(token!==detailToken||!x)return;document.getElementById('prevBtn').disabled=x._position<=0;document.getElementById('nextBtn').disabled=x._position>=lastQuery.total-1;document.getElementById('mPos').textContent=(x._position+1)+' / '+lastQuery.total;}).catch(function(){});return;}
+    if(isV2){if(!modalItem||!lastQuery?.resultId){document.getElementById('prevBtn').disabled=true;document.getElementById('nextBtn').disabled=true;if(modalItem&&lastQuery&&exactToken===queryToken){var waitKey=modalItem.k;exactResult().then(function(ready){if(ready&&detailActive&&modalItem&&modalItem.k===waitKey)updateStepper(i);}).catch(function(){});}return;}var key=modalItem.k,token=detailToken;runtime.neighbor(lastQuery.resultId,key,0).then(function(x){if(token!==detailToken||!x)return;document.getElementById('prevBtn').disabled=x._position<=0;document.getElementById('nextBtn').disabled=x._position>=lastQuery.total-1;document.getElementById('mPos').textContent=(x._position+1)+' / '+lastQuery.total;}).catch(function(){});return;}
     var p = document.getElementById('prevBtn'), n = document.getElementById('nextBtn');
     p.disabled = i <= 0; n.disabled = i < 0 || i >= view.length - 1;
     document.getElementById('mPos').textContent = i >= 0 ? (i + 1) + ' / ' + view.length : '—';
@@ -2060,7 +2208,7 @@ td.mine-c {
   function refreshPrices() {
     if(document.hidden)return;
     if(detailActive){catalogDirty=true;if(modalItem)fillModal(modalItem);return;}
-    render();
+    render({silent:true});
   }
   document.addEventListener('visibilitychange',refreshPrices);
   window.addEventListener('pageshow',function(e){if(e.persisted)refreshPrices();});

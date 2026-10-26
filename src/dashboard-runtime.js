@@ -32,6 +32,7 @@ export function createDashboardRuntime(options) {
       bootstrap: manifest.bootstrap,
       error: null,
       notice: manifest.notice,
+      progress: { loaded: 0, total: null },
     };
     let pending = null,
       engine = null,
@@ -70,6 +71,12 @@ export function createDashboardRuntime(options) {
         }
       });
     }
+    // Progress belongs to one query; late reports from superseded queries are dropped.
+    function handleProgress({ requestId, loaded, total }) {
+      if (disposed || requestId !== querySeq || state.status !== "loading") return;
+      state = { ...state, progress: { loaded, total } };
+      emit();
+    }
     function stop(error = Error("Worker stopped")) {
       initialized = false;
       engine = null;
@@ -91,6 +98,7 @@ export function createDashboardRuntime(options) {
             const w = (worker = createWorker(manifest.workerPath));
             w.onmessage = ({ data }) => {
               if (disposed || worker !== w) return;
+              if (data.type === "progress") return handleProgress(data);
               const c = calls.get(data.requestId);
               if (!c) return;
               calls.delete(data.requestId);
@@ -119,6 +127,7 @@ export function createDashboardRuntime(options) {
                 scope: scopeFactory?.(),
                 loadAsset,
                 yieldTask: () => new Promise((r) => setTimeout(r, 0)),
+                onProgress: handleProgress,
               }),
             );
           if (disposed) throw Error("Runtime disposed");
@@ -156,7 +165,7 @@ export function createDashboardRuntime(options) {
     async function operation(method, value) {
       const own = ++querySeq;
       lastOperation = { method, value };
-      state = { ...state, status: "loading", phase: method === "query" ? "query" : "product", requestId: own, error: null };
+      state = { ...state, status: "loading", phase: method === "query" ? "query" : "product", requestId: own, error: null, progress: { loaded: 0, total: null } };
       emit();
       try {
         await start();
@@ -192,6 +201,25 @@ export function createDashboardRuntime(options) {
       retry() {
         if (lastOperation) return operation(lastOperation.method, lastOperation.value);
         return start();
+      },
+      // The build's default result stays exact until the first live row's freshness flips.
+      exactPreview(s, nowMs = Date.now()) {
+        const state = model.restoreState(s),
+          p = manifest.previews?.[state.src];
+        if (
+          !p ||
+          !(manifest.exactUntilMs > nowMs && nowMs >= manifest.asOfMs) ||
+          JSON.stringify(state) !== JSON.stringify(p.state)
+        )
+          return null;
+        const cards = new Map((manifest.previewItems || []).map((x) => [x.k, x])),
+          items = p.keys.map((k) => model.refresh({ ...cards.get(k) }, { asOfMs: nowMs }));
+        return {
+          ...p.facets,
+          items,
+          exact: true,
+          nextOffset: p.facets.total > items.length ? items.length : null,
+        };
       },
       page: (...a) => invoke("page", a),
       lookup: (key) => invoke("lookup", [model.resolveKey(key),Date.now()]),

@@ -210,7 +210,7 @@ test("latest scope bypasses obsolete queued downloads", async (t) => {
   await rejected;
   const result = await newest;
   assert.ok(result.items.every((x) => x.src === "4910" && x.c === "etc"));
-  assert.ok(max <= 4);
+  assert.ok(max <= 8);
   const wanted = new Set(
     data.catalog.indexParts
       .filter((x) => x.source === "4910" && x.category === "etc")
@@ -219,7 +219,7 @@ test("latest scope bypasses obsolete queued downloads", async (t) => {
   assert.ok(
     calls
       .filter((x) => x.id.startsWith("index"))
-      .slice(4)
+      .slice(8)
       .every((x) => wanted.has(x.id)),
   );
 });
@@ -374,9 +374,9 @@ test("new scope downloads precede the obsolete card backlog", async () => {
     bytes: 1,
     count,
   });
-  const rows = Array.from({ length: 9 }, (_, n) => ({
+  const rows = Array.from({ length: 13 }, (_, n) => ({
     ...model.summarize({
-      src: n === 8 ? "4910" : "musinsa",
+      src: n === 12 ? "4910" : "musinsa",
       n,
       tracking:freshTracking(n%5?90:0,null),
       b: "b",
@@ -387,7 +387,7 @@ test("new scope downloads precede the obsolete card backlog", async () => {
     card: makeRef("cards-" + n, 1),
   }));
   const refs = [
-    { ...makeRef("index-0", 8), source: "musinsa", category: "top" },
+    { ...makeRef("index-0", 12), source: "musinsa", category: "top" },
     { ...makeRef("index-1", 1), source: "4910", category: "top" },
   ];
   const releases = [],
@@ -409,7 +409,7 @@ test("new scope downloads precede the obsolete card backlog", async () => {
       if (ref.id.startsWith("index"))
         return {
           payload: index.packIndex(
-            ref.id === "index-0" ? rows.slice(0, 8) : rows.slice(8),
+            ref.id === "index-0" ? rows.slice(0, 12) : rows.slice(12),
             { revision: "r", id: ref.id },
           ),
           bytes: 1,
@@ -429,7 +429,7 @@ test("new scope downloads precede the obsolete card backlog", async () => {
   releases[0]();
   try {
     await new Promise((r) => setImmediate(r));
-    assert.equal(calls[5], "index-1");
+    assert.equal(calls[9], "index-1");
   } finally {
     for (const r of releases) r();
     await rejected;
@@ -445,7 +445,7 @@ test("direct lookup bypasses the queued whole-catalog index backlog", async () =
       bytes: 1,
       count,
     });
-  const rows = Array.from({ length: 8 }, (_, n) => ({
+  const rows = Array.from({ length: 12 }, (_, n) => ({
       ...model.summarize({
         src: "musinsa",
         n,
@@ -505,7 +505,7 @@ test("direct lookup bypasses the queued whole-catalog index backlog", async () =
   releases[0]();
   try {
     await new Promise((r) => setImmediate(r));
-    assert.equal(calls[4], "routes-0");
+    assert.equal(calls[8], "routes-0");
     assert.equal(
       await Promise.race([
         lookup.then((x) => x.k),
@@ -530,11 +530,114 @@ test('cancelQuery settles before active downloads and removes queued indexes',as
   assert.equal(await Promise.race([rejected.then(()=>true),new Promise(r=>setTimeout(()=>r(false),100))]),true);
  }finally{release();await rejected;}
  const item=await engine.lookup('musinsa:11998');assert.equal(item.k,'musinsa:11998');
- assert.equal(calls.filter(ref=>ref.id.startsWith('index')).length,4);
+ assert.equal(calls.filter(ref=>ref.id.startsWith('index')).length,8);
 });
 test('direct lookup ignores blocked indexes after query failure',async t=>{
  const {engine,calls}=await transportFixture(t,{load:(ref,read)=>{if(ref.id.startsWith('index'))throw Error('blocked index');return read(ref);}});
  await assert.rejects(engine.query({}),/blocked index/);await engine.cancelQuery();
  const count=calls.length;assert.equal((await engine.lookup('musinsa:518')).k,'musinsa:518');
  assert.ok(calls.slice(count).every(ref=>!ref.id.startsWith('index')));
+});
+function tierFixture(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tier-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const asOfMs = Date.parse("2026-10-26T00:00:00Z"), H = 3600e3,
+    b = createDashboardBuilder({ outDir: dir, revision: "tier", asOfMs }),
+    L = [["2026-10-25", 200, 100, 90, 0, null, 0]];
+  for (let n = 0; n < 40; n++)
+    b.add({ src: "musinsa", n, b: "A", g: "P" + n, c: "top", L,
+      tracking: freshTracking(90, null, { at: n % 4 ? asOfMs : asOfMs - 72 * H }) });
+  const data = b.finish({ scanState: "complete" });
+  const read = (ref) => {
+    const s = fs.readFileSync(path.join(dir, ref.path), "utf8"), ctx = {};
+    vm.runInNewContext(s, ctx);
+    return { payload: JSON.parse(JSON.stringify(ctx.__CLOT_ASSETS__[ref.id])), bytes: Buffer.byteLength(s) };
+  };
+  return { data, read, asOfMs, H };
+}
+test("index parts split by freshness tier and expose exactUntilMs", (t) => {
+  const { data, read, asOfMs, H } = tierFixture(t);
+  const counts = {};
+  for (const r of data.catalog.indexParts) {
+    counts[r.tier] = (counts[r.tier] || 0) + r.count;
+    for (const x of index.unpackIndex(read(r).payload))
+      assert.equal(model.freshWindow(x)?.until >= asOfMs ? "live" : "history", r.tier);
+  }
+  assert.deepEqual(counts, { live: 30, history: 10 });
+  assert.equal(data.catalog.exactUntilMs, asOfMs - H + 48 * H);
+});
+test("selectParts skips history unless included or the clock precedes the build", async () => {
+  const scope = (await import("../src/dashboard-scope.js")).createDashboardScope();
+  const m = { asOfMs: 100, indexParts: [
+    { id: "a", source: "musinsa", category: "top", tier: "live" },
+    { id: "b", source: "musinsa", category: "top", tier: "history" },
+    { id: "c", source: "musinsa", category: "top" }] };
+  const ids = (s, nowMs) => scope.selectParts(m, s, { nowMs }).map((r) => r.id);
+  assert.deepEqual(ids({}, 200), ["a", "c"]);
+  assert.deepEqual(ids({ includeHistory: true }, 200), ["a", "b", "c"]);
+  assert.deepEqual(ids({}, 50), ["a", "b", "c"]);
+  assert.equal(scope.facetCoverage(m, new Set(["a", "c"]), {}, { nowMs: 200 }).sources.musinsa, true);
+});
+test("default query never requests history parts; includeHistory adds only them", async (t) => {
+  const { data, read, asOfMs } = tierFixture(t), calls = [];
+  const scope = (await import("../src/dashboard-scope.js")).createDashboardScope();
+  const engine = await createDashboardTransport({ manifest: data.catalog, index, scope,
+    loadAsset: async (ref) => { calls.push(ref.id); return read(ref); } });
+  const tierOf = (id) => data.catalog.indexParts.find((r) => r.id === id)?.tier;
+  assert.equal((await engine.query({}, 1, asOfMs + 1)).total, 30);
+  assert.ok(calls.filter((id) => id.startsWith("index")).every((id) => tierOf(id) === "live"));
+  const before = calls.length;
+  assert.equal((await engine.query({ includeHistory: true }, 2, asOfMs + 1)).total, 40);
+  assert.ok(calls.slice(before).filter((id) => id.startsWith("index")).every((id) => tierOf(id) === "history"));
+});
+import { createDashboardScope } from "../src/dashboard-scope.js";
+const scope = createDashboardScope();
+const syntheticItem = (i) => ({
+  ...model.summarize({ src: "musinsa", n: i, b: "A", g: "P" + i, c: "top", L: [] }),
+  card: { id: "cards-" + i, path: "assets/cards-" + i + ".js", bytes: 1, count: 1 },
+});
+function synthetic(n) {
+  const indexParts = Array.from({ length: n }, (_, i) => ({
+    id: "index-" + i, path: "assets/index-" + i + ".js",
+    source: "musinsa", category: "top", tier: "live", bytes: 1, count: 1,
+  }));
+  return { v: 2, revision: "r", asOfMs: 0, loadingMode: "scoped", bootstrap: { items: [] }, indexParts };
+}
+function syntheticAsset(ref) {
+  const i = Number(ref.id.split("-").pop());
+  return ref.id.startsWith("index")
+    ? { payload: index.packIndex([syntheticItem(i)], { revision: "r", id: ref.id }), bytes: 1 }
+    : { payload: { v: 2, revision: "r", id: ref.id, items: [syntheticItem(i)] }, bytes: 1 };
+}
+test("scoped downloads run at most eight at a time", async () => {
+  let active = 0, max = 0;
+  const engine = await createDashboardTransport({ manifest: synthetic(12), index, scope,
+    loadAsset: async (ref) => { max = Math.max(max, ++active); await new Promise((r) => setTimeout(r, 5)); active--; return syntheticAsset(ref); } });
+  await engine.query({ includeHistory: true }, 1, Date.now());
+  assert.equal(max, 8);
+});
+test("progress reports monotonic counts for the active request", async () => {
+  const events = [];
+  const engine = await createDashboardTransport({ manifest: synthetic(12), index, scope,
+    loadAsset: async (ref) => syntheticAsset(ref), onProgress: (p) => events.push(p) });
+  await engine.query({ includeHistory: true }, 7, Date.now());
+  assert.ok(events.every((e) => e.requestId === 7 && e.total === 12));
+  assert.deepEqual(events.map((e) => e.loaded), [...Array(13).keys()]);
+});
+import { createDashboardRuntime } from "../src/dashboard-runtime.js";
+import { createHistoryLoader } from "../src/dashboard-history.js";
+test("exactPreview returns the build result only for default state inside the exact window", async (t) => {
+  const { data } = fixture(t), m = data.catalog, calls = [];
+  const api = createDashboardRuntime({ manifest: m, model, indexFactory: createDashboardIndex,
+    scopeFactory: createDashboardScope, historyFactory: createHistoryLoader,
+    transportFactory: createDashboardTransport, loadAsset: async (ref) => { calls.push(ref.id); throw Error("no"); } });
+  const r = api.exactPreview({ src: "musinsa" }, m.asOfMs + 1);
+  assert.deepEqual(r.items.map((x) => x.k), m.previews.musinsa.keys);
+  assert.equal(r.total, m.previews.musinsa.facets.total);
+  assert.equal(r.nextOffset, r.total > 120 ? 120 : null);
+  for (const [s, now] of [[{ src: "musinsa", cat: "top" }, m.asOfMs + 1], [{ src: "musinsa", sort: "priceAsc" }, m.asOfMs + 1],
+    [{ src: "musinsa" }, m.exactUntilMs], [{ src: "musinsa" }, m.asOfMs - 1]])
+    assert.equal(api.exactPreview(s, now), null);
+  assert.deepEqual(calls, []);
+  api.dispose();
 });

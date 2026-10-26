@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {createDashboardModel} from '../src/dashboard-model.js';
-import {fixtureRaw,defaultState,row} from './helpers/dashboard-fixture.js';
+import {fixtureRaw,defaultState,row,freshTracking} from './helpers/dashboard-fixture.js';
 const m=createDashboardModel(), items=fixtureRaw().map(x=>m.summarize(x));
 test('union keeps retailer identity and prefers liked over scan in either order',()=>{
  const dup=m.summarize({...fixtureRaw()[2],src:'4910all',L:[row(70)]});
@@ -77,4 +77,18 @@ test('dropAmt defaults preserve saved and legacy sorts',()=>{
  assert.equal(m.restoreState({sort:'coupon'}).sort,'priceAsc');
  assert.equal(m.restoreState({sort:'couponRate'}).sort,'rate');
  assert.equal(m.restoreState({src:'4910all'}).src,'4910');
+});
+test('freshWindow matches refresh at every boundary',()=>{
+ const H=3600e3,base=Date.parse('2026-10-26T00:00:00Z');
+ const x={my:90,priceBasis:null,tracking:freshTracking(90,null,{at:base})};
+ const w=m.freshWindow(x);
+ assert.deepEqual(w,{from:base-H,until:base-H+48*H});
+ for(const t of [w.from-1,w.from,base,w.until,w.until+1])
+  assert.equal(m.refresh({...x},{asOfMs:t}).fresh,t>=w.from&&t<=w.until);
+ const late={...x,tracking:{...x.tracking,saleAt:new Date(base-30*H).toISOString()}};
+ assert.deepEqual(m.freshWindow(late),{from:base-H,until:base-30*H+48*H});
+ assert.equal(m.freshWindow({...x,my:80}),null);
+ assert.equal(m.freshWindow({...x,tracking:{...x.tracking,status:'STOPPED'}}),null);
+ assert.equal(m.freshWindow({...x,tracking:{...x.tracking,samples:[]}}),null);
+ assert.equal(m.freshWindow({...x,priceBasis:'회원가'}),null); // sample basis is null
 });

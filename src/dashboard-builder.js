@@ -69,12 +69,19 @@ export function createDashboardBuilder({ outDir, revision, asOfMs=Date.now() }) 
       flush();
       const indexParts = [],
         groups = new Map();
+      // Live rows can be fresh at or after asOfMs; the default result cannot change before exactUntilMs.
+      let exactUntilMs = Infinity;
       for (const x of summaries) {
-        const k = x.src + ":" + x.c;
-        if (!groups.has(k)) groups.set(k, []);
-        groups.get(k).push(x);
+        const w = model.freshWindow(x),
+          tier = w && w.until >= asOfMs ? "live" : "history";
+        if (tier === "live")
+          exactUntilMs = Math.min(exactUntilMs, w.from > asOfMs ? w.from : w.until);
+        const k = x.src + ":" + x.c + ":" + tier;
+        if (!groups.has(k)) groups.set(k, { tier, items: [] });
+        groups.get(k).items.push(x);
       }
-      for (const group of groups.values())
+      if (exactUntilMs === Infinity) exactUntilMs = asOfMs + model.PRICE_TTL_MS;
+      for (const { tier, items: group } of groups.values())
         for (let i = 0; i < group.length; i += 1200) {
           for (const { ref } of splitWrite(
             "index",
@@ -93,6 +100,7 @@ export function createDashboardBuilder({ outDir, revision, asOfMs=Date.now() }) 
               ...ref,
               source: group[0].src,
               category: group[0].c,
+              tier,
             });
         }
       const state = model.restoreState({}),
@@ -124,6 +132,7 @@ export function createDashboardBuilder({ outDir, revision, asOfMs=Date.now() }) 
         catalog: {
           v: 2,
           asOfMs,
+          exactUntilMs,
           revision,
           scanState,
           notice,
