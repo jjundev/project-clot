@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import { createDashboardModel } from "../src/dashboard-model.js";
 import { unpackIndex } from "../src/dashboard-index.js";
 import { expandScanHistory } from "../src/dashboard-catalog.js";
+import { COVERAGE_KEYS, coverageGroup, evaluateFreshnessCoverage } from "../src/dashboard-coverage.js";
 export function verifyDashboardBuild(outputPath) {
   const html = fs.readFileSync(outputPath, "utf8"),
     match = html.match(/window\.__CLOT_DATA__ = ([\s\S]*?);\r?\n/);
@@ -179,6 +180,7 @@ function verifyV2(D, directory) {
   }
   const keys = new Set(), cards = new Map(), cardParts = new Map(), cardOwners = new Map();
   let totalItems = 0, total4910 = 0, exactUntilMs = Infinity;
+  const coverage = new Map(COVERAGE_KEYS.map((key) => [key, { active: 0, live: 0 }]));
   for (const r of m.indexParts) {
     const rows = unpackIndex(load(r));
     if (rows.length !== r.count) throw Error("index count mismatch");
@@ -192,6 +194,11 @@ function verifyV2(D, directory) {
           live = !!w && w.until >= m.asOfMs;
         if ((live ? "live" : "history") !== (r.tier ?? "live"))
           throw Error("index tier mismatch");
+        if (x.tracking?.status === "ACTIVE") {
+          const g = coverage.get(coverageGroup(x));
+          g.active++;
+          if (live) g.live++;
+        }
         if (live)
           exactUntilMs = Math.min(exactUntilMs, w.from > m.asOfMs ? w.from : w.until);
       }
@@ -267,6 +274,15 @@ function verifyV2(D, directory) {
   if (m.loadingMode === "scoped") {
     if (exactUntilMs === Infinity) exactUntilMs = m.asOfMs + model.PRICE_TTL_MS;
     if (m.exactUntilMs !== exactUntilMs) throw Error("exactUntilMs mismatch");
+    // Recount coverage from the index, then block a deploy whose freshly collected source mostly fell out of the live tier.
+    if (
+      !Array.isArray(m.coverage) ||
+      JSON.stringify(m.coverage.map((r) => r.key)) !== JSON.stringify(COVERAGE_KEYS) ||
+      m.coverage.some((r) => !equal({ active: r.active, live: r.live }, coverage.get(r.key)))
+    )
+      throw Error("coverage count mismatch");
+    const problems = evaluateFreshnessCoverage(m.coverage, m.asOfMs);
+    if (problems.length) throw Error(problems.join("; "));
     const scope = createDashboardScope(),
       routes = new Map();
     for (const [bucket, refs] of Object.entries(m.routes))
@@ -312,6 +328,7 @@ function verifyV2(D, directory) {
     totalItems,
     total4910,
     scanState: m.scanState,
+    coverage: m.coverage,
   };
 }
 if (
@@ -319,7 +336,10 @@ if (
   import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
 ) {
   try {
-    console.log(JSON.stringify(verifyDashboardBuild(process.argv[2])));
+    const result = verifyDashboardBuild(process.argv[2]);
+    for (const r of result.coverage || [])
+      console.error(`freshness coverage ${r.key}: live ${r.live}/${r.active} last run ${r.lastRunAt ?? "none"}`);
+    console.log(JSON.stringify(result));
   } catch (err) {
     console.error(err.message);
     process.exitCode = 1;

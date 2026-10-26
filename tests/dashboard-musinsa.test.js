@@ -119,3 +119,11 @@ test('wide coverage ignores incomplete scan runs',async t=>{
 const {dir,store}=fixture(t);store.db.prepare('UPDATE scan_runs SET complete=0').run();const {m}=await buildCoverage(t,dir);
 assert.equal(m.coverage[0].lastRunAt,null);
 });
+test('verifier blocks a build that hides a freshly scanned wide catalog',async t=>{
+const {dir,store}=fixture(t);const {verifyDashboardBuild}=await import('../scripts/verify-dashboard-build.js');
+// 120 ACTIVE goods without observation evidence, scan finished one hour before the build.
+for(let n=10;n<130;n++)store.db.prepare("INSERT INTO goods(goods_no,cat,name,url,brand_name,sale_price,normal_price,coupon_price,coupon_price_source,first_seen_date) VALUES(?,?,?,?,?,?,?,?,?,?)").run(n,'001','상품 '+n,'https://www.musinsa.com/products/'+n,'브랜드',100,200,90,'ESTIMATED','2026-10-15');
+store.db.prepare('UPDATE scan_runs SET complete=1,completed_at=?').run(new Date(Date.now()-3600000).toISOString());
+const {output}=await buildCoverage(t,dir);
+assert.throws(()=>verifyDashboardBuild(output),/freshness coverage collapse: musinsa-wide live 2\/122/);
+});
