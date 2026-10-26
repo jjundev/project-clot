@@ -105,3 +105,17 @@ test('30만 ACTIVE build의 적립금 읽기는 상품 수만큼 SQL을 만들�
  const result=buildMusinsaCatalog(spy,{outDir:dir,revision:'scale',pointEstimatesEnabled:true,asOfMs:AS_OF,sink:{add(){count++;}}});
  assert.equal(count,300000);assert.equal(result.metadata.points.active,300000);assert.equal(result.metadata.points.eligible,1);assert.ok(queries<=10,`${queries} point SQL statements`);
 });
+async function buildCoverage(t,dir){const {DatabaseSync}=await import('node:sqlite');const {generateDashboardHtml}=await import('../src/visualizer.js');
+const db=new DatabaseSync(':memory:');t.after(()=>db.close());db.exec("CREATE TABLE items(goods_no INTEGER,goods_name TEXT,brand_name TEXT,url TEXT,image_url TEXT,status TEXT,first_seen_at TEXT,last_checked_at TEXT);CREATE TABLE price_logs(id INTEGER,goods_no INTEGER,date TEXT,normal_price INTEGER,sale_price INTEGER,my_price INTEGER,is_sold_out INTEGER,coupon_name TEXT,coupon_discount INTEGER);INSERT INTO items VALUES(1,'old','old','','','ACTIVE','','');INSERT INTO price_logs VALUES(1,1,'2026-10-15',200,100,99,0,'old',1)");
+const output=path.join(dir,'index.html');generateDashboardHtml({db,db4910Path:null,dbMusinsaPath:path.join(dir,'wide.db'),outputPath:output,openBrowser:false});
+return {output,m:JSON.parse(fs.readFileSync(output,'utf8').match(/window\.__CLOT_DATA__ = ([^\n]+);/)[1]).catalog};}
+test('generated manifest records per-group freshness coverage',async t=>{
+const {dir}=fixture(t);const {m}=await buildCoverage(t,dir);
+assert.deepEqual(m.coverage.map(r=>r.key),['musinsa-wide','musinsa-watched','4910']);
+assert.deepEqual(m.coverage[0],{key:'musinsa-wide',active:2,live:2,lastRunAt:'2026-10-16T04:50:00Z'});
+assert.equal(m.coverage[2].lastRunAt,null);
+});
+test('wide coverage ignores incomplete scan runs',async t=>{
+const {dir,store}=fixture(t);store.db.prepare('UPDATE scan_runs SET complete=0').run();const {m}=await buildCoverage(t,dir);
+assert.equal(m.coverage[0].lastRunAt,null);
+});

@@ -57,6 +57,7 @@ export function buildMusinsaCatalog(db, { outDir, revision, sink, pointEstimates
   const metadata = {
     date: run.date,
     completedAt: run.completed_at,
+    complete: run.complete === 1,
     selected: JSON.parse(run.category_counts_json || "[]").reduce(
       (n, c) => n + c.scanned,
       0,
