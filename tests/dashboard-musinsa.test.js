@@ -105,8 +105,8 @@ test('30만 ACTIVE build의 적립금 읽기는 상품 수만큼 SQL을 만들�
  const result=buildMusinsaCatalog(spy,{outDir:dir,revision:'scale',pointEstimatesEnabled:true,asOfMs:AS_OF,sink:{add(){count++;}}});
  assert.equal(count,300000);assert.equal(result.metadata.points.active,300000);assert.equal(result.metadata.points.eligible,1);assert.ok(queries<=10,`${queries} point SQL statements`);
 });
-async function buildCoverage(t,dir){const {DatabaseSync}=await import('node:sqlite');const {generateDashboardHtml}=await import('../src/visualizer.js');
-const db=new DatabaseSync(':memory:');t.after(()=>db.close());db.exec("CREATE TABLE items(goods_no INTEGER,goods_name TEXT,brand_name TEXT,url TEXT,image_url TEXT,status TEXT,first_seen_at TEXT,last_checked_at TEXT);CREATE TABLE price_logs(id INTEGER,goods_no INTEGER,date TEXT,normal_price INTEGER,sale_price INTEGER,my_price INTEGER,is_sold_out INTEGER,coupon_name TEXT,coupon_discount INTEGER);INSERT INTO items VALUES(1,'old','old','','','ACTIVE','','');INSERT INTO price_logs VALUES(1,1,'2026-10-15',200,100,99,0,'old',1)");
+async function buildCoverage(t,dir,extraSql=''){const {DatabaseSync}=await import('node:sqlite');const {generateDashboardHtml}=await import('../src/visualizer.js');
+const db=new DatabaseSync(':memory:');t.after(()=>db.close());db.exec("CREATE TABLE items(goods_no INTEGER,goods_name TEXT,brand_name TEXT,url TEXT,image_url TEXT,status TEXT,first_seen_at TEXT,last_checked_at TEXT);CREATE TABLE price_logs(id INTEGER,goods_no INTEGER,date TEXT,normal_price INTEGER,sale_price INTEGER,my_price INTEGER,is_sold_out INTEGER,coupon_name TEXT,coupon_discount INTEGER);INSERT INTO items VALUES(1,'old','old','','','ACTIVE','','');INSERT INTO price_logs VALUES(1,1,'2026-10-15',200,100,99,0,'old',1)");if(extraSql)db.exec(extraSql);
 const output=path.join(dir,'index.html');generateDashboardHtml({db,db4910Path:null,dbMusinsaPath:path.join(dir,'wide.db'),outputPath:output,openBrowser:false});
 return {output,m:JSON.parse(fs.readFileSync(output,'utf8').match(/window\.__CLOT_DATA__ = ([^\n]+);/)[1]).catalog};}
 test('generated manifest records per-group freshness coverage',async t=>{
@@ -126,4 +126,8 @@ for(let n=10;n<130;n++)store.db.prepare("INSERT INTO goods(goods_no,cat,name,url
 store.db.prepare('UPDATE scan_runs SET complete=1,completed_at=?').run(new Date(Date.now()-3600000).toISOString());
 const {output}=await buildCoverage(t,dir);
 assert.throws(()=>verifyDashboardBuild(output),/freshness coverage collapse: musinsa-wide live 2\/122/);
+});
+test('watched coverage ignores manually skipped days',async t=>{
+const {dir}=fixture(t);const {m}=await buildCoverage(t,dir,"CREATE TABLE daily_runs(date TEXT,total_tracked INTEGER,price_dropped_count INTEGER,restocked_count INTEGER,duration_ms INTEGER,completed_at TEXT,mode TEXT);INSERT INTO daily_runs VALUES('2026-10-20',1,0,0,1,'2026-10-20T05:00:00Z','full'),('2026-10-21',0,0,0,0,'2026-10-22T01:00:00Z','skipped')");
+assert.equal(m.coverage[1].lastRunAt,'2026-10-20T05:00:00Z');
 });

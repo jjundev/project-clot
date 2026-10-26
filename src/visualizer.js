@@ -484,6 +484,8 @@ export function generateDashboardHtml({
     if(process.env.CLOT_REQUIRE_MUSINSA_WIDE==='1')throw Error('Required Musinsa wide snapshot missing');
     fs.rmSync(path.join(outDir,'musinsa'),{recursive:true,force:true});
   }
+  // Watched goods are fresh from the last daily collection: daily_runs, never a manual skip or the checked_at fallback in lastRun.
+  try { runs['musinsa-watched']=(activeDb.db||activeDb).prepare("SELECT completed_at FROM daily_runs WHERE mode IS NOT 'skipped' ORDER BY date DESC,completed_at DESC LIMIT 1").get()?.completed_at??null; } catch {}
   const checkpoint=sink.checkpoint();
   try {
     let db4910;
@@ -510,8 +512,7 @@ export function generateDashboardHtml({
     } finally { if(db4910)db4910.close(); }
   } finally { if(shouldCloseDb)activeDb.close(); }
   total4910All = packaged.catalog.scanCount;
-  // Coverage counts a group only against its own complete collection run; daily_runs, not the checked_at fallback in lastRun.
-  runs['musinsa-watched']=payload.runs?.at(-1)?.completed_at??null;
+  // Coverage counts a group only against its own complete collection run.
   runs['musinsa-wide']=wide?.metadata.complete?wide.metadata.completedAt:null;
   if(wide) {
     payload.musinsa=wide.metadata;
