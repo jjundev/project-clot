@@ -202,6 +202,25 @@ export function createDashboardRuntime(options) {
         if (lastOperation) return operation(lastOperation.method, lastOperation.value);
         return start();
       },
+      // The build's default result stays exact until the first live row's freshness flips.
+      exactPreview(s, nowMs = Date.now()) {
+        const state = model.restoreState(s),
+          p = manifest.previews?.[state.src];
+        if (
+          !p ||
+          !(manifest.exactUntilMs > nowMs && nowMs >= manifest.asOfMs) ||
+          JSON.stringify(state) !== JSON.stringify(p.state)
+        )
+          return null;
+        const cards = new Map((manifest.previewItems || []).map((x) => [x.k, x])),
+          items = p.keys.map((k) => model.refresh({ ...cards.get(k) }, { asOfMs: nowMs }));
+        return {
+          ...p.facets,
+          items,
+          exact: true,
+          nextOffset: p.facets.total > items.length ? items.length : null,
+        };
+      },
       page: (...a) => invoke("page", a),
       lookup: (key) => invoke("lookup", [model.resolveKey(key),Date.now()]),
       neighbor: (...a) => invoke("neighbor", a),

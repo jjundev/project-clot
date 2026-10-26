@@ -624,3 +624,20 @@ test("progress reports monotonic counts for the active request", async () => {
   assert.ok(events.every((e) => e.requestId === 7 && e.total === 12));
   assert.deepEqual(events.map((e) => e.loaded), [...Array(13).keys()]);
 });
+import { createDashboardRuntime } from "../src/dashboard-runtime.js";
+import { createHistoryLoader } from "../src/dashboard-history.js";
+test("exactPreview returns the build result only for default state inside the exact window", async (t) => {
+  const { data } = fixture(t), m = data.catalog, calls = [];
+  const api = createDashboardRuntime({ manifest: m, model, indexFactory: createDashboardIndex,
+    scopeFactory: createDashboardScope, historyFactory: createHistoryLoader,
+    transportFactory: createDashboardTransport, loadAsset: async (ref) => { calls.push(ref.id); throw Error("no"); } });
+  const r = api.exactPreview({ src: "musinsa" }, m.asOfMs + 1);
+  assert.deepEqual(r.items.map((x) => x.k), m.previews.musinsa.keys);
+  assert.equal(r.total, m.previews.musinsa.facets.total);
+  assert.equal(r.nextOffset, r.total > 120 ? 120 : null);
+  for (const [s, now] of [[{ src: "musinsa", cat: "top" }, m.asOfMs + 1], [{ src: "musinsa", sort: "priceAsc" }, m.asOfMs + 1],
+    [{ src: "musinsa" }, m.exactUntilMs], [{ src: "musinsa" }, m.asOfMs - 1]])
+    assert.equal(api.exactPreview(s, now), null);
+  assert.deepEqual(calls, []);
+  api.dispose();
+});
