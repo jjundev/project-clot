@@ -1,11 +1,24 @@
 {
-  "updated_at": "2026-11-17T08:25:37.666Z",
-  "total_items": 1048,
-  "active_items": 615,
+  "updated_at": "2026-11-18T07:57:40.386Z",
+  "total_items": 1049,
+  "active_items": 616,
   "soldout_items": 17,
   "unliked_items": 9,
   "dropped_items": 407,
   "items": [
+    {
+      "goods_no": 2767054,
+      "goods_name": "[VIP] 케이블 라운드 니트_아이보리",
+      "brand_name": "예일",
+      "source": "like",
+      "status": "ACTIVE",
+      "url": "https://www.musinsa.com/products/2767054",
+      "current_price": null,
+      "lowest_price": null,
+      "lowest_price_date": null,
+      "is_sold_out": false,
+      "last_checked": "2026-11-18T07:52:21.924Z"
+    },
     {
       "goods_no": 7266312,
       "goods_name": "[VIP] 시어링 후디드 봄버 자켓_카키",
